@@ -9,4 +9,4 @@ Someone else can edit to make sprites have a sleeping animation or a bed in thei
 It basically makes them turn on their side and lay down when it’s night, minus quest characters.
 Some trainers asleep too, but they will battle with you initiate dialogue with them.
 Others will just give dialogue that they’re asleep. 
-Here’s some screenshots from testing (I did lower the count in Viridian since this from 50 to 35)
+
