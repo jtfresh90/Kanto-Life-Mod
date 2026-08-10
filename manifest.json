@@ -1,0 +1,21 @@
+{
+  "id": "kanto_life",
+  "name": "Kanto Life",
+  "version": "0.3.5",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "category": "MECHANIC",
+  "game_version": ">=0.1.75 <0.1.76",
+  "priority": 1000,
+  "permissions": [
+    "engine_internals"
+  ],
+  "optional_dependencies": [
+    "DRAMATIC_SHAPE",
+    "overworld_wild_spawns",
+    "FOLLOWERS_EX",
+    "PokePCFollowers_VoxelMerge"
+  ],
+  "description": "START\u2192OPTION\u2192KANTO LIFE (OPEN) submenu with left/right steppers, same pattern as Wilds of Kanto."
+}
