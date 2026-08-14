@@ -1,21 +1,24 @@
 {
   "id": "kanto_life",
   "name": "Kanto Life",
-  "version": "0.3.5",
+  "version": "0.7.0",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
-  "category": "MECHANIC",
-  "game_version": ">=0.1.75 <0.1.76",
+  "category": "GAMEPLAY",
+  "games": ["all"],
+  "gen2compat": true,
+  "game_version": ">=0.0.0 <10.0.0",
   "priority": 1000,
-  "permissions": [
-    "engine_internals"
-  ],
+  "permissions": ["engine_internals"],
   "optional_dependencies": [
     "DRAMATIC_SHAPE",
     "overworld_wild_spawns",
     "FOLLOWERS_EX",
     "PokePCFollowers_VoxelMerge"
   ],
-  "description": "START\u2192OPTION\u2192KANTO LIFE (OPEN) submenu with left/right steppers, same pattern as Wilds of Kanto."
+  "description": "Ambient NPCs, Pokemon NPCs, sleep toggle+rate, Common Courtesy. Adaptive for gen1recomp 0.1.78-0.1.86+ (mod.game + WorldAPI). games:all.",
+  "github": "jtfresh90/Kanto-Life-Mod",
+  "affects_link": false,
+  "experimental": false
 }
