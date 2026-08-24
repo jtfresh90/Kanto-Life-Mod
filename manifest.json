@@ -1,7 +1,7 @@
 {
   "id": "kanto_life",
   "name": "Kanto Life",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -13,7 +13,7 @@
   "permissions": ["engine_internals"],
   "dependencies": [],
   "conflicts": ["johto_life"],
-  "description": "Ambient NPCs, Pokemon NPCs, sleep, Common Courtesy, gender names, Options menu. Gen1 only.",
+  "description": "Kanto 0.7 base + Johto deltas: gender names on default NPCs, name prefix on dialogue. Gen1 only.",
   "github": "jtfresh90/Kanto-Life-Mod",
   "affects_link": false,
   "experimental": false
