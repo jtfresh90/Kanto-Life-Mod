@@ -32,12 +32,12 @@ return function(mod)
     pcall(function()
       local g = mod.game or (mod.world and mod.world.game)
       local opts = g and g.save and g.save.options
-      if opts and opts.modOptions and opts.modOptions.kanto_life == nil
+      if opts and opts.modOptions and opts.modOptions.kanto_life_experimental == nil
          and opts.modOptions.johto_life ~= nil then
         local old = opts.modOptions.johto_life
         local copy = {}
         for k,v in pairs(old) do copy[k] = v end
-        opts.modOptions.kanto_life = copy
+        opts.modOptions.kanto_life_experimental = copy
       end
     end)
   end

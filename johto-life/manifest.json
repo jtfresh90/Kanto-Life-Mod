@@ -6,13 +6,20 @@
   "entry": "main.lua",
   "profile": "content",
   "category": "GAMEPLAY",
-  "games": ["gen2"],
+  "games": [
+    "gen2"
+  ],
   "gen2compat": true,
   "game_version": ">=0.0.0 <10.0.0",
   "priority": 1000,
-  "permissions": ["engine_internals"],
+  "permissions": [
+    "engine_internals"
+  ],
   "dependencies": [],
-  "conflicts": ["kanto_life"],
+  "conflicts": [
+    "kanto_life",
+    "kanto_life_experimental"
+  ],
   "description": "Ambient NPCs + Common Courtesy for Gold/Silver/Crystal. Options under JOHTO LIFE. Compatible with gen1recomp 0.2.x.",
   "github": "jtfresh90/Kanto-Life-Mod",
   "affects_link": false,

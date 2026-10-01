@@ -4718,7 +4718,7 @@ local function nightlifeTick(world, dt)
       -- Each animation state is a separate cached image. The sprite itself
       -- remains a normal single-frame SpriteRenderer from the engine's point
       -- of view; voxel simply receives the currently selected texture.
-      local baseRel = string.format("kanto_life_sleep/%s",
+      local baseRel = string.format("kanto_life_exp_sleep/%s",
         tostring(npc.id or "x"):gsub("[^%w%-_]", "_"))
       local rels = {}
       for i = 1, 3 do
@@ -4980,7 +4980,7 @@ local function nightlifeTick(world, dt)
         local prop = sleepPropImage(style)
         if not prop then return nil end
         local pw, ph = prop:getDimensions()
-        local path = "kanto_life_sleep_prop_" .. tostring(style) .. ".png"
+        local path = "kanto_life_exp_sleep_prop_" .. tostring(style) .. ".png"
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
@@ -5018,8 +5018,8 @@ local function nightlifeTick(world, dt)
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc"):gsub("[^%w%-_]", "_")
-        local bodyPath = "kanto_life_sleep_3d/" .. sourceKey .. "_body_" .. idx .. ".png"
-        local zPath = "kanto_life_sleep_3d/" .. sourceKey .. "_z_" .. idx .. ".png"
+        local bodyPath = "kanto_life_exp_sleep_3d/" .. sourceKey .. "_body_" .. idx .. ".png"
+        local zPath = "kanto_life_exp_sleep_3d/" .. sourceKey .. "_z_" .. idx .. ".png"
         -- The normal sleep asset hook already exists for the generated cards.
         -- Publish these two derived images through that same hook so
         -- SpriteBillboards.mesh can resolve them without touching Assets.
