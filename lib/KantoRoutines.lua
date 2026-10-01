@@ -339,6 +339,11 @@ return function(ctx)
   local function pathTo(world, npc, tx, ty)
     local map = world and world.map
     if not map or type(map.isWalkableCell) ~= "function" then return nil end
+    -- Defensive: callers occasionally pass a destination table instead of
+    -- coordinates (e.g. st.target set directly from destinationFor). Coerce.
+    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
+    tx, ty = tonumber(tx), tonumber(ty)
+    if tx == nil or ty == nil then return nil end
     local sx, sy = npc.cellX or 0, npc.cellY or 0
     if sx == tx and sy == ty then return {} end
     -- Map.width/height are block dimensions in both Gen 1 and Gold.
@@ -401,6 +406,10 @@ return function(ctx)
   end
 
   local function stepToward(world, npc, tx, ty)
+    -- Defensive: coerce table targets to coordinates.
+    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
+    tx, ty = tonumber(tx), tonumber(ty)
+    if tx == nil or ty == nil then return false end
     local h = handle(world, npc)
     if not h then return false end
     if npc.moving then return true end

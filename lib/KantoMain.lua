@@ -2855,8 +2855,18 @@ local nm = storyDisplayName(talker)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
-    if sprite._kantoSleepBaked then return true end
+    local curStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+    if sprite._kantoSleepBaked then
+      -- Rebake if the sleep style changed (e.g. tent vs bed rotation).
+      if sprite._kantoSleepBakedStyle == curStyle then return true end
+      restoreSleepSprite(npc)
+    end
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+    -- Tent style (1): NPC stays upright inside the tent; the tent prop is
+    -- drawn upright, so a 90-degree baked rotation would look wrong.
+    if curStyle == 1 then
+      angle = 0
+    end
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
     local ok, canvas = pcall(function()
@@ -2903,6 +2913,7 @@ local nm = storyDisplayName(talker)
     newDef.walker = false
     sprite.def = newDef
     sprite._kantoSleepBaked = true
+    sprite._kantoSleepBakedStyle = math.floor(tonumber(opt("sleep_style")) or 0)
     return true
   end
 
@@ -2916,6 +2927,7 @@ local nm = storyDisplayName(talker)
     sprite._kantoOrigImage, sprite._kantoOrigFrames = nil, nil
     sprite._kantoOrigFrameCount, sprite._kantoOrigDef = nil, nil
     sprite._kantoSleepBaked = nil
+    sprite._kantoSleepBakedStyle = nil
   end
 
   -- Exact vanilla Yellow sleeper: Viridian City's southwest sleeping Old Man.
@@ -4874,9 +4886,11 @@ local function nightlifeTick(world, dt)
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
+          -- Tent style: prop stays upright like the (unrotated) NPC body.
+          local propRotX = (propStyle == 1) and 0 or (sign * math.pi / 2)
           local propModel = Mat4.mul(
             Mat4.translate(px, gh + 0.05, py + 8),
-            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(propRotX))
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
         end
