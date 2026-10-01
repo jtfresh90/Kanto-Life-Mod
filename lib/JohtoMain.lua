@@ -2643,7 +2643,9 @@ function isVoxelPresentation()
       G.setColor(0.1,0.1,0.1,1); G.rectangle("line",x,y,w,h,2,2)
       G.polygon("fill",x+w/2-2,y+h,x+w/2+2,y+h,x+w/2,y+h+3)
       G.setColor(0.1,0.1,0.1,1)
-      G.print(text, px - (ox or 0) + 8 - tw/2, y + (h-th)/2)
+      -- Text must be positioned relative to the box (x,y), not using the
+      -- old pre-fix formula. Center it in the box.
+      G.print(text, x + (w - tw)/2, y + (h-th)/2)
       G.pop()
     end
 
