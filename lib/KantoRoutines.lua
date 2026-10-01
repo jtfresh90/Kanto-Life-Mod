@@ -703,7 +703,8 @@ return function(ctx)
       if ha == hb then return actorKey(a) < actorKey(b) end
       return ha < hb
     end)
-    local indoorNow = isIndoor(world)
+    local wmap = world and world.map
+    local indoorNow = isIndoor(wmap and tostring(wmap.id or "") or "", wmap)
     local desired = indoorNow and #candidates or math.ceil(#candidates * pct / 100)
     if not indoorNow then
       if pct <= 0 then desired = 0 elseif pct >= 100 then desired = #candidates end
