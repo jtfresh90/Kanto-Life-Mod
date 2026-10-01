@@ -1,19 +1,32 @@
 {
   "id": "kanto_life",
   "name": "Kanto Life",
-  "version": "0.8.2",
+  "version": "1.2.36",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
   "category": "GAMEPLAY",
-  "games": ["gen1"],
-  "gen2compat": false,
+  "games": [
+    "gen1",
+    "gen2",
+    "gen3"
+  ],
   "game_version": ">=0.0.0 <10.0.0",
   "priority": 1000,
-  "permissions": ["engine_internals"],
+  "permissions": [
+    "engine_internals"
+  ],
   "dependencies": [],
-  "conflicts": ["johto_life"],
-  "description": "0.7.8 base + Johto gender names and dialogue name prefixes. Gen1 only.",
+  "optional_dependencies": [
+    "HGSS_SPRITES",
+    "red_3d_player",
+    "player_model_loader",
+    "PORYGONAL_OVERWORLD_CHARACTERS",
+    "LEGENDARY_STADIUM_OVERWORLD_MODELS",
+    "TERRARIUM"
+  ],
+  "conflicts": [],
+  "description": "Unified Kanto Life for Gen1, Gen2, and Gen3 including FireRed/LeafGreen/Emerald: continuous ambient movement, route/door routines, Gen3 dialogue and interaction events, NPC collision bubbles, and voxel-safe sleep props. Yellow keeps the engine-native local walker active and uses the controller for route/door travel; Gen3 uses native profile-specific Game3 graphics and world handles.",
   "github": "jtfresh90/Kanto-Life-Mod",
   "affects_link": false,
   "experimental": false
