@@ -826,6 +826,118 @@ return function(mod)
   -- Gen-2-native routine controller. It uses only the public mod.world NPC
   -- handle surface, which Gen1Recomp++ resolves to the live Gold/Silver/Crystal
   -- world. No Gen-1 OverworldController internals are patched here.
+
+  -- Cross-map traveler pool (Gen 2): same design as Gen 1. When an NPC
+  -- exits through a door/warp to a DIFFERENT map, they are recorded here.
+  -- When the player enters the destination map, the traveler spawns at the
+  -- entrance connecting from their origin map.
+  local johtoTravelers = {}
+  local JOHTO_TRAVELER_EXPIRY = 600
+
+  local function pruneJohtoTravelers()
+    local now = os.time()
+    for destMap, list in pairs(johtoTravelers) do
+      local kept = {}
+      for _, t in ipairs(list) do
+        if now - (t.timestamp or 0) < JOHTO_TRAVELER_EXPIRY then
+          kept[#kept + 1] = t
+        end
+      end
+      if #kept > 0 then johtoTravelers[destMap] = kept
+      else johtoTravelers[destMap] = nil end
+    end
+  end
+
+  local function onJohtoRoutineExit(npc, world, old)
+    local destMap = old and old[4]
+    destMap = destMap and tostring(destMap) or ""
+    local currentMap = world and world.map and tostring(world.map.id or "") or ""
+    if destMap == "" or destMap == currentMap then
+      return false
+    end
+    local d = npc and npc.def or {}
+    johtoTravelers[destMap] = johtoTravelers[destMap] or {}
+    table.insert(johtoTravelers[destMap], {
+      sprite = d.sprite,
+      name = d.kantoLifeDisplayName or d.name,
+      gender = d.kantoLifeGender,
+      agenda = npc and npc._kantoLifeAgenda,
+      fromMap = currentMap,
+      timestamp = os.time(),
+    })
+    pruneJohtoTravelers()
+    if npc and npc.id and world and type(world.removeNpc) == "function" then
+      pcall(world.removeNpc, world, npc.id)
+    end
+    return true
+  end
+
+  local function spawnJohtoTravelers(mapId)
+    local key = tostring(mapId or "")
+    local pending = johtoTravelers[key]
+    if not pending or #pending == 0 then return end
+    pruneJohtoTravelers()
+    pending = johtoTravelers[key]
+    if not pending or #pending == 0 then return end
+
+    local ow = mod.world and mod.world:overworld()
+    if not ow or not ow.map or ow.map.id ~= mapId then return end
+    local map = ow.map
+
+    local entrances = {}
+    for _, w in ipairs((map.def and map.def.warps) or {}) do
+      if w.x ~= nil and w.y ~= nil then
+        local dest = w.destMap or w.map
+        if dest then
+          dest = tostring(dest)
+          if entrances[dest] == nil then
+            entrances[dest] = { tonumber(w.x), tonumber(w.y) }
+          end
+        end
+      end
+    end
+
+    local remaining = {}
+    for _, t in ipairs(pending) do
+      local entrance = entrances[t.fromMap]
+      if entrance then
+        local x, y = entrance[1], entrance[2] + 1
+        local name = "JOHTO_TRAVELER_" .. key .. "_" .. tostring(os.time() % 100000)
+        local ok, id = pcall(function()
+          return mod.world:spawnNpc(key, {
+            name = name,
+            sprite = t.sprite,
+            x = x, y = y,
+            text = "",
+            movement = "WALK",
+            range = "ANY_DIR",
+            radius = { x = 8, y = 8 },
+            kantoLifeAmbient = true,
+            kantoLifeDisplayName = t.name,
+            kantoLifeGender = t.gender,
+          })
+        end)
+        if not (ok and id) then
+          remaining[#remaining + 1] = t
+        else
+          pcall(function()
+            for _, n in ipairs(ow.npcs or {}) do
+              if n.id == id then
+                n._kantoLifeAgenda = t.agenda
+                break
+              end
+            end
+          end)
+        end
+      else
+        remaining[#remaining + 1] = t
+      end
+    end
+
+    if #remaining > 0 then johtoTravelers[key] = remaining
+    else johtoTravelers[key] = nil end
+  end
+
   local JohtoRoutines, johtoRoutineErr = loadBundled("lib/JohtoRoutines.lua")
   local johtoRoutines = nil
   if type(JohtoRoutines) == "function" then
@@ -838,6 +950,7 @@ return function(mod)
       resolveDestMap = function(data, warpDef)
         return warpDef and warpDef.destMap
       end,
+      onRoutineExit = onJohtoRoutineExit,
     })
     if ok and instance then
       johtoRoutines = instance
@@ -1396,6 +1509,7 @@ return function(mod)
     local function onMapIn(p)
       local id = p and (p.mapId or p.id)
       if id then spawnAmbient(id); tryEject(liveWorld(), id) end
+      if id then pcall(spawnJohtoTravelers, id) end
     end
     mod.events:on("map.ready", onMapIn)
     mod.events:on("map.reloaded", onMapIn)
