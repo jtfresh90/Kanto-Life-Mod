@@ -9,6 +9,136 @@ return function(mod)
     if not ok then return nil, value end
     return value
   end
+  -- Cross-map traveler pool: when an NPC exits through a door/warp to a
+  -- DIFFERENT map, they are recorded here instead of being replaced on the
+  -- same map. When the player enters the destination map, the traveler
+  -- spawns at the entrance connecting from their origin map.
+  -- travelers[destMapId] = { {sprite, name, gender, agenda, fromMap, timestamp}, ... }
+  local travelers = {}
+  local TRAVELER_EXPIRY = 600  -- seconds; discard if player never visits
+
+  local function pruneTravelers()
+    local now = os.time()
+    for destMap, list in pairs(travelers) do
+      local kept = {}
+      for _, t in ipairs(list) do
+        if now - (t.timestamp or 0) < TRAVELER_EXPIRY then
+          kept[#kept + 1] = t
+        end
+      end
+      if #kept > 0 then travelers[destMap] = kept
+      else travelers[destMap] = nil end
+    end
+  end
+
+  -- Called by KantoRoutines when an NPC reaches a door/exit destination.
+  -- If the door leads to a different map, record the NPC as a traveler
+  -- (to spawn when the player enters that map) and remove them here.
+  -- Returns true if handled (no same-map replacement), false otherwise.
+  local function onRoutineExit(npc, world, old)
+    -- old = {x, y, kind, destMap, destX, destY, "warp", warpDef}
+    local destMap = old and old[4]
+    destMap = destMap and tostring(destMap) or ""
+    local currentMap = world and world.map and tostring(world.map.id or "") or ""
+    if destMap == "" or destMap == currentMap then
+      return false  -- same map or unknown; let normal replacement handle it
+    end
+    -- Cross-map exit: record traveler
+    local d = npc and npc.def or {}
+    travelers[destMap] = travelers[destMap] or {}
+    table.insert(travelers[destMap], {
+      sprite = d.sprite,
+      name = d.kantoLifeDisplayName or d.name,
+      gender = d.kantoLifeGender,
+      agenda = npc and npc._kantoLifeAgenda,
+      fromMap = currentMap,
+      timestamp = os.time(),
+    })
+    pruneTravelers()
+    -- Remove the NPC from the current map (they went through the door)
+    if npc and npc.id and world and type(world.removeNpc) == "function" then
+      pcall(world.removeNpc, world, npc.id)
+    end
+    return true
+  end
+
+  -- Spawn pending travelers when the player enters their destination map.
+  -- Each traveler appears at the entrance (door/warp) that connects from
+  -- their origin map, creating the paired exit/entry effect.
+  local function spawnTravelers(mapId, map)
+    local pending = travelers[tostring(mapId or "")]
+    if not pending or #pending == 0 then return end
+    pruneTravelers()
+    pending = travelers[tostring(mapId or "")]
+    if not pending or #pending == 0 then return end
+
+    local ow = mod.world and mod.world:overworld()
+    if not ow or not map then return end
+
+    -- Build a lookup of entrances: which warp on THIS map leads to each
+    -- connected map. The traveler came from `fromMap`, so they appear at
+    -- the door that connects this map to fromMap.
+    local entrances = {}  -- fromMapId -> {x, y}
+    for _, w in ipairs((map.def and map.def.warps) or {}) do
+      if w.x ~= nil and w.y ~= nil then
+        local dest = w.destMap or w.map
+        if dest then
+          dest = tostring(dest)
+          if entrances[dest] == nil then
+            entrances[dest] = { tonumber(w.x), tonumber(w.y) }
+          end
+        end
+      end
+    end
+
+    local spawned = 0
+    local remaining = {}
+    for _, t in ipairs(pending) do
+      local entrance = entrances[t.fromMap]
+      if entrance then
+        -- Spawn adjacent to the entrance (not on top of it)
+        local x, y = entrance[1], entrance[2] + 1
+        local name = "KANTO_TRAVELER_" .. tostring(mapId) .. "_" .. tostring(spawned)
+        -- Use a simple counter for unique names
+        local ok, id = pcall(function()
+          return mod.world:spawnNpc(tostring(mapId), {
+            name = name,
+            sprite = t.sprite,
+            x = x, y = y,
+            text = "",
+            movement = "WALK",
+            range = "ANY_DIR",
+            radius = { x = 8, y = 8 },
+            kantoLifeAmbient = true,
+            kantoLifeDisplayName = t.name,
+            kantoLifeGender = t.gender,
+          })
+        end)
+        if ok and id then
+          spawned = spawned + 1
+          -- Tag the NPC with the traveler's agenda if available
+          pcall(function()
+            for _, n in ipairs(ow.npcs or {}) do
+              if n.id == id then
+                n._kantoLifeAgenda = t.agenda
+                break
+              end
+            end
+          end)
+        else
+          remaining[#remaining + 1] = t
+        end
+      else
+        -- No entrance found from this origin; keep for later (maybe player
+        -- entered via a different route, or the map data is incomplete)
+        remaining[#remaining + 1] = t
+      end
+    end
+
+    if #remaining > 0 then travelers[tostring(mapId)] = remaining
+    else travelers[tostring(mapId)] = nil end
+  end
+
   -- Prefer mod.game (loader facade on 0.1.8x+). Fall back to mod.world.game
   -- for older engines where only WorldAPI carried the live reference.
   local function resolveGame()
@@ -1347,6 +1477,8 @@ return function(mod)
       if cur <= 0 then setOpt("indoor_npc_count", 2) end
     end
     syncAmbientToTarget(mapId, enteredMap)
+    -- Spawn cross-map travelers who exited to this map from another map
+    pcall(spawnTravelers, mapId, enteredMap)
   end)
 
   mod.events:on("mod.options_changed", function(payload)
@@ -2251,6 +2383,7 @@ local nm = storyDisplayName(talker)
         isTown = isTown,
         isRoute = isRoute,
         resolveDestMap = resolveDestMap,
+        onRoutineExit = onRoutineExit,
       })
       if okInit and instance then
         kantoRoutines = instance
