@@ -2851,6 +2851,11 @@ local nm = storyDisplayName(talker)
     end
   end
 
+  -- Forward declaration: bakeSleepSprite can trigger a rebake on sleep-style
+  -- change, which calls restoreSleepSprite (defined below). Without this the
+  -- reference inside bakeSleepSprite would resolve to a nil global.
+  local restoreSleepSprite
+
   -- Bake ±90° sleep frame into sprite.image so pose is real pixels (voxel + 2D)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
@@ -2917,7 +2922,7 @@ local nm = storyDisplayName(talker)
     return true
   end
 
-  local function restoreSleepSprite(npc)
+  restoreSleepSprite = function(npc)
     if not npc or not npc.sprite or not npc.sprite._kantoSleepBaked then return end
     local sprite = npc.sprite
     if sprite._kantoOrigImage ~= nil then sprite.image = sprite._kantoOrigImage end
@@ -4873,23 +4878,43 @@ local function nightlifeTick(world, dt)
         local py = tonumber(ctx.py) or tonumber(npc.py) or 0
         local gh = tonumber(ctx.groundHeight) or 0
         local sign = (tonumber(npc.kantoLifeSleepSide) or 1) >= 0 and 1 or -1
-        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing) + sign * math.pi / 2
+        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+        -- Tent style mirrors the 2D path: the NPC stands upright inside the
+        -- upright tent instead of lying flat. The baked voxel frames carry a
+        -- 90-degree lying pixel rotation, so undo it in the card plane
+        -- (rotateZ) rather than laying the card flat (rotateX), and lift the
+        -- card so the sleeper's feet rest on the ground. Other styles keep the
+        -- proven lying transform untouched.
+        local isTent = (propStyle == 1) and type(Mat4.rotateZ) == "function"
+        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+        if not isTent then yaw = yaw + sign * math.pi / 2 end
 
         -- SpriteBillboards' local card is centred by using anchorX/anchorY;
         -- rotate that plane onto the ground and keep its centre over the NPC.
-        local bodyModel = Mat4.mul(
-          Mat4.translate(px, gh + 0.25, py + 8),
-          Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
-        )
+        -- (Tent: keep the card vertical; the in-plane rotateZ below cancels
+        -- the baked lying rotation so the sleeper stands upright.)
+        local bodyModel
+        if isTent then
+          bodyModel = Mat4.mul(
+            Mat4.translate(px, gh + 8.25, py + 8),
+            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateZ(sign * math.pi / 2))
+          )
+        else
+          bodyModel = Mat4.mul(
+            Mat4.translate(px, gh + 0.25, py + 8),
+            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+          )
+        end
         Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
 
-        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
-          -- Tent style: prop stays upright like the (unrotated) NPC body.
-          local propRotX = (propStyle == 1) and 0 or (sign * math.pi / 2)
+          -- Tent style: prop stays upright like the standing NPC body, with
+          -- the tent's base on the ground (24px tall card, centred anchor).
+          local propRotX = isTent and 0 or (sign * math.pi / 2)
+          local propLift = isTent and 12.05 or 0.05
           local propModel = Mat4.mul(
-            Mat4.translate(px, gh + 0.05, py + 8),
+            Mat4.translate(px, gh + propLift, py + 8),
             Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(propRotX))
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
@@ -4915,8 +4940,14 @@ local function nightlifeTick(world, dt)
           end
         end
         local headOffsetX = sign * -5
+        local zx, zz = px + headOffsetX, py + 8
+        if isTent then
+          -- Above the standing sleeper's head (card top-centre, yawed).
+          zx = px + 8 * math.cos(yaw)
+          zz = py + 8 - 8 * math.sin(yaw)
+        end
         local zModel = Mat4.mul(
-          Mat4.translate(px + headOffsetX, gh + 17, py + 8),
+          Mat4.translate(zx, gh + 17, zz),
           Mat4.rotateY(zyaw)
         )
         if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
