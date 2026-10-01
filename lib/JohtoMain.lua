@@ -2605,8 +2605,13 @@ function isVoxelPresentation()
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       love.graphics.push("all")
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
-      love.graphics.translate((ox or 0) + px + 8 + shiftX, (oy or 0) + py + 8)
+      -- ox,oy arrive as the negated, scaled camera offset (see World draw);
+      -- apply them first, then place the prop in scaled world space exactly
+      -- like the engine's own NPC:draw does. (Previously px/py were added to
+      -- the pre-scale translate, so the prop drifted by px*(s-1) at zoom.)
+      love.graphics.translate(ox or 0, oy or 0)
       if scale and scale ~= 1 then love.graphics.scale(scale,scale) end
+      love.graphics.translate(px + 8 + shiftX, py + 8)
       if style ~= 1 then love.graphics.rotate(angle) end
       love.graphics.translate(-iw/2,-ih/2)
       love.graphics.draw(img,0,0)
@@ -2627,8 +2632,13 @@ function isVoxelPresentation()
       local font = G.getFont()
       local tw, th = font:getWidth(text), font:getHeight()
       local w, h = math.max(22, tw + 10), math.max(13, th + 5)
-      local x = px - (ox or 0) + 8 - w/2
-      local y = py - (oy or 0) - h - 4
+      -- ox,oy arrive as the negated, scaled camera offset (see World draw),
+      -- so screen position is ox + world*scale. (Previously this subtracted
+      -- ox, displacing the bubble by twice the camera offset, usually
+      -- off-screen.)
+      local s = scale or 1
+      local x = (ox or 0) + px * s + 8 * s - w/2
+      local y = (oy or 0) + py * s - h - 4
       G.setColor(1,1,1,1); G.rectangle("fill",x,y,w,h,2,2)
       G.setColor(0.1,0.1,0.1,1); G.rectangle("line",x,y,w,h,2,2)
       G.polygon("fill",x+w/2-2,y+h,x+w/2+2,y+h,x+w/2,y+h+3)

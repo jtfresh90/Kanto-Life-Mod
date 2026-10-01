@@ -554,7 +554,9 @@ return function(ctx)
       return st
     end
 
-    local travel = ambient and forcedRoutine or false
+    -- forcedRoutine is true or nil (see callers); keep nil (not false) so the
+    -- branch below can apply the force flag or the travel-percentage roll.
+    local travel = ambient and forcedRoutine or nil
     if ambient and travel == nil then
       if npc._kantoLifeFRForceRoutine then
         travel = true
