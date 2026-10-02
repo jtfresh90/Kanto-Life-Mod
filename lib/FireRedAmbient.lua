@@ -1020,6 +1020,70 @@ return function(ctx)
         end
       end
     end)
+    -- EXPERIMENTAL: NPC-to-NPC chatter — nearby idle NPCs exchange brief
+    -- bubbles. One initiates, the other responds after a short delay.
+    pcall(function()
+      local Objects = engine("src.core.game3.objects")
+      if not Objects then return end
+      local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      for lid, _ in pairs(spawned) do
+        local npc = Objects._byId and Objects._byId[lid]
+        if npc then
+          local pending = npc._kantoLifeChatReply
+          if pending and tonumber(pending.at) and now2 >= tonumber(pending.at) then
+            npc._kantoLifeChatReply = nil
+            local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+            if bubbleUntil <= now2 and not npc.moving then
+              npc._kantoLifeCollisionBubbleText = pending.text
+              npc._kantoLifeCollisionBubbleUntil = now2 + 2.0
+            end
+          end
+        end
+      end
+      -- Throttle pair scans (module-level via spawned table metadata)
+      local lastChatScan = tonumber(spawned._kantoLifeLastChatScan) or 0
+      if now2 - lastChatScan > 10 then
+        spawned._kantoLifeLastChatScan = now2
+        local chatterOpeners = { "Hey!", "Psst!", "Yo!", "..." }
+        local chatterReplies = { "Huh?", "Yeah?", "Hi!", "!", "..." }
+        local candidates = {}
+        for lid, _ in pairs(spawned) do
+          if lid ~= "_kantoLifeLastChatScan" then
+            local npc = Objects._byId and Objects._byId[lid]
+            if npc and npc.kantoLifeAmbient and not npc.moving then
+              local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+              if bubbleUntil <= now2 and not npc._kantoLifeChatReply then
+                local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                if nx and ny then candidates[#candidates + 1] = npc end
+              end
+            end
+          end
+        end
+        for i = 1, #candidates do
+          local a = candidates[i]
+          local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
+          for j = i + 1, #candidates do
+            local b = candidates[j]
+            local bx, by = tonumber(b.cellX), tonumber(b.cellY)
+            if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
+              local lastChat = math.max(tonumber(a._kantoLifeLastChat) or 0, tonumber(b._kantoLifeLastChat) or 0)
+              if now2 - lastChat > 60 then
+                a._kantoLifeLastChat = now2
+                b._kantoLifeLastChat = now2
+                a._kantoLifeCollisionBubbleText = chatterOpeners[math.random(1, #chatterOpeners)]
+                a._kantoLifeCollisionBubbleUntil = now2 + 2.0
+                b._kantoLifeChatReply = {
+                  text = chatterReplies[math.random(1, #chatterReplies)],
+                  at = now2 + 1.5,
+                }
+                break
+              end
+            end
+          end
+          if a._kantoLifeLastChat == now2 then break end
+        end
+      end
+    end)
   end
 
   function api:clear() clear(); lastMap = nil end

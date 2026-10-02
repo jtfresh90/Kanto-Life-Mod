@@ -3052,6 +3052,65 @@ local nm = storyDisplayName(talker)
           end
         end
       end
+      -- EXPERIMENTAL: NPC-to-NPC chatter — nearby idle NPCs exchange brief
+      -- bubbles. One initiates, the other responds after a short delay.
+      pcall(function()
+        local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        -- First, deliver any pending responses that are due
+        for _, n in ipairs(world.npcs or {}) do
+          local pending = n._kantoLifeChatReply
+          if pending and tonumber(pending.at) and now2 >= tonumber(pending.at) then
+            n._kantoLifeChatReply = nil
+            local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+            if bubbleUntil <= now2 and not n.nightlifeSleeping and not n.moving then
+              n._kantoLifeCollisionBubbleText = pending.text
+              n._kantoLifeCollisionBubbleUntil = now2 + 2.0
+            end
+          end
+        end
+        -- Look for a new chatter pair (throttled: check every ~10s)
+        local lastChatScan = tonumber(world._kantoLifeLastChatScan) or 0
+        if now2 - lastChatScan > 10 then
+          world._kantoLifeLastChatScan = now2
+          local chatterOpeners = { "Hey!", "Psst!", "Yo!", "..." }
+          local chatterReplies = { "Huh?", "Yeah?", "Hi!", "!", "..." }
+          local candidates = {}
+          for _, n in ipairs(world.npcs or {}) do
+            local d = n.def or {}
+            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+              local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+              if bubbleUntil <= now2 and not n._kantoLifeChatReply then
+                local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+                if nx and ny then candidates[#candidates + 1] = n end
+              end
+            end
+          end
+          -- Find two NPCs within 2 tiles of each other
+          for i = 1, #candidates do
+            local a = candidates[i]
+            local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
+            for j = i + 1, #candidates do
+              local b = candidates[j]
+              local bx, by = tonumber(b.cellX), tonumber(b.cellY)
+              if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
+                local lastChat = math.max(tonumber(a._kantoLifeLastChat) or 0, tonumber(b._kantoLifeLastChat) or 0)
+                if now2 - lastChat > 60 then  -- 60s cooldown per pair
+                  a._kantoLifeLastChat = now2
+                  b._kantoLifeLastChat = now2
+                  a._kantoLifeCollisionBubbleText = chatterOpeners[math.random(1, #chatterOpeners)]
+                  a._kantoLifeCollisionBubbleUntil = now2 + 2.0
+                  b._kantoLifeChatReply = {
+                    text = chatterReplies[math.random(1, #chatterReplies)],
+                    at = now2 + 1.5,
+                  }
+                  break
+                end
+              end
+            end
+            if a._kantoLifeLastChat == now2 then break end
+          end
+        end
+      end)
     end)
   end
 
