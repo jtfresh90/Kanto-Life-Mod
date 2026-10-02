@@ -618,9 +618,9 @@ return function(ctx)
     npc.hidden = true; npc.visible = false
   end
 
-  local function spawnReplacement(world, npc, door)
+  local function spawnReplacement(world, npc, door, exitedDoor) -- exitedDoor[4] is the warp destMap
     if not world or not world.map or not door or not mod or not mod.world then return false end
-    local spawn = replacementSpawnCell(world, door)
+    local _isExit = exitedDoor and tostring(exitedDoor[4] or "") ~= "" and tostring(exitedDoor[4]):upper() ~= tostring(world.map.id or ""):upper(); if _isExit then removeAmbient(world, npc); local _rd = destinationFor(world, npc, exitedDoor, "door"); if _rd then door = _rd end end; local spawn = replacementSpawnCell(world, door)
     if not spawn then return false end
     local d = npc.def or {}
     local poke = npc.kantoLifePokeAmbient == true or d.kantoLifePokeAmbient == true
@@ -943,7 +943,7 @@ return function(ctx)
         local old = {t[1], t[2], t[3], t[4]}
         if st.phase == "blocked_return" then
           local replacement = destinationFor(world, npc, st.blockedDoor, st.travelKind)
-          if replacement and spawnReplacement(world, npc, replacement) then
+          if replacement and spawnReplacement(world, npc, replacement, st.blockedDoor) then
             states[key] = nil; stateKeys[key] = nil; goto continue
           end
           st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil; st.target = nil; st.blockedDoor = nil
@@ -954,7 +954,7 @@ return function(ctx)
           if ok and replaced then states[key] = nil; stateKeys[key] = nil; goto continue end
         end
         local replacement = destinationFor(world, npc, old, st.travelKind)
-        if replacement and spawnReplacement(world, npc, replacement) then
+        if replacement and spawnReplacement(world, npc, replacement, old) then
           states[key] = nil; stateKeys[key] = nil; goto continue
         end
         -- If a replacement cannot be created, keep the actor alive and send it
