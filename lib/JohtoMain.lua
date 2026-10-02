@@ -1756,6 +1756,39 @@ return function(mod)
           end
         end
       end
+      -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
+      -- NPCs are surprised to see you.
+      pcall(function()
+        local mapId = world.map and tostring(world.map.id or "") or ""
+        local lastMap = world._kantoLifeLastMapId
+        if lastMap and lastMap ~= mapId then
+          local player = world.player
+          local px, py = player and tonumber(player.cellX), player and tonumber(player.cellY)
+          if px and py then
+            local nowDt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+            local reacted = 0
+            for _, n in ipairs(world.npcs or {}) do
+              if reacted >= 3 then break end
+              local d2 = n.def or {}
+              if d2.johtoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+                local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+                if nx and ny then
+                  local dist = math.abs(nx - px) + math.abs(ny - py)
+                  if dist <= 4 and dist > 0 then
+                    local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                    if bubbleUntil <= nowDt then
+                      n._kantoLifeCollisionBubbleText = "!"
+                      n._kantoLifeCollisionBubbleUntil = nowDt + 1.0
+                      reacted = reacted + 1
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+        world._kantoLifeLastMapId = mapId
+      end)
       -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
       -- with a brief bubble when walked past (not sleeping, cooldown per NPC).
       -- EXPERIMENTAL: idle behaviors — idle NPCs occasionally look around or

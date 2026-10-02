@@ -995,6 +995,45 @@ return function(ctx)
     if not ow or not ow.map then return end
     local map = ow.map
     local mapId = map.gen3Id or map.id
+    -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
+    -- NPCs are surprised to see you.
+    pcall(function()
+      local lastMapId = spawned._kantoLifeLastMapId
+      local curMapId = tostring(mapId or "")
+      if lastMapId and lastMapId ~= curMapId then
+        local Player = engine("src.core.game3.player")
+        local Objects = engine("src.core.game3.objects")
+        if Player and Objects then
+          local px, py = tonumber(Player.cellX), tonumber(Player.cellY)
+          if px and py then
+            local nowDt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+            local reacted = 0
+            for lid, _ in pairs(spawned) do
+              if reacted >= 3 then break end
+              if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
+                 and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId" then
+                local npc = Objects._byId and Objects._byId[lid]
+                if npc and npc.kantoLifeAmbient and not npc.moving then
+                  local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                  if nx and ny then
+                    local dist = math.abs(nx - px) + math.abs(ny - py)
+                    if dist <= 4 and dist > 0 then
+                      local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                      if bubbleUntil <= nowDt then
+                        npc._kantoLifeCollisionBubbleText = "!"
+                        npc._kantoLifeCollisionBubbleUntil = nowDt + 1.0
+                        reacted = reacted + 1
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      spawned._kantoLifeLastMapId = curMapId
+    end)
     if mapId ~= lastMap then self:rebuild(true) end
     -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
     -- with a brief bubble when walked past (cooldown per NPC).

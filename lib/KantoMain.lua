@@ -3012,6 +3012,40 @@ local nm = storyDisplayName(talker)
 
   local function scheduleTick(world, dt)
     if not world or not world.map or not world.player or not world.npcs then return end
+    -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
+    -- NPCs are surprised to see you.
+    pcall(function()
+      local mapId = world.map and tostring(world.map.id or "") or ""
+      local lastMap = world._kantoLifeLastMapId
+      if lastMap and lastMap ~= mapId then
+        -- Map changed! Nearby NPCs do a double-take.
+        local player = world.player
+        local px, py = player and tonumber(player.cellX), player and tonumber(player.cellY)
+        if px and py then
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+          local reacted = 0
+          for _, n in ipairs(world.npcs or {}) do
+            if reacted >= 3 then break end
+            local d = n.def or {}
+            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+              local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+              if nx and ny then
+                local dist = math.abs(nx - px) + math.abs(ny - py)
+                if dist <= 4 and dist > 0 then
+                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                  if bubbleUntil <= now then
+                    n._kantoLifeCollisionBubbleText = "!"
+                    n._kantoLifeCollisionBubbleUntil = now + 1.0
+                    reacted = reacted + 1
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      world._kantoLifeLastMapId = mapId
+    end)
     -- KantoRoutines is the sole owner of Kanto Life spawned-NPC travel and
     -- agenda. Default FireRed map NPCs are intentionally never handed to a
     -- routine scheduler here.
