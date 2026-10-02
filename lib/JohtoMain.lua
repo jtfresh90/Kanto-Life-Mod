@@ -1973,6 +1973,15 @@ return function(mod)
                     text = chatterReplies[math.random(1, #chatterReplies)],
                     at = now2 + 1.5,
                   }
+                  -- EXPERIMENTAL: face each other while chatting
+                  local dx2, dy2 = tonumber(b.cellX) - tonumber(a.cellX), tonumber(b.cellY) - tonumber(a.cellY)
+                  if math.abs(dx2) >= math.abs(dy2) then
+                    a.facing = dx2 > 0 and "right" or "left"
+                    b.facing = dx2 > 0 and "left" or "right"
+                  else
+                    a.facing = dy2 > 0 and "down" or "up"
+                    b.facing = dy2 > 0 and "up" or "down"
+                  end
                   break
                 end
               end

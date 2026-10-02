@@ -1230,6 +1230,19 @@ return function(ctx)
                   text = chatterReplies[math.random(1, #chatterReplies)],
                   at = now2 + 1.5,
                 }
+                -- EXPERIMENTAL: face each other while chatting
+                -- Gen3 dirs: 0=down,1=up,2=left,3=right
+                local dx2, dy2 = tonumber(b.cellX) - tonumber(a.cellX), tonumber(b.cellY) - tonumber(a.cellY)
+                local aFace, bFace
+                if math.abs(dx2) >= math.abs(dy2) then
+                  aFace = dx2 > 0 and 3 or 2
+                  bFace = dx2 > 0 and 2 or 3
+                else
+                  aFace = dy2 > 0 and 0 or 1
+                  bFace = dy2 > 0 and 1 or 0
+                end
+                if a.setDirection then pcall(a.setDirection, a, aFace) end
+                if b.setDirection then pcall(b.setDirection, b, bFace) end
                 break
               end
             end

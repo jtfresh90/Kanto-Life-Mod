@@ -3251,6 +3251,15 @@ local nm = storyDisplayName(talker)
                     text = chatterReplies[math.random(1, #chatterReplies)],
                     at = now2 + 1.5,
                   }
+                  -- EXPERIMENTAL: face each other while chatting
+                  local dx, dy = bx - ax, by - ay
+                  if math.abs(dx) >= math.abs(dy) then
+                    a.facing = dx > 0 and "right" or "left"
+                    b.facing = dx > 0 and "left" or "right"
+                  else
+                    a.facing = dy > 0 and "down" or "up"
+                    b.facing = dy > 0 and "up" or "down"
+                  end
                   break
                 end
               end
