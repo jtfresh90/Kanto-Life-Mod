@@ -932,10 +932,22 @@ return function(mod)
         if not (ok and id) then
           remaining[#remaining + 1] = t
         else
+          -- EXPERIMENTAL: arrival greeting
           pcall(function()
             for _, n in ipairs(ow.npcs or {}) do
               if n.id == id then
                 n._kantoLifeAgenda = t.agenda
+                local greetings = {
+                  "Phew, made it!",
+                  "Here I am!",
+                  "What a walk!",
+                  "Finally here!",
+                  "Hello there!",
+                }
+                local g = greetings[math.random(1, #greetings)]
+                local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+                n._kantoLifeCollisionBubbleText = g
+                n._kantoLifeCollisionBubbleUntil = now + 2.5
                 break
               end
             end

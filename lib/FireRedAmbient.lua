@@ -935,6 +935,17 @@ return function(ctx)
           npc._kantoLifeFRAnchorX = sx or entrance.x
           npc._kantoLifeFRAnchorY = sy or entrance.y
           if t.agenda then npc._kantoLifeFRAgenda = true end
+          -- EXPERIMENTAL: arrival greeting bubble
+          local greetings = {
+            "Phew, made it!",
+            "Here I am!",
+            "What a walk!",
+            "Finally here!",
+            "Hello there!",
+          }
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+          npc._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+          npc._kantoLifeCollisionBubbleUntil = now + 2.5
         else
           remaining[#remaining + 1] = t
         end

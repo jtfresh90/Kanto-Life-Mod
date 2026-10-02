@@ -120,10 +120,23 @@ return function(mod)
         if ok and id then
           spawned = spawned + 1
           -- Tag the NPC with the traveler's agenda if available
+          -- EXPERIMENTAL: arrival greeting — travelers announce themselves
+          -- with a brief text bubble when they appear at the entrance.
           pcall(function()
             for _, n in ipairs(ow.npcs or {}) do
               if n.id == id then
                 n._kantoLifeAgenda = t.agenda
+                local greetings = {
+                  "Phew, made it!",
+                  "Here I am!",
+                  "What a walk!",
+                  "Finally here!",
+                  "Hello there!",
+                }
+                local g = greetings[math.random(1, #greetings)]
+                local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+                n._kantoLifeCollisionBubbleText = g
+                n._kantoLifeCollisionBubbleUntil = now + 2.5
                 break
               end
             end
