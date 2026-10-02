@@ -808,7 +808,9 @@ return function(ctx)
           local waved = 0
           for lid2, _ in pairs(spawned) do
             if lid2 ~= lid and waved < 3 and lid2 ~= "_kantoLifeLastChatScan"
-               and lid2 ~= "_kantoLifePlayerLastX" and lid2 ~= "_kantoLifePlayerLastY" then
+               and lid2 ~= "_kantoLifePlayerLastX" and lid2 ~= "_kantoLifePlayerLastY"
+               and lid2 ~= "_kantoLifeLastMapId" and lid2 ~= "_kantoLifeLastGroupScan"
+               and lid2 ~= "_kantoLifeRecentYawn" then
               local other = Objects._byId and Objects._byId[lid2]
               if other and other.kantoLifeAmbient and not other.moving then
                 local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
@@ -1011,7 +1013,8 @@ return function(ctx)
             for lid, _ in pairs(spawned) do
               if reacted >= 3 then break end
               if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
-                 and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId" then
+                 and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
+                 and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" then
                 local npc = Objects._byId and Objects._byId[lid]
                 if npc and npc.kantoLifeAmbient and not npc.moving then
                   local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -1101,7 +1104,7 @@ return function(ctx)
         spawned._kantoLifePlayerLastY = py
       end
       for lid, _ in pairs(spawned) do
-        if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX" and lid ~= "_kantoLifePlayerLastY" then
+        if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX" and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId" and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" then
         local npc = Objects._byId and Objects._byId[lid]
         if npc and npc.kantoLifeAmbient then
           -- EXPERIMENTAL: face the player — idle NPCs turn to look at you
@@ -1187,9 +1190,28 @@ return function(ctx)
                   npc._kantoLifeCollisionBubbleUntil = now + 1.5
                 end
               else
+                -- EXPERIMENTAL: contagious yawning
                 if bubbleUntil <= now then
-                  npc._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
+                  local thought = idleThoughts[math.random(1, #idleThoughts)]
+                  local recentYawn = spawned._kantoLifeRecentYawn
+                  if recentYawn and now - (tonumber(recentYawn.at) or 0) < 5 then
+                    local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                    if nx and ny then
+                      local ydx = math.abs(nx - (tonumber(recentYawn.x) or 999))
+                      local ydy = math.abs(ny - (tonumber(recentYawn.y) or 999))
+                      if ydx + ydy <= 4 and ydx + ydy > 0 and math.random() < 0.5 then
+                        thought = "*yawn*"
+                      end
+                    end
+                  end
+                  npc._kantoLifeCollisionBubbleText = thought
                   npc._kantoLifeCollisionBubbleUntil = now + 1.5
+                  if thought == "*yawn*" then
+                    local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                    if nx and ny then
+                      spawned._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
+                    end
+                  end
                 end
               end
             end
@@ -1213,7 +1235,7 @@ return function(ctx)
         for lid, _ in pairs(spawned) do
           if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
              and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
-             and lid ~= "_kantoLifeLastGroupScan" then
+             and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" then
             local npc = Objects._byId and Objects._byId[lid]
             if npc and npc.kantoLifeAmbient and not npc.moving then
               local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -1281,7 +1303,7 @@ return function(ctx)
         local chatterReplies = { "Huh?", "Yeah?", "Hi!", "!", "..." }
         local candidates = {}
         for lid, _ in pairs(spawned) do
-          if lid ~= "_kantoLifeLastChatScan" then
+          if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX" and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId" and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" then
             local npc = Objects._byId and Objects._byId[lid]
             if npc and npc.kantoLifeAmbient and not npc.moving then
               local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0

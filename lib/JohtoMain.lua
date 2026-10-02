@@ -1939,9 +1939,28 @@ return function(mod)
                     npc._kantoLifeCollisionBubbleUntil = now + 1.5
                   end
                 else
+                  -- EXPERIMENTAL: contagious yawning
                   if bubbleUntil <= now then
-                    npc._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
+                    local thought = idleThoughts[math.random(1, #idleThoughts)]
+                    local recentYawn = world._kantoLifeRecentYawn
+                    if recentYawn and now - (tonumber(recentYawn.at) or 0) < 5 then
+                      local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                      if nx and ny then
+                        local ydx = math.abs(nx - (tonumber(recentYawn.x) or 999))
+                        local ydy = math.abs(ny - (tonumber(recentYawn.y) or 999))
+                        if ydx + ydy <= 4 and ydx + ydy > 0 and math.random() < 0.5 then
+                          thought = "*yawn*"
+                        end
+                      end
+                    end
+                    npc._kantoLifeCollisionBubbleText = thought
                     npc._kantoLifeCollisionBubbleUntil = now + 1.5
+                    if thought == "*yawn*" then
+                      local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                      if nx and ny then
+                        world._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
+                      end
+                    end
                   end
                 end
               end

@@ -3216,9 +3216,30 @@ local nm = storyDisplayName(talker)
                 end
               else
                 -- Thought bubble (only if no other bubble active)
+                -- EXPERIMENTAL: contagious yawning — if a nearby NPC yawned
+                -- recently, this NPC is more likely to yawn too.
                 if bubbleUntil <= now then
-                  n._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
+                  local thought = idleThoughts[math.random(1, #idleThoughts)]
+                  local recentYawn = world._kantoLifeRecentYawn
+                  if recentYawn and now - (tonumber(recentYawn.at) or 0) < 5 then
+                    local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+                    if nx and ny then
+                      local ydx = math.abs(nx - (tonumber(recentYawn.x) or 999))
+                      local ydy = math.abs(ny - (tonumber(recentYawn.y) or 999))
+                      if ydx + ydy <= 4 and ydx + ydy > 0 and math.random() < 0.5 then
+                        thought = "*yawn*"
+                      end
+                    end
+                  end
+                  n._kantoLifeCollisionBubbleText = thought
                   n._kantoLifeCollisionBubbleUntil = now + 1.5
+                  -- Record yawns for contagion
+                  if thought == "*yawn*" then
+                    local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+                    if nx and ny then
+                      world._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
+                    end
+                  end
                 end
               end
             end
