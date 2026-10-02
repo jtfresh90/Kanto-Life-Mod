@@ -3218,7 +3218,7 @@ function putToSleep(npc)
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
         if self.nightlifeSleeping then
-          if self.sprite and not self.sprite._kantoSleepBaked then
+          if self.sprite and not self.sprite._kantoSleepBaked and not (isVoxelPresentation and isVoxelPresentation()) then
             pcall(bakeSleepSprite, self)
           end
           local px0 = self.px or self.x or ((self.cellX or 0) * 16) or 0
