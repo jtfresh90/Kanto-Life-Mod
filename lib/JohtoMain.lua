@@ -2600,15 +2600,15 @@ function isVoxelPresentation()
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local px = self.px or self.x or ((self.cellX or 0) * 16)
-      local py = self.py or self.y or ((self.cellY or 0) * 16)
+      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
+      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       love.graphics.push("all")
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
       love.graphics.translate((ox or 0) + px + 8 + shiftX, (oy or 0) + py + 8)
-      if scale and scale ~= 1 then love.graphics.scale(scale,scale) end
-      if style ~= 1 then love.graphics.rotate(angle) end
-      love.graphics.translate(-iw/2,-ih/2)
+      love.graphics.scale((scale or 1) * 1.5, (scale or 1) * 1.5)
+      if style == 2 then love.graphics.rotate(angle) end
+      love.graphics.translate(-iw/2,-ih)
       love.graphics.draw(img,0,0)
       love.graphics.pop()
     end
@@ -2622,8 +2622,8 @@ function isVoxelPresentation()
       local G = love.graphics
       G.push("all")
       if scale and scale ~= 1 then G.scale(scale,scale) end
-      local px = self.px or self.x or ((self.cellX or 0) * 16)
-      local py = self.py or self.y or ((self.cellY or 0) * 16)
+      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
+      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local font = G.getFont()
       local tw, th = font:getWidth(text), font:getHeight()
       local w, h = math.max(22, tw + 10), math.max(13, th + 5)
@@ -2641,8 +2641,8 @@ function isVoxelPresentation()
       if not self or not self.nightlifeSleeping then return end
       local v = opt("sleep_bubbles")
       if v == false then return end
-      local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
-      local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0) or 0
+      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0) or 0
       local G = love.graphics
       G.push()
       if scale ~= nil then
