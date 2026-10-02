@@ -2675,10 +2675,10 @@ function isVoxelPresentation()
         local sleeping = self.nightlifeSleeping
         local voxel = isVoxelPresentation()
         local angle = self.johtoLifeSleepAngle or (math.pi / 2)
+    
         local baked = self.sprite and self.sprite._johtoSleepBaked
-
-        -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
-        if sleeping and baked then
+        -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP).
+        if sleeping and baked and not voxel then
           local r = baseDraw(self, ox, oy, scale)
           drawSleepAccessory(self, ox, oy, scale)
           if not voxel then
