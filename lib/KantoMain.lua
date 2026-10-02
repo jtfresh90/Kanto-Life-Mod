@@ -3227,8 +3227,60 @@ local nm = storyDisplayName(talker)
       end
       -- EXPERIMENTAL: NPC-to-NPC chatter — nearby idle NPCs exchange brief
       -- bubbles. One initiates, the other responds after a short delay.
+      -- EXPERIMENTAL: group conversations — clusters of 3+ NPCs face the
+      -- center, like they're having a group chat.
       pcall(function()
         local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        -- Group detection (every 30s)
+        local lastGroupScan = tonumber(world._kantoLifeLastGroupScan) or 0
+        if now2 - lastGroupScan > 30 then
+          world._kantoLifeLastGroupScan = now2
+          local idleNpcs = {}
+          for _, n in ipairs(world.npcs or {}) do
+            local d = n.def or {}
+            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+              local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+              if nx and ny then idleNpcs[#idleNpcs + 1] = n end
+            end
+          end
+          -- Find clusters: for each NPC, count neighbors within 2 tiles
+          local grouped = {}
+          for i = 1, #idleNpcs do
+            if not grouped[idleNpcs[i]] then
+              local a = idleNpcs[i]
+              local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
+              local cluster = { a }
+              for j = 1, #idleNpcs do
+                if i ~= j and not grouped[idleNpcs[j]] then
+                  local b = idleNpcs[j]
+                  local bx, by = tonumber(b.cellX), tonumber(b.cellY)
+                  if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
+                    cluster[#cluster + 1] = b
+                  end
+                end
+              end
+              if #cluster >= 3 then
+                -- Found a group! Make them face the center.
+                local cx, cy = 0, 0
+                for _, m in ipairs(cluster) do
+                  cx = cx + tonumber(m.cellX)
+                  cy = cy + tonumber(m.cellY)
+                  grouped[m] = true
+                end
+                cx, cy = cx / #cluster, cy / #cluster
+                for _, m in ipairs(cluster) do
+                  local mx, my = tonumber(m.cellX), tonumber(m.cellY)
+                  local dx, dy = cx - mx, cy - my
+                  if math.abs(dx) >= math.abs(dy) then
+                    m.facing = dx > 0 and "right" or (dx < 0 and "left" or m.facing)
+                  else
+                    m.facing = dy > 0 and "down" or (dy < 0 and "up" or m.facing)
+                  end
+                end
+              end
+            end
+          end
+        end
         -- First, deliver any pending responses that are due
         for _, n in ipairs(world.npcs or {}) do
           local pending = n._kantoLifeChatReply

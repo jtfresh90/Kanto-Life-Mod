@@ -1200,10 +1200,65 @@ return function(ctx)
     end)
     -- EXPERIMENTAL: NPC-to-NPC chatter — nearby idle NPCs exchange brief
     -- bubbles. One initiates, the other responds after a short delay.
+    -- EXPERIMENTAL: group conversations — clusters of 3+ NPCs face the
+    -- center, like they're having a group chat.
     pcall(function()
       local Objects = engine("src.core.game3.objects")
       if not Objects then return end
       local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      local lastGroupScan = tonumber(spawned._kantoLifeLastGroupScan) or 0
+      if now2 - lastGroupScan > 30 then
+        spawned._kantoLifeLastGroupScan = now2
+        local idleNpcs = {}
+        for lid, _ in pairs(spawned) do
+          if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
+             and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
+             and lid ~= "_kantoLifeLastGroupScan" then
+            local npc = Objects._byId and Objects._byId[lid]
+            if npc and npc.kantoLifeAmbient and not npc.moving then
+              local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+              if nx and ny then idleNpcs[#idleNpcs + 1] = npc end
+            end
+          end
+        end
+        local grouped = {}
+        for i = 1, #idleNpcs do
+          if not grouped[idleNpcs[i]] then
+            local a = idleNpcs[i]
+            local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
+            local cluster = { a }
+            for j = 1, #idleNpcs do
+              if i ~= j and not grouped[idleNpcs[j]] then
+                local b = idleNpcs[j]
+                local bx, by = tonumber(b.cellX), tonumber(b.cellY)
+                if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
+                  cluster[#cluster + 1] = b
+                end
+              end
+            end
+            if #cluster >= 3 then
+              local cx, cy = 0, 0
+              for _, m in ipairs(cluster) do
+                cx = cx + tonumber(m.cellX)
+                cy = cy + tonumber(m.cellY)
+                grouped[m] = true
+              end
+              cx, cy = cx / #cluster, cy / #cluster
+              for _, m in ipairs(cluster) do
+                local mx, my = tonumber(m.cellX), tonumber(m.cellY)
+                local dx, dy = cx - mx, cy - my
+                local faceDir
+                if math.abs(dx) >= math.abs(dy) then
+                  faceDir = dx > 0 and 3 or (dx < 0 and 2 or nil)
+                else
+                  faceDir = dy > 0 and 0 or (dy < 0 and 1 or nil)
+                end
+                if faceDir and m.setDirection then pcall(m.setDirection, m, faceDir) end
+              end
+            end
+          end
+        end
+      end
       for lid, _ in pairs(spawned) do
         local npc = Objects._byId and Objects._byId[lid]
         if npc then
