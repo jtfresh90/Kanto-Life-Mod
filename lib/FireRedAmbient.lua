@@ -969,6 +969,8 @@ return function(ctx)
     if mapId ~= lastMap then self:rebuild(true) end
     -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
     -- with a brief bubble when walked past (cooldown per NPC).
+    -- EXPERIMENTAL: idle behaviors — idle NPCs occasionally change facing or
+    -- show a thought bubble.
     pcall(function()
       local Player = engine("src.core.game3.player")
       local Objects = engine("src.core.game3.objects")
@@ -980,6 +982,7 @@ return function(ctx)
         "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
         "Morning!", "Afternoon!", "Evening!",
       }
+      local idleThoughts = { "...", "Hmm.", "*yawn*", "*stretch*", "La la..." }
       for lid, _ in pairs(spawned) do
         local npc = Objects._byId and Objects._byId[lid]
         if npc and npc.kantoLifeAmbient then
@@ -994,6 +997,22 @@ return function(ctx)
                   npc._kantoLifeLastGreet = now
                   npc._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
                   npc._kantoLifeCollisionBubbleUntil = now + 2.0
+                end
+              end
+            end
+          end
+          -- Idle behavior: only when standing still
+          if not npc.moving then
+            local lastIdle = tonumber(npc._kantoLifeLastIdle) or 0
+            if now - lastIdle > 25 + math.random() * 20 then
+              npc._kantoLifeLastIdle = now
+              if math.random() < 0.7 then
+                -- Turn to face a random direction
+                if npc.setDirection then pcall(npc.setDirection, npc, math.random(0, 3)) end
+              else
+                if bubbleUntil <= now then
+                  npc._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
+                  npc._kantoLifeCollisionBubbleUntil = now + 1.5
                 end
               end
             end

@@ -3000,6 +3000,8 @@ local nm = storyDisplayName(talker)
     end
     -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
     -- with a brief bubble when walked past (not sleeping, cooldown per NPC).
+    -- EXPERIMENTAL: idle behaviors — idle NPCs occasionally look around or
+    -- show a thought bubble, so they feel alive when not moving.
     pcall(function()
       local player = world.player
       if not player then return end
@@ -3010,6 +3012,8 @@ local nm = storyDisplayName(talker)
         "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
         "Morning!", "Afternoon!", "Evening!",
       }
+      local idleThoughts = { "...", "Hmm.", "*yawn*", "*stretch*", "La la..." }
+      local dirs = { "up", "down", "left", "right" }
       for _, n in ipairs(world.npcs or {}) do
         local d = n.def or {}
         if d.kantoLifeAmbient and not n.nightlifeSleeping then
@@ -3025,6 +3029,23 @@ local nm = storyDisplayName(talker)
                   n._kantoLifeLastGreet = now
                   n._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
                   n._kantoLifeCollisionBubbleUntil = now + 2.0
+                end
+              end
+            end
+          end
+          -- Idle behavior: only when standing still (not moving, no routine step)
+          if not n.moving then
+            local lastIdle = tonumber(n._kantoLifeLastIdle) or 0
+            if now - lastIdle > 25 + math.random() * 20 then  -- 25-45s
+              n._kantoLifeLastIdle = now
+              if math.random() < 0.7 then
+                -- Look around: face a random direction
+                n.facing = dirs[math.random(1, 4)]
+              else
+                -- Thought bubble (only if no other bubble active)
+                if bubbleUntil <= now then
+                  n._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
+                  n._kantoLifeCollisionBubbleUntil = now + 1.5
                 end
               end
             end
