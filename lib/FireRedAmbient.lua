@@ -998,11 +998,14 @@ return function(ctx)
     local map = ow.map
     local mapId = map.gen3Id or map.id
     -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
-    -- NPCs are surprised to see you.
+    -- NPCs are surprised. Revisited maps get "Welcome back!" instead.
     pcall(function()
       local lastMapId = spawned._kantoLifeLastMapId
       local curMapId = tostring(mapId or "")
       if lastMapId and lastMapId ~= curMapId then
+        spawned._kantoLifeVisitedMaps = spawned._kantoLifeVisitedMaps or {}
+        local isRevisit = spawned._kantoLifeVisitedMaps[curMapId]
+        spawned._kantoLifeVisitedMaps[curMapId] = true
         local Player = engine("src.core.game3.player")
         local Objects = engine("src.core.game3.objects")
         if Player and Objects then
@@ -1014,7 +1017,7 @@ return function(ctx)
               if reacted >= 3 then break end
               if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
                  and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
-                 and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" and lid ~= "_kantoLifePlayerStillSince" then
+                 and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" and lid ~= "_kantoLifePlayerStillSince" and lid ~= "_kantoLifeVisitedMaps" then
                 local npc = Objects._byId and Objects._byId[lid]
                 if npc and npc.kantoLifeAmbient and not npc.moving then
                   local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -1023,8 +1026,13 @@ return function(ctx)
                     if dist <= 4 and dist > 0 then
                       local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
                       if bubbleUntil <= nowDt then
-                        npc._kantoLifeCollisionBubbleText = "!"
-                        npc._kantoLifeCollisionBubbleUntil = nowDt + 1.0
+                        if isRevisit then
+                          local welcomes = { "Welcome back!", "You're back!", "Hey again!", "WB!" }
+                          npc._kantoLifeCollisionBubbleText = welcomes[math.random(1, #welcomes)]
+                        else
+                          npc._kantoLifeCollisionBubbleText = "!"
+                        end
+                        npc._kantoLifeCollisionBubbleUntil = nowDt + 1.5
                         reacted = reacted + 1
                       end
                     end

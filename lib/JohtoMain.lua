@@ -1757,11 +1757,14 @@ return function(mod)
         end
       end
       -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
-      -- NPCs are surprised to see you.
+      -- NPCs are surprised. Revisited maps get "Welcome back!" instead.
       pcall(function()
         local mapId = world.map and tostring(world.map.id or "") or ""
         local lastMap = world._kantoLifeLastMapId
         if lastMap and lastMap ~= mapId then
+          world._kantoLifeVisitedMaps = world._kantoLifeVisitedMaps or {}
+          local isRevisit = world._kantoLifeVisitedMaps[mapId]
+          world._kantoLifeVisitedMaps[mapId] = true
           local player = world.player
           local px, py = player and tonumber(player.cellX), player and tonumber(player.cellY)
           if px and py then
@@ -1777,8 +1780,13 @@ return function(mod)
                   if dist <= 4 and dist > 0 then
                     local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
                     if bubbleUntil <= nowDt then
-                      n._kantoLifeCollisionBubbleText = "!"
-                      n._kantoLifeCollisionBubbleUntil = nowDt + 1.0
+                      if isRevisit then
+                        local welcomes = { "Welcome back!", "You're back!", "Hey again!", "WB!" }
+                        n._kantoLifeCollisionBubbleText = welcomes[math.random(1, #welcomes)]
+                      else
+                        n._kantoLifeCollisionBubbleText = "!"
+                      end
+                      n._kantoLifeCollisionBubbleUntil = nowDt + 1.5
                       reacted = reacted + 1
                     end
                   end

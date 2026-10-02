@@ -3013,12 +3013,17 @@ local nm = storyDisplayName(talker)
   local function scheduleTick(world, dt)
     if not world or not world.map or not world.player or not world.npcs then return end
     -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
-    -- NPCs are surprised to see you.
+    -- NPCs are surprised to see you. If it's a map you've visited before,
+    -- they say "Welcome back!" instead.
     pcall(function()
       local mapId = world.map and tostring(world.map.id or "") or ""
       local lastMap = world._kantoLifeLastMapId
       if lastMap and lastMap ~= mapId then
-        -- Map changed! Nearby NPCs do a double-take.
+        -- Map changed! Check if we've visited this map before.
+        world._kantoLifeVisitedMaps = world._kantoLifeVisitedMaps or {}
+        local isRevisit = world._kantoLifeVisitedMaps[mapId]
+        world._kantoLifeVisitedMaps[mapId] = true
+        -- Nearby NPCs react.
         local player = world.player
         local px, py = player and tonumber(player.cellX), player and tonumber(player.cellY)
         if px and py then
@@ -3034,8 +3039,13 @@ local nm = storyDisplayName(talker)
                 if dist <= 4 and dist > 0 then
                   local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
                   if bubbleUntil <= now then
-                    n._kantoLifeCollisionBubbleText = "!"
-                    n._kantoLifeCollisionBubbleUntil = now + 1.0
+                    if isRevisit then
+                      local welcomes = { "Welcome back!", "You're back!", "Hey again!", "WB!" }
+                      n._kantoLifeCollisionBubbleText = welcomes[math.random(1, #welcomes)]
+                    else
+                      n._kantoLifeCollisionBubbleText = "!"
+                    end
+                    n._kantoLifeCollisionBubbleUntil = now + 1.5
                     reacted = reacted + 1
                   end
                 end
