@@ -3144,9 +3144,17 @@ local nm = storyDisplayName(talker)
             local lastIdle = tonumber(n._kantoLifeLastIdle) or 0
             if now - lastIdle > 25 + math.random() * 20 then  -- 25-45s
               n._kantoLifeLastIdle = now
-              if math.random() < 0.7 then
+              local roll = math.random()
+              if roll < 0.6 then
                 -- Look around: face a random direction
                 n.facing = dirs[math.random(1, 4)]
+              elseif roll < 0.7 and (timeOfDay == "morning" or timeOfDay == "afternoon") then
+                -- EXPERIMENTAL: happy humming — daytime NPCs sing a little
+                if bubbleUntil <= now then
+                  local hums = { "♪", "♫", "La la~ ♪" }
+                  n._kantoLifeCollisionBubbleText = hums[math.random(1, #hums)]
+                  n._kantoLifeCollisionBubbleUntil = now + 1.5
+                end
               else
                 -- Thought bubble (only if no other bubble active)
                 if bubbleUntil <= now then

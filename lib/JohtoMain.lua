@@ -1871,8 +1871,16 @@ return function(mod)
               local lastIdle = tonumber(npc._kantoLifeLastIdle) or 0
               if now - lastIdle > 25 + math.random() * 20 then
                 npc._kantoLifeLastIdle = now
-                if math.random() < 0.7 then
+                local roll = math.random()
+                if roll < 0.6 then
                   npc.facing = dirs[math.random(1, 4)]
+                elseif roll < 0.7 and (timeOfDay == "morning" or timeOfDay == "afternoon") then
+                  -- EXPERIMENTAL: happy humming — daytime NPCs sing a little
+                  if bubbleUntil <= now then
+                    local hums = { "♪", "♫", "La la~ ♪" }
+                    npc._kantoLifeCollisionBubbleText = hums[math.random(1, #hums)]
+                    npc._kantoLifeCollisionBubbleUntil = now + 1.5
+                  end
                 else
                   if bubbleUntil <= now then
                     npc._kantoLifeCollisionBubbleText = idleThoughts[math.random(1, #idleThoughts)]
