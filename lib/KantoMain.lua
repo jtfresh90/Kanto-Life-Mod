@@ -3085,6 +3085,24 @@ local nm = storyDisplayName(talker)
         night = { "Oh, hi.", "Evening...", "*yawn* Hey.", "Hey...", "Still up?" },
       }
       local greetings = greetingsByTime[timeOfDay] or greetingsByTime.afternoon
+      -- EXPERIMENTAL: NPC moods — each NPC has a mood (happy, neutral, grumpy,
+      -- sleepy, excited) that colors their greetings. Reshuffled every 30-60 min.
+      local moodGreetings = {
+        happy = { "Hey!", "Hi there!", "Great day!", "Hello!", "Howdy!" },
+        neutral = { "Hey.", "Hi.", "Hello.", "Yo." },
+        grumpy = { "...", "Hmph.", "What?", "Yeah, hi." },
+        sleepy = { "*yawn* Hey.", "Oh, hi...", "Mmm...", "Hey..." },
+        excited = { "Hey hey!", "Wow, hi!", "Hello!!", "Hiya!" },
+      }
+      local moodList = { "happy", "neutral", "neutral", "grumpy", "sleepy", "excited" }
+      local function getNpcMood(npc)
+        local moodSetAt = tonumber(npc._kantoLifeMoodSetAt) or 0
+        if now - moodSetAt > 1800 + math.random() * 1800 then  -- 30-60 min
+          npc._kantoLifeMood = moodList[math.random(1, #moodList)]
+          npc._kantoLifeMoodSetAt = now
+        end
+        return npc._kantoLifeMood or "neutral"
+      end
       local idleThoughtsByTime = {
         morning = { "...", "Hmm.", "*stretch*", "What a day!", "La la..." },
         afternoon = { "...", "Hmm.", "La la...", "Nice weather.", "*stretch*" },
@@ -3167,7 +3185,14 @@ local nm = storyDisplayName(talker)
                 local lastGreet = tonumber(n._kantoLifeLastGreet) or 0
                 if now - lastGreet > 30 then  -- 30s cooldown per NPC
                   n._kantoLifeLastGreet = now
-                  n._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+                  -- EXPERIMENTAL: mood colors the greeting
+                  local mood = getNpcMood(n)
+                  local moodPool = moodGreetings[mood]
+                  if moodPool and math.random() < 0.6 then
+                    n._kantoLifeCollisionBubbleText = moodPool[math.random(1, #moodPool)]
+                  else
+                    n._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+                  end
                   n._kantoLifeCollisionBubbleUntil = now + 2.0
                 end
               end
