@@ -345,6 +345,12 @@ return function(mod)
       routines:update(ow, 1)
       sleep:rebuild(true)
       sleep:update()
+      -- Spawn cross-map travelers whose destination is this map (paired
+      -- exit/entry: NPCs that left through a door to here appear at the
+      -- entrance connecting from their origin map).
+      if type(ambient.spawnTravelers) == "function" then
+        pcall(function() ambient:spawnTravelers() end)
+      end
     end
   end)
 

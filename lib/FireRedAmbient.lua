@@ -25,6 +25,43 @@ return function(ctx)
   local lastMap = nil
   local pendingPokemonBattle = nil
 
+  -- Cross-map traveler pool (Gen 3): when an NPC exits through a door/warp
+  -- to a DIFFERENT map, they are recorded here instead of being replaced on
+  -- the same map. When the player enters the destination map, the traveler
+  -- spawns at the entrance connecting from their origin map (paired exit/
+  -- entry). Same-map exits use the existing replacement logic unchanged.
+  -- travelers[destMapId] = { {graphicsId, isPoke, species, agenda, fromMap, timestamp}, ... }
+  local travelers = {}
+  local TRAVELER_EXPIRY = 600  -- seconds; discard if player never visits
+
+  local function pruneTravelers()
+    local now = os.time()
+    for destMap, list in pairs(travelers) do
+      local kept = {}
+      for _, t in ipairs(list) do
+        if now - (t.timestamp or 0) < TRAVELER_EXPIRY then
+          kept[#kept + 1] = t
+        end
+      end
+      if #kept > 0 then travelers[destMap] = kept
+      else travelers[destMap] = nil end
+    end
+  end
+
+  -- Resolve a warp/door definition to its destination map ID string.
+  local function warpDestMapId(warp)
+    if type(warp) ~= "table" then return nil end
+    if warp.destMap ~= nil then return tostring(warp.destMap) end
+    if warp.mapGroup ~= nil and warp.mapNum ~= nil then
+      local okCatalog, Catalog = pcall(require, "src.import.gba.map_catalog")
+      if okCatalog and Catalog and type(Catalog.mapIdFor) == "function" then
+        local ok, id = pcall(Catalog.mapIdFor, warp.mapGroup, warp.mapNum)
+        if ok and id ~= nil then return tostring(id) end
+      end
+    end
+    return nil
+  end
+
   -- Build pools from the active Gen3 profile's actual event-object constants.
   -- FRLG and Emerald use different graphics tables, so hard-coding FireRed
   -- ids here would silently show the wrong sprites on Emerald.
@@ -721,7 +758,7 @@ return function(ctx)
     return true
   end
 
-  function api:handleRoutineExit(npc, _, _, avoidX, avoidY)
+  function api:handleRoutineExit(npc, exitX, exitY, avoidX, avoidY)
     if type(npc) ~= "table" or npc.kantoLifeAmbient ~= true then return false end
     local ow = world()
     if not ow or not ow.map then return false end
@@ -730,6 +767,56 @@ return function(ctx)
     if not Objects or type(Objects.removeObject) ~= "function" then return false end
     local lid = tonumber(npc.localId or (npc.def and npc.def.localId))
     if not lid then return false end
+
+    -- Cross-map check: if the door/warp the NPC is exiting through leads to
+    -- a DIFFERENT map, record them as a traveler instead of doing same-map
+    -- replacement. They will spawn at the paired entrance when the player
+    -- enters the destination map.
+    local currentMapId = tostring(ow.map.gen3Id or ow.map.id or "")
+    do
+      local dx, dy = tonumber(exitX) or oldX, tonumber(exitY) or oldY
+      local destMapId = nil
+      -- Find the door at the exit coordinates and resolve its destination.
+      for _, d in ipairs(routineDoorCells(ow)) do
+        if d.x == dx and d.y == dy then
+          -- Route connections store destMap directly; warps resolve via def.
+          destMapId = d.destMap and tostring(d.destMap) or warpDestMapId(d.warp)
+          break
+        end
+      end
+      if destMapId and destMapId ~= "" and destMapId ~= currentMapId then
+        -- Cross-map exit: record traveler, remove NPC from this map.
+        local isPoke = npc.kantoLifePokemon == true
+        local gid = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
+        travelers[destMapId] = travelers[destMapId] or {}
+        table.insert(travelers[destMapId], {
+          graphicsId = gid,
+          isPoke = isPoke,
+          species = npc.kantoLifeSpecies,
+          agenda = npc._kantoLifeFRAgenda,
+          fromMap = currentMapId,
+          timestamp = os.time(),
+        })
+        pruneTravelers()
+        -- Remove the NPC (they went through the door to the other map).
+        -- Use the same Objects API as the same-map path below.
+        Objects._tracks[lid] = nil
+        Objects._byId[lid] = nil
+        for i = #Objects._order, 1, -1 do if tonumber(Objects._order[i]) == lid then table.remove(Objects._order, i) break end end
+        if Objects._defs then
+          for i = #Objects._defs, 1, -1 do
+            local d = Objects._defs[i]
+            if tonumber(d and (d.localId or d.index)) == lid then table.remove(Objects._defs, i) break end
+          end
+        end
+        spawned[lid] = nil
+        local okF, FieldView = pcall(require, "src.core.game3.field_view")
+        if okF and FieldView then FieldView._nativeDirty = true end
+        return true
+      end
+      -- Same map, unknown destination, or no door found: fall through to the
+      -- existing same-map replacement logic below (unchanged behavior).
+    end
 
     local replacement = chooseReplacementDoor(ow, oldX, oldY, avoidX, avoidY)
     if not replacement then return false end
@@ -796,6 +883,71 @@ return function(ctx)
     local okF, FieldView = pcall(require, "src.core.game3.field_view")
     if okF and FieldView then FieldView._nativeDirty = true end
     return true
+  end
+
+  -- Spawn pending travelers when the player enters their destination map.
+  -- Each traveler appears at the entrance (door/warp) that connects back to
+  -- their origin map, creating the paired exit/entry effect. Called from the
+  -- map.entered event in FireRedMain.
+  function api:spawnTravelers()
+    local ow = world()
+    if not ow or not ow.map then return end
+    local mapId = tostring(ow.map.gen3Id or ow.map.id or "")
+    if mapId == "" then return end
+    local pending = travelers[mapId]
+    if not pending or #pending == 0 then return end
+    pruneTravelers()
+    pending = travelers[mapId]
+    if not pending or #pending == 0 then return end
+
+    -- Build entrance lookup: for each door on THIS map, which map does it
+    -- lead to? The traveler came from `fromMap`, so they appear at the door
+    -- that connects this map back to fromMap.
+    local entrances = {}  -- fromMapId -> {x, y, door}
+    for _, d in ipairs(routineDoorCells(ow)) do
+      local dest = d.destMap and tostring(d.destMap) or warpDestMapId(d.warp)
+      if dest and dest ~= "" and entrances[dest] == nil then
+        entrances[dest] = d
+      end
+    end
+
+    local remaining = {}
+    for _, t in ipairs(pending) do
+      local entrance = entrances[t.fromMap]
+      if entrance then
+        -- Spawn adjacent to the entrance (not on top of it), using the same
+        -- interiorCell logic as same-map replacements.
+        local sx, sy = interiorCell(ow, entrance)
+        local npc = newObject(sx or entrance.x, sy or entrance.y, nil,
+          t.graphicsId, t.isPoke, t.species)
+        if npc then
+          npc.frozen = false
+          npc.hidden = false
+          npc.visible = true
+          npc.moving = false
+          npc.scriptBusy = false
+          npc._kantoLifeRoutineArrival = true
+          npc._kantoLifeFRForceRoutine = true
+          npc._kantoLifeFRArrivalDoorX = entrance.x
+          npc._kantoLifeFRArrivalDoorY = entrance.y
+          npc._kantoLifeFRLastDoorX = entrance.x
+          npc._kantoLifeFRLastDoorY = entrance.y
+          npc._kantoLifeFRAnchorX = sx or entrance.x
+          npc._kantoLifeFRAnchorY = sy or entrance.y
+          if t.agenda then npc._kantoLifeFRAgenda = true end
+        else
+          remaining[#remaining + 1] = t
+        end
+      else
+        -- No entrance from this origin on the current map layout; keep the
+        -- traveler for a later visit (map data may differ by entrance).
+        remaining[#remaining + 1] = t
+      end
+    end
+    if #remaining > 0 then travelers[mapId] = remaining
+    else travelers[mapId] = nil end
+    local okF, FieldView = pcall(require, "src.core.game3.field_view")
+    if okF and FieldView then FieldView._nativeDirty = true end
   end
 
   function api:update()
