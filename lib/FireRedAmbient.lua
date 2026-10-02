@@ -1242,6 +1242,39 @@ return function(ctx)
                       spawned._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
                     end
                   end
+                  -- EXPERIMENTAL: random sneezes — nearby NPCs say "Bless you!"
+                  if thought ~= "*yawn*" and math.random() < 0.02 then
+                    local lastSneeze = tonumber(npc._kantoLifeLastSneeze) or 0
+                    if now - lastSneeze > 300 then
+                      npc._kantoLifeLastSneeze = now
+                      npc._kantoLifeCollisionBubbleText = "Achoo!"
+                      npc._kantoLifeCollisionBubbleUntil = now + 1.5
+                      local sx, sy = tonumber(npc.cellX), tonumber(npc.cellY)
+                      if sx and sy then
+                        for lid2, _ in pairs(spawned) do
+                          if lid2 ~= "_kantoLifeLastChatScan" and lid2 ~= "_kantoLifePlayerLastX"
+                             and lid2 ~= "_kantoLifePlayerLastY" and lid2 ~= "_kantoLifeLastMapId"
+                             and lid2 ~= "_kantoLifeLastGroupScan" and lid2 ~= "_kantoLifeRecentYawn"
+                             and lid2 ~= "_kantoLifePlayerStillSince" and lid2 ~= "_kantoLifeVisitedMaps" then
+                            local other = Objects._byId and Objects._byId[lid2]
+                            if other and other ~= npc and other.kantoLifeAmbient and not other.moving then
+                              local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+                              if ox and oy then
+                                local odist = math.abs(ox - sx) + math.abs(oy - sy)
+                                if odist <= 3 and odist > 0 and math.random() < 0.7 then
+                                  local obubble = tonumber(other._kantoLifeCollisionBubbleUntil) or 0
+                                  if obubble <= now then
+                                    other._kantoLifeCollisionBubbleText = "Bless you!"
+                                    other._kantoLifeCollisionBubbleUntil = now + 1.5
+                                  end
+                                end
+                              end
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
                 end
               end
             end

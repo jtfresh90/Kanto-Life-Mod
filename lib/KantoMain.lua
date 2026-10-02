@@ -3274,6 +3274,38 @@ local nm = storyDisplayName(talker)
                       world._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
                     end
                   end
+                  -- EXPERIMENTAL: random sneezes — 2% chance, nearby NPCs say
+                  -- "Bless you!" (5-min cooldown per NPC).
+                  if thought ~= "*yawn*" and math.random() < 0.02 then
+                    local lastSneeze = tonumber(n._kantoLifeLastSneeze) or 0
+                    if now - lastSneeze > 300 then
+                      n._kantoLifeLastSneeze = now
+                      n._kantoLifeCollisionBubbleText = "Achoo!"
+                      n._kantoLifeCollisionBubbleUntil = now + 1.5
+                      -- Nearby NPCs bless you
+                      local sx, sy = tonumber(n.cellX), tonumber(n.cellY)
+                      if sx and sy then
+                        for _, other in ipairs(world.npcs or {}) do
+                          if other ~= n then
+                            local d2 = other.def or {}
+                            if d2.kantoLifeAmbient and not other.nightlifeSleeping and not other.moving then
+                              local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+                              if ox and oy then
+                                local odist = math.abs(ox - sx) + math.abs(oy - sy)
+                                if odist <= 3 and odist > 0 and math.random() < 0.7 then
+                                  local obubble = tonumber(other._kantoLifeCollisionBubbleUntil) or 0
+                                  if obubble <= now then
+                                    other._kantoLifeCollisionBubbleText = "Bless you!"
+                                    other._kantoLifeCollisionBubbleUntil = now + 1.5
+                                  end
+                                end
+                              end
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
                 end
               end
             end
