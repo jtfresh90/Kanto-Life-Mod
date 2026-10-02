@@ -411,6 +411,11 @@ return function(ctx)
   local function pathFirst(world, npc, tx, ty)
     local map = world and world.map
     if not map then return nil end
+    -- Defensive: coerce table targets to coordinates (same guard as
+    -- KantoRoutines/JohtoRoutines).
+    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
+    tx, ty = tonumber(tx), tonumber(ty)
+    if tx == nil or ty == nil then return nil end
     local sx, sy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
     if sx == tx and sy == ty then return nil end
     if type(map.isWalkableCell) ~= "function" then
