@@ -5035,9 +5035,9 @@ local function nightlifeTick(world, dt)
             end
           end
         end
-        local headOffsetX = sign * -5
-        local zModel = Mat4.mul(
-          Mat4.translate(px + headOffsetX, gh + 17, py + 8),
+        local headOffsetX, zt = sign * -5, ((love and love.timer and love.timer.getTime and love.timer.getTime()) or 0)
+        local rise = ((zt * 0.75) % 2.0) * 8; local zModel = Mat4.mul(
+          Mat4.translate(px + headOffsetX, gh + 17 + rise, py + 8),
           Mat4.rotateY(zyaw)
         )
         if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
