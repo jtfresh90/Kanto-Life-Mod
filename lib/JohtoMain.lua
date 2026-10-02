@@ -2710,6 +2710,12 @@ function isVoxelPresentation()
 
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
     local function drawSleepAccessory(self, ox, oy, scale)
+      -- Voxel mode: the bed/tent/bag prop is drawn by drawGoldSleep (voxel
+      -- overlay via Voxel3D.project). The 2D transform below uses camera
+      -- offsets that are meaningless in voxel space, producing a tiny
+      -- misplaced prop (user screenshot: bed at top-left instead of on
+      -- the sleeper). Skip here to avoid double-drawing.
+      if isVoxelPresentation() then return end
       local style = math.floor(tonumber(opt("sleep_style")) or 0)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
