@@ -2998,6 +2998,40 @@ local nm = storyDisplayName(talker)
       local ok, err = pcall(function() kantoRoutines.update(world, dt or 0, false) end)
       if not ok then mod.log:error("Kanto Life routines update: %s", tostring(err)) end
     end
+    -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
+    -- with a brief bubble when walked past (not sleeping, cooldown per NPC).
+    pcall(function()
+      local player = world.player
+      if not player then return end
+      local px, py = tonumber(player.cellX), tonumber(player.cellY)
+      if not px or not py then return end
+      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      local greetings = {
+        "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
+        "Morning!", "Afternoon!", "Evening!",
+      }
+      for _, n in ipairs(world.npcs or {}) do
+        local d = n.def or {}
+        if d.kantoLifeAmbient and not n.nightlifeSleeping then
+          -- Skip if already showing a bubble (traveler greeting, collision, etc.)
+          local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+          if bubbleUntil <= now then
+            local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+            if nx and ny then
+              local dist = math.abs(nx - px) + math.abs(ny - py)
+              if dist <= 3 and dist > 0 then
+                local lastGreet = tonumber(n._kantoLifeLastGreet) or 0
+                if now - lastGreet > 30 then  -- 30s cooldown per NPC
+                  n._kantoLifeLastGreet = now
+                  n._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+                  n._kantoLifeCollisionBubbleUntil = now + 2.0
+                end
+              end
+            end
+          end
+        end
+      end
+    end)
   end
 
   -- Forward declaration: bakeSleepSprite can trigger a rebake on sleep-style

@@ -1727,6 +1727,39 @@ return function(mod)
           end
         end
       end
+      -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
+      -- with a brief bubble when walked past (not sleeping, cooldown per NPC).
+      pcall(function()
+        local player = world.player
+        if not player then return end
+        local px, py = tonumber(player.cellX), tonumber(player.cellY)
+        if not px or not py then return end
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        local greetings = {
+          "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
+          "Morning!", "Afternoon!", "Evening!",
+        }
+        for _, npc in ipairs(world.npcs or {}) do
+          local d = npc.def or {}
+          if d.johtoLifeAmbient and not npc.nightlifeSleeping then
+            local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+            if bubbleUntil <= now then
+              local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+              if nx and ny then
+                local dist = math.abs(nx - px) + math.abs(ny - py)
+                if dist <= 3 and dist > 0 then
+                  local lastGreet = tonumber(npc._kantoLifeLastGreet) or 0
+                  if now - lastGreet > 30 then
+                    npc._kantoLifeLastGreet = now
+                    npc._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+                    npc._kantoLifeCollisionBubbleUntil = now + 2.0
+                  end
+                end
+              end
+            end
+          end
+        end
+      end)
       local function sleepSafeCell(world, npc)
         local map = world and world.map
         if not map or not npc then return false end

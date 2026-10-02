@@ -967,6 +967,40 @@ return function(ctx)
     local map = ow.map
     local mapId = map.gen3Id or map.id
     if mapId ~= lastMap then self:rebuild(true) end
+    -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
+    -- with a brief bubble when walked past (cooldown per NPC).
+    pcall(function()
+      local Player = engine("src.core.game3.player")
+      local Objects = engine("src.core.game3.objects")
+      if not Player or not Objects then return end
+      local px, py = tonumber(Player.cellX), tonumber(Player.cellY)
+      if not px or not py then return end
+      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      local greetings = {
+        "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
+        "Morning!", "Afternoon!", "Evening!",
+      }
+      for lid, _ in pairs(spawned) do
+        local npc = Objects._byId and Objects._byId[lid]
+        if npc and npc.kantoLifeAmbient then
+          local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+          if bubbleUntil <= now then
+            local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+            if nx and ny then
+              local dist = math.abs(nx - px) + math.abs(ny - py)
+              if dist <= 3 and dist > 0 then
+                local lastGreet = tonumber(npc._kantoLifeLastGreet) or 0
+                if now - lastGreet > 30 then
+                  npc._kantoLifeLastGreet = now
+                  npc._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
+                  npc._kantoLifeCollisionBubbleUntil = now + 2.0
+                end
+              end
+            end
+          end
+        end
+      end
+    end)
   end
 
   function api:clear() clear(); lastMap = nil end
