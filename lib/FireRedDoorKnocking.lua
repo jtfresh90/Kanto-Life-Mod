@@ -3,6 +3,8 @@
 -- through that exact door is allowed once.  Walking through without knocking
 -- still lets FireRed perform the normal door transition; immediately after
 -- arrival the visitor is told to knock and is sent back outside.
+-- Knocking applies to houses only: marts, Poke Centers, gyms and other
+-- non-house buildings always allow free entry without knocking.
 return function(ctx)
   local mod = ctx.mod
   local getOption = ctx.getOption
@@ -33,17 +35,33 @@ return function(ctx)
     return ok and value or nil
   end
 
+  -- House-only classification for door knocking.  Known service/non-house
+  -- interiors (marts, Poke Centers, gyms, dept stores, labs, ...) are excluded
+  -- by name first; only actual house names ("HOUSE", "HOME", "PLAYERS_HOUSE",
+  -- ...) count as houses.  This mirrors Yellow's name-based resident() in
+  -- lib/KantoMain.lua.  The old "every indoor map is a house" isOutdoors
+  -- fallback is intentionally gone: it made every mart, center and gym
+  -- require knocking.
+  local NON_HOUSE_PATTERNS = {
+    "MART", "POKECENTER", "POKE_CENTER", "POKEMON_CENTER", "CENTER",
+    "GYM", "DEPT", "LAB", "MUSEUM", "GAME_CORNER", "HOTEL",
+    "RESTAURANT", "SCHOOL", "DAYCARE", "POWER_PLANT", "SAFARI",
+    "SILPH", "ROCKET", "MANSION", "SHIP", "DOCK", "GATE",
+    "TOWER", "CAVE", "TUNNEL",
+  }
+  local HOUSE_PATTERNS = {
+    "PLAYERS_HOUSE", "RIVALS_HOUSE", "HOUSE", "_HOME", "HOME_",
+  }
   local function houseMap(id)
     local s = string.upper(tostring(id or ""))
-    if s:find("HOUSE", 1, true) ~= nil or s:find("PLAYERS_HOUSE", 1, true) ~= nil then return true end
-    -- Emerald/RSE does not use FireRed's HOUSE-only naming for every interior.
-    -- Use the active map's actual field-family classification when available.
-    local Map = engine("src.core.game3.map")
-    local FieldMoves = engine("src.core.game3.field_moves")
-    local def = Map and Map.currentDef and Map.currentDef()
-    if def and FieldMoves and type(FieldMoves.isOutdoors) == "function" then
-      local ok, out = pcall(FieldMoves.isOutdoors, def.mapType)
-      if ok then return not out end
+    if s == "" then return false end
+    -- Service and non-residential interiors never count as houses, even if a
+    -- map id happens to combine a service word with a house-like word.
+    for _, pattern in ipairs(NON_HOUSE_PATTERNS) do
+      if s:find(pattern, 1, true) ~= nil then return false end
+    end
+    for _, pattern in ipairs(HOUSE_PATTERNS) do
+      if s:find(pattern, 1, true) ~= nil then return true end
     end
     return false
   end
@@ -92,6 +110,9 @@ return function(ctx)
     if modalActive then return true end
     local info = doorInfo(game)
     if not info then return false end
+    -- Knocking is for houses only.  Marts, Poke Centers, gyms and other
+    -- non-house buildings keep FireRed's normal free entry.
+    if not houseMap(info.destMap) then return false end
     modalActive = true
     suppressAUntilRelease = true
     local doorKey = key(game, info)
