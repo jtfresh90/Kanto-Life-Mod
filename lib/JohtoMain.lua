@@ -2019,6 +2019,16 @@ return function(mod)
                 pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
                 npc.johtoLifeSleepFacing = nil
               end
+              -- EXPERIMENTAL: wake-up stretch
+              pcall(function()
+                local nowW = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+                local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
+                local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                if bubbleUntil <= nowW then
+                  npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
+                  npc._kantoLifeCollisionBubbleUntil = nowW + 2.0
+                end
+              end)
             end
           end
         end
