@@ -878,6 +878,35 @@ return function(mod)
       timestamp = os.time(),
     })
     pruneJohtoTravelers()
+    -- EXPERIMENTAL: farewell waves — nearby NPCs wave goodbye to the
+    -- departing traveler.
+    pcall(function()
+      if not npc then return end
+      local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+      if not nx or not ny then return end
+      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      local farewells = { "Bye!", "See ya!", "Safe travels!", "Take care!", "Bye-bye!" }
+      local waved = 0
+      for _, other in ipairs(world.npcs or {}) do
+        if other ~= npc and waved < 3 then
+          local d2 = other.def or {}
+          if d2.johtoLifeAmbient and not other.nightlifeSleeping and not other.moving then
+            local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+            if ox and oy then
+              local dist = math.abs(ox - nx) + math.abs(oy - ny)
+              if dist <= 3 and dist > 0 then
+                local bubbleUntil = tonumber(other._kantoLifeCollisionBubbleUntil) or 0
+                if bubbleUntil <= now then
+                  other._kantoLifeCollisionBubbleText = farewells[math.random(1, #farewells)]
+                  other._kantoLifeCollisionBubbleUntil = now + 2.0
+                  waved = waved + 1
+                end
+              end
+            end
+          end
+        end
+      end
+    end)
     if npc and npc.id and world and type(world.removeNpc) == "function" then
       pcall(world.removeNpc, world, npc.id)
     end
