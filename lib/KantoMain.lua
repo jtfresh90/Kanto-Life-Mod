@@ -3115,11 +3115,16 @@ local nm = storyDisplayName(talker)
       -- and running (for startled reactions).
       local playerStill = false
       local playerRunning = false
+      local playerIdleLong = false  -- EXPERIMENTAL: player still for 30+s
       local lastPX = tonumber(world._kantoLifePlayerLastX)
       local lastPY = tonumber(world._kantoLifePlayerLastY)
       if lastPX == px and lastPY == py then
         playerStill = true
+        -- Track how long player has been still
+        local stillSince = tonumber(world._kantoLifePlayerStillSince) or now
+        if now - stillSince > 30 then playerIdleLong = true end
       else
+        world._kantoLifePlayerStillSince = now
         if lastPX and lastPY then
           local moved = math.abs(px - lastPX) + math.abs(py - lastPY)
           if moved >= 2 then playerRunning = true end
@@ -3145,6 +3150,25 @@ local nm = storyDisplayName(talker)
                   face = dy > 0 and "down" or "up"
                 end
                 if face and n.facing ~= face then n.facing = face end
+              end
+            end
+          end
+          -- EXPERIMENTAL: idle curiosity — if you've stood still for 30+s,
+          -- nearby NPCs notice and show "?" (5-min cooldown per NPC).
+          if playerIdleLong and not n.moving then
+            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
+            if nx0 and ny0 then
+              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+              if pdist <= 4 and pdist > 0 then
+                local lastCurious = tonumber(n._kantoLifeLastCurious) or 0
+                if now - lastCurious > 300 then  -- 5-min cooldown
+                  n._kantoLifeLastCurious = now
+                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                  if bubbleUntil <= now then
+                    n._kantoLifeCollisionBubbleText = "?"
+                    n._kantoLifeCollisionBubbleUntil = now + 1.5
+                  end
+                end
               end
             end
           end
