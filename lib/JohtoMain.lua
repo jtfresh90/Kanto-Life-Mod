@@ -2499,8 +2499,8 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
       end
 
       local name = tostring(d.name or "")
-      local pool = name:find("ROUTE", 1, true) and routeLines or lines
-      local text = pool[love.math.random(1, #pool)]
+      local pool = name:find("ROUTE", 1, true) and routeLines or lines; --[[ Per-NPC dialogue history: skip last 5 lines per NPC per pool; resets when all used. ]]; local rh = st.recentLines; if type(rh) ~= "table" then rh = {}; st.recentLines = rh end; local rk = (name:find("ROUTE", 1, true) and "route" or "town"); local hst = rh[rk]; if type(hst) ~= "table" then hst = {}; rh[rk] = hst end; local avail = {}; for i = 1, #pool do local used = false; for _, v in ipairs(hst) do if v == i then used = true; break end end; if not used then avail[#avail + 1] = i end end; if #avail == 0 then hst = {}; rh[rk] = hst; for i = 1, #pool do avail[i] = i end end; local pi = avail[love.math.random(1, #avail)]; hst[#hst + 1] = pi; while #hst > 5 do table.remove(hst, 1) end; putTalkState(key, st, all)
+      local text = pool[pi]
       local ref = eventRefLine(st, false)
       if ref and st.count > 5 and love.math.random() < 0.5 then
         text = ref
