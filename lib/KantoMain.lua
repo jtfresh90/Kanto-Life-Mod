@@ -3030,13 +3030,19 @@ local nm = storyDisplayName(talker)
       }
       local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
       local dirs = { "up", "down", "left", "right" }
-      -- EXPERIMENTAL: track if the player is standing still (for face-the-player)
+      -- EXPERIMENTAL: track player movement — stillness (for face-the-player)
+      -- and running (for startled reactions).
       local playerStill = false
+      local playerRunning = false
       local lastPX = tonumber(world._kantoLifePlayerLastX)
       local lastPY = tonumber(world._kantoLifePlayerLastY)
       if lastPX == px and lastPY == py then
         playerStill = true
       else
+        if lastPX and lastPY then
+          local moved = math.abs(px - lastPX) + math.abs(py - lastPY)
+          if moved >= 2 then playerRunning = true end
+        end
         world._kantoLifePlayerLastX = px
         world._kantoLifePlayerLastY = py
       end
@@ -3058,6 +3064,33 @@ local nm = storyDisplayName(talker)
                   face = dy > 0 and "down" or "up"
                 end
                 if face and n.facing ~= face then n.facing = face end
+              end
+            end
+          end
+          -- EXPERIMENTAL: startled reaction — NPCs notice when you sprint past.
+          if playerRunning and not n.moving then
+            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
+            if nx0 and ny0 then
+              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+              if pdist <= 2 and pdist > 0 then
+                local lastStartle = tonumber(n._kantoLifeLastStartle) or 0
+                if now - lastStartle > 15 then  -- 15s cooldown
+                  n._kantoLifeLastStartle = now
+                  local bubbleUntil2 = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                  if bubbleUntil2 <= now then
+                    n._kantoLifeCollisionBubbleText = "!"
+                    n._kantoLifeCollisionBubbleUntil = now + 1.0
+                  end
+                  -- Turn to face the runner
+                  local dx, dy = px - nx0, py - ny0
+                  local face
+                  if math.abs(dx) >= math.abs(dy) then
+                    face = dx > 0 and "right" or "left"
+                  else
+                    face = dy > 0 and "down" or "up"
+                  end
+                  if face then n.facing = face end
+                end
               end
             end
           end

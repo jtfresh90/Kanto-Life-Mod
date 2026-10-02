@@ -1759,13 +1759,19 @@ return function(mod)
         }
         local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
         local dirs = { "up", "down", "left", "right" }
-        -- EXPERIMENTAL: track if the player is standing still (for face-the-player)
+        -- EXPERIMENTAL: track player movement — stillness (for face-the-player)
+        -- and running (for startled reactions).
         local playerStill = false
+        local playerRunning = false
         local lastPX = tonumber(world._kantoLifePlayerLastX)
         local lastPY = tonumber(world._kantoLifePlayerLastY)
         if lastPX == px and lastPY == py then
           playerStill = true
         else
+          if lastPX and lastPY then
+            local moved = math.abs(px - lastPX) + math.abs(py - lastPY)
+            if moved >= 2 then playerRunning = true end
+          end
           world._kantoLifePlayerLastX = px
           world._kantoLifePlayerLastY = py
         end
@@ -1787,6 +1793,32 @@ return function(mod)
                     face = dy > 0 and "down" or "up"
                   end
                   if face and npc.facing ~= face then npc.facing = face end
+                end
+              end
+            end
+            -- EXPERIMENTAL: startled reaction — NPCs notice when you sprint past.
+            if playerRunning and not npc.moving then
+              local nx0, ny0 = tonumber(npc.cellX), tonumber(npc.cellY)
+              if nx0 and ny0 then
+                local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+                if pdist <= 2 and pdist > 0 then
+                  local lastStartle = tonumber(npc._kantoLifeLastStartle) or 0
+                  if now - lastStartle > 15 then
+                    npc._kantoLifeLastStartle = now
+                    local bubbleUntil2 = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                    if bubbleUntil2 <= now then
+                      npc._kantoLifeCollisionBubbleText = "!"
+                      npc._kantoLifeCollisionBubbleUntil = now + 1.0
+                    end
+                    local dx, dy = px - nx0, py - ny0
+                    local face
+                    if math.abs(dx) >= math.abs(dy) then
+                      face = dx > 0 and "right" or "left"
+                    else
+                      face = dy > 0 and "down" or "up"
+                    end
+                    if face then npc.facing = face end
+                  end
                 end
               end
             end

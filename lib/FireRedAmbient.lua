@@ -999,14 +999,19 @@ return function(ctx)
         night = { "...", "*yawn*", "Hmm.", "*yawn*", "So sleepy..." },
       }
       local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
-      -- EXPERIMENTAL: track if the player is standing still (for face-the-player)
-      -- Stored on spawned table metadata.
+      -- EXPERIMENTAL: track player movement — stillness (for face-the-player)
+      -- and running (for startled reactions). Stored on spawned table metadata.
       local playerStill = false
+      local playerRunning = false
       local lastPX = tonumber(spawned._kantoLifePlayerLastX)
       local lastPY = tonumber(spawned._kantoLifePlayerLastY)
       if lastPX == px and lastPY == py then
         playerStill = true
       else
+        if lastPX and lastPY then
+          local moved = math.abs(px - lastPX) + math.abs(py - lastPY)
+          if moved >= 2 then playerRunning = true end
+        end
         spawned._kantoLifePlayerLastX = px
         spawned._kantoLifePlayerLastY = py
       end
@@ -1029,6 +1034,32 @@ return function(ctx)
                   faceDir = dy > 0 and 0 or 1  -- down : up
                 end
                 if npc.setDirection then pcall(npc.setDirection, npc, faceDir) end
+              end
+            end
+          end
+          -- EXPERIMENTAL: startled reaction — NPCs notice when you sprint past.
+          if playerRunning and not npc.moving then
+            local nx0, ny0 = tonumber(npc.cellX), tonumber(npc.cellY)
+            if nx0 and ny0 then
+              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+              if pdist <= 2 and pdist > 0 then
+                local lastStartle = tonumber(npc._kantoLifeLastStartle) or 0
+                if now - lastStartle > 15 then
+                  npc._kantoLifeLastStartle = now
+                  local bubbleUntil2 = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                  if bubbleUntil2 <= now then
+                    npc._kantoLifeCollisionBubbleText = "!"
+                    npc._kantoLifeCollisionBubbleUntil = now + 1.0
+                  end
+                  local dx, dy = px - nx0, py - ny0
+                  local faceDir
+                  if math.abs(dx) >= math.abs(dy) then
+                    faceDir = dx > 0 and 3 or 2
+                  else
+                    faceDir = dy > 0 and 0 or 1
+                  end
+                  if npc.setDirection then pcall(npc.setDirection, npc, faceDir) end
+                end
               end
             end
           end
