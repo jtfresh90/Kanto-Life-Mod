@@ -999,9 +999,39 @@ return function(ctx)
         night = { "...", "*yawn*", "Hmm.", "*yawn*", "So sleepy..." },
       }
       local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
+      -- EXPERIMENTAL: track if the player is standing still (for face-the-player)
+      -- Stored on spawned table metadata.
+      local playerStill = false
+      local lastPX = tonumber(spawned._kantoLifePlayerLastX)
+      local lastPY = tonumber(spawned._kantoLifePlayerLastY)
+      if lastPX == px and lastPY == py then
+        playerStill = true
+      else
+        spawned._kantoLifePlayerLastX = px
+        spawned._kantoLifePlayerLastY = py
+      end
       for lid, _ in pairs(spawned) do
+        if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX" and lid ~= "_kantoLifePlayerLastY" then
         local npc = Objects._byId and Objects._byId[lid]
         if npc and npc.kantoLifeAmbient then
+          -- EXPERIMENTAL: face the player — idle NPCs turn to look at you
+          -- when you stand still nearby. Gen3 dirs: 0=down,1=up,2=left,3=right.
+          if playerStill and not npc.moving then
+            local nx0, ny0 = tonumber(npc.cellX), tonumber(npc.cellY)
+            if nx0 and ny0 then
+              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+              if pdist <= 2 and pdist > 0 then
+                local dx, dy = px - nx0, py - ny0
+                local faceDir
+                if math.abs(dx) >= math.abs(dy) then
+                  faceDir = dx > 0 and 3 or 2  -- right : left
+                else
+                  faceDir = dy > 0 and 0 or 1  -- down : up
+                end
+                if npc.setDirection then pcall(npc.setDirection, npc, faceDir) end
+              end
+            end
+          end
           local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
           if bubbleUntil <= now then
             local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -1033,6 +1063,7 @@ return function(ctx)
               end
             end
           end
+        end
         end
       end
     end)

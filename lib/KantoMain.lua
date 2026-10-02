@@ -3030,9 +3030,37 @@ local nm = storyDisplayName(talker)
       }
       local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
       local dirs = { "up", "down", "left", "right" }
+      -- EXPERIMENTAL: track if the player is standing still (for face-the-player)
+      local playerStill = false
+      local lastPX = tonumber(world._kantoLifePlayerLastX)
+      local lastPY = tonumber(world._kantoLifePlayerLastY)
+      if lastPX == px and lastPY == py then
+        playerStill = true
+      else
+        world._kantoLifePlayerLastX = px
+        world._kantoLifePlayerLastY = py
+      end
       for _, n in ipairs(world.npcs or {}) do
         local d = n.def or {}
         if d.kantoLifeAmbient and not n.nightlifeSleeping then
+          -- EXPERIMENTAL: face the player — idle NPCs turn to look at you
+          -- when you stand still nearby.
+          if playerStill and not n.moving then
+            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
+            if nx0 and ny0 then
+              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
+              if pdist <= 2 and pdist > 0 then
+                local dx, dy = px - nx0, py - ny0
+                local face
+                if math.abs(dx) >= math.abs(dy) then
+                  face = dx > 0 and "right" or "left"
+                else
+                  face = dy > 0 and "down" or "up"
+                end
+                if face and n.facing ~= face then n.facing = face end
+              end
+            end
+          end
           -- Skip if already showing a bubble (traveler greeting, collision, etc.)
           local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
           if bubbleUntil <= now then
