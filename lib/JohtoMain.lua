@@ -2985,7 +2985,10 @@ function isVoxelPresentation()
         VoxelScene = V.require("VoxelScene")
       end
       if not (Voxel3D and BA and BV and Pipelines) then
-        mod.log:warn("Johto Life: Gold battle sleep overlay unavailable (engine modules missing)")
+        -- Silently skip: the voxel sleep overlay needs a Gen 2 voxel mod
+        -- (BATTLE_ART_VOXEL_GEN2) which isn't installed. The baked sleeper
+        -- sprite still renders correctly; only the animated Zzz overlay is
+        -- unavailable. No warning: this is an expected configuration, not a bug.
         return
       end
 
