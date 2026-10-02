@@ -13,6 +13,9 @@ return function(mod)
   -- DIFFERENT map, they are recorded here instead of being replaced on the
   -- same map. When the player enters the destination map, the traveler
   -- spawns at the entrance connecting from their origin map.
+  -- Combinatorial dialogue generator: unique lines via template+slot
+  -- expansion with per-NPC history (see lib/DialogueGen.lua).
+  local DialogueGen = loadBundled("lib/DialogueGen.lua")
   -- travelers[destMapId] = { {sprite, name, gender, agenda, fromMap, timestamp}, ... }
   local travelers = {}
   local TRAVELER_EXPIRY = 600  -- seconds; discard if player never visits
@@ -4348,8 +4351,28 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
 
     local name = tostring(d.name or "")
     local route = name:match("^KANTO_ROUTE") or name:match("^JOHTO_")
-    local pool = route and routeLines or lines
-    local text = pool[love.math.random(1, #pool)]
+    -- Unique dialogue: combinatorial generator with per-NPC history.
+    -- Falls back to the static pool if the generator is unavailable.
+    local text
+    if DialogueGen and type(DialogueGen.generate) == "function" then
+      local genOk, genLine, genHistory = pcall(DialogueGen.generate, {
+        npcName = display,
+        gender = d.kantoLifeGender,
+        agenda = npc._kantoLifeAgenda,
+        gen = 1,
+        dex = POKE_SPECIES,
+        isPoke = false,
+        recentLines = st.recentLines,
+      })
+      if genOk and type(genLine) == "string" and genLine ~= "" then
+        text = genLine
+        st.recentLines = genHistory
+      end
+    end
+    if not text then
+      local pool = route and routeLines or lines
+      text = pool[love.math.random(1, #pool)]
+    end
     local ref = eventRefLine(st, false)
     if ref and st.count > 5 and love.math.random() < 0.5 then
       text = ref

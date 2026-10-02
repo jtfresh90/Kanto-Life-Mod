@@ -939,6 +939,9 @@ return function(mod)
   end
 
   local JohtoRoutines, johtoRoutineErr = loadBundled("lib/JohtoRoutines.lua")
+  -- Combinatorial dialogue generator: unique lines via template+slot
+  -- expansion with per-NPC history (see lib/DialogueGen.lua).
+  local DialogueGen = loadBundled("lib/DialogueGen.lua")
   local johtoRoutines = nil
   if type(JohtoRoutines) == "function" then
     local ok, instance = pcall(JohtoRoutines, {
@@ -2614,7 +2617,29 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
 
       local name = tostring(d.name or "")
       local pool = name:find("ROUTE", 1, true) and routeLines or lines
-      local text = pool[love.math.random(1, #pool)]
+      -- Unique dialogue: combinatorial generator with per-NPC history.
+      -- Falls back to the static pool if the generator is unavailable.
+      local text
+      if DialogueGen and type(DialogueGen.generate) == "function" then
+        local dexPool = nil
+        pcall(function() dexPool = fullDexSpecies() end)
+        local genOk, genLine, genHistory = pcall(DialogueGen.generate, {
+          npcName = display,
+          gender = d.johtoLifeGender,
+          agenda = npc._johtoLifeAgenda,
+          gen = 2,
+          dex = dexPool,
+          isPoke = false,
+          recentLines = st.recentLines,
+        })
+        if genOk and type(genLine) == "string" and genLine ~= "" then
+          text = genLine
+          st.recentLines = genHistory
+        end
+      end
+      if not text then
+        text = pool[love.math.random(1, #pool)]
+      end
       local ref = eventRefLine(st, false)
       if ref and st.count > 5 and love.math.random() < 0.5 then
         text = ref
