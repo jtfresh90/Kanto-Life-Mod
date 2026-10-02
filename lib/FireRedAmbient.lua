@@ -978,11 +978,27 @@ return function(ctx)
       local px, py = tonumber(Player.cellX), tonumber(Player.cellY)
       if not px or not py then return end
       local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-      local greetings = {
-        "Hey!", "Hi there!", "Hello!", "Yo!", "Hey there!",
-        "Morning!", "Afternoon!", "Evening!",
+      -- EXPERIMENTAL: time-of-day awareness — greetings shift with the clock.
+      local hour = tonumber(os.date("%H")) or 12
+      local timeOfDay
+      if hour >= 5 and hour < 12 then timeOfDay = "morning"
+      elseif hour >= 12 and hour < 18 then timeOfDay = "afternoon"
+      elseif hour >= 18 and hour < 22 then timeOfDay = "evening"
+      else timeOfDay = "night" end
+      local greetingsByTime = {
+        morning = { "Morning!", "Good morning!", "Hey!", "Hi there!", "Rise and shine!" },
+        afternoon = { "Afternoon!", "Hey there!", "Hi!", "Yo!", "How's it going?" },
+        evening = { "Evening!", "Hey!", "Hi there!", "Good evening!", "Yo!" },
+        night = { "Oh, hi.", "Evening...", "*yawn* Hey.", "Hey...", "Still up?" },
       }
-      local idleThoughts = { "...", "Hmm.", "*yawn*", "*stretch*", "La la..." }
+      local greetings = greetingsByTime[timeOfDay] or greetingsByTime.afternoon
+      local idleThoughtsByTime = {
+        morning = { "...", "Hmm.", "*stretch*", "What a day!", "La la..." },
+        afternoon = { "...", "Hmm.", "La la...", "Nice weather.", "*stretch*" },
+        evening = { "...", "Hmm.", "La la...", "What a day.", "*sigh*" },
+        night = { "...", "*yawn*", "Hmm.", "*yawn*", "So sleepy..." },
+      }
+      local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
       for lid, _ in pairs(spawned) do
         local npc = Objects._byId and Objects._byId[lid]
         if npc and npc.kantoLifeAmbient then
