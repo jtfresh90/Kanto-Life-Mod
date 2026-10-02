@@ -338,7 +338,7 @@ return function(ctx)
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
       love.graphics.push(); love.graphics.translate(12 + shiftX,12)
       if style ~= 1 then love.graphics.rotate(angle) end
-      love.graphics.translate(-aw/2,-ah/2)
+      if style == 1 then local ts=math.max(24/aw,24/ah); love.graphics.scale(ts,ts) end; love.graphics.translate(-aw/2,-ah/2)
       love.graphics.draw(accessory,0,0); love.graphics.pop()
     end
     love.graphics.setCanvas(previous); love.graphics.setColor(1,1,1,1)
