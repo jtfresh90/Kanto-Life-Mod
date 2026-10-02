@@ -206,7 +206,15 @@ return function(mod)
     sprite._johtoOrigFrames = sprite.frames
     sprite._johtoOrigFrameCount = sprite.frameCount
     sprite._johtoOrigDef = sprite.def
+    sprite._johtoOrigFrameWidth = sprite.frameWidth
+    sprite._johtoOrigFrameHeight = sprite.frameHeight
+    sprite._johtoOrigAnchorX = sprite.anchorX
+    sprite._johtoOrigAnchorY = sprite.anchorY
     sprite.image = canvas
+    sprite.frameWidth = fw
+    sprite.frameHeight = fh
+    sprite.anchorX = fw / 2
+    sprite.anchorY = fh
     local qok, q = pcall(love.graphics.newQuad, 0, 0, fw, fh, fw, fh)
     if qok then
       sprite.frames = { [0] = q }
@@ -220,6 +228,10 @@ return function(mod)
     newDef.image = sleepKey
     newDef.frames = 1
     newDef.walker = false
+    newDef.frameWidth = fw
+    newDef.frameHeight = fh
+    newDef.anchorX = fw / 2
+    newDef.anchorY = fh
     sprite.def = newDef
     sprite._johtoSleepBaked = true
     return true
@@ -2745,8 +2757,17 @@ function isVoxelPresentation()
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local px = self.px or self.x or ((self.cellX or 0) * 16)
-      local py = self.py or self.y or ((self.cellY or 0) * 16)
+      -- For sleeping NPCs, prefer cell coordinates: px/py can be stale
+      -- from pre-sleep movement interpolation, placing the prop far from
+      -- the sleeper (user screenshot: bed in trees, sleeper on grass).
+      -- cellX/cellY is the authoritative frozen position.
+      local px, py
+      if self.cellX ~= nil and self.cellY ~= nil then
+        px, py = self.cellX * 16, self.cellY * 16
+      else
+        px = self.px or self.x or 0
+        py = self.py or self.y or 0
+      end
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       love.graphics.push("all")
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
