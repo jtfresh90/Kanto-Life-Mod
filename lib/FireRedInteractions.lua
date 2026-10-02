@@ -434,34 +434,22 @@ return function(ctx)
   -- Human identities are generated from a large deterministic name bank. The
   -- name is keyed by map + runtime object id, not by a shared fallback, so
   -- spawned civilians do not all become Quinn.
-  local FIRST_NAMES = {
-    "Aaron","Abby","Adam","Aiden","Alex","Alice","Amber","Amy","Andre","Anna","April","Ari","Aria","Arthur","Ashley","Avery",
-    "Bailey","Ben","Bianca","Blake","Bobby","Brady","Brandon","Brenda","Brianna","Brooke","Bryce","Caleb","Callie","Cameron","Cara","Carla",
-    "Casey","Cathy","Chad","Chase","Chloe","Chris","Claire","Clara","Cole","Colin","Connor","Courtney","Crystal","Daisy","Dakota",
-    "Daniel","Daphne","Darius","David","Dawn","Dean","Derek","Diana","Diego","Drew","Eli","Ella","Ellie","Emily","Emma","Eric",
-    "Erin","Ethan","Eva","Evan","Faith","Felix","Finn","Fiona","Frank","Gabriel","Gavin","Gia","Grace","Grant","Hailey","Hannah",
-    "Harper","Hayden","Hazel","Heidi","Henry","Holly","Hunter","Ian","Iris","Isaac","Isla","Jack","Jackie","Jacob","Jade","Jake",
-    "James","Jamie","Jasmine","Jason","Jenna","Jenny","Jesse","Jill","Joan","Joe","Jordan","Jose","Josh","Joy","Julia","Julian",
-    "Kara","Karen","Kate","Katie","Kayla","Keith","Kelly","Kevin","Kim","Kira","Kyle","Lance","Laura","Lauren","Leah","Leo",
-    "Liam","Lily","Logan","Lucas","Lucy","Luke","Maddie","Mara","Marcus","Maria","Mark","Mason","Matt","Maya","Megan","Mia",
-    "Michael","Mila","Molly","Morgan","Nate","Nathan","Nell","Nick","Nico","Nina","Noah","Nora","Owen","Paige","Parker","Patrick",
-    "Paul","Payton","Peter","Peyton","Quinn","Rachael","Rae","Riley","Robin","Rosa","Rose","Ruby","Ryan","Sadie","Sam","Samantha",
-    "Sara","Sarah","Scott","Sean","Serena","Shane","Shawn","Sierra","Simon","Sofia","Sophie","Spencer","Stella","Steven","Summer","Tara",
-    "Taylor","Theo","Tiffany","Tim","Tina","Toby","Travis","Trevor","Tyler","Valerie","Vanessa","Victor","Violet","Wade","Wendy","Will",
-    "William","Wyatt","Xander","Yara","Zach","Zoe"
+  local MALE_FIRST_NAMES = {
+    "Aaron","Adam","Aiden","Alex","Andre","Arthur","Ben","Blake","Bobby","Brady","Brandon","Bryce","Caleb","Cameron","Chad","Chase",
+    "Chris","Cole","Colin","Connor","Dakota","Daniel","Darius","David","Dean","Derek","Diego","Drew","Eli","Eric",
+    "Ethan","Evan","Felix","Finn","Frank","Gabriel","Gavin","Grant","Harper","Hayden","Henry","Hunter","Ian","Isaac","Jack","Jacob","Jake",
+    "James","Jason","Jesse","Joe","Jordan","Jose","Josh","Julian","Keith","Kevin","Kyle","Lance","Leo",
+    "Liam","Logan","Lucas","Luke","Marcus","Mark","Mason","Matt","Michael","Nate","Nathan","Nick","Nico","Noah","Owen","Parker","Patrick",
+    "Paul","Peter","Ryan","Sam","Scott","Sean","Shane","Shawn","Simon","Spencer","Steven","Theo","Tim","Toby","Travis","Trevor","Tyler","Victor","Wade","Will",
+    "William","Wyatt","Xander","Zach"
   }
-  local LAST_NAMES = {
-    "Adams","Baker","Bennett","Brooks","Brown","Campbell","Carter","Clark","Collins","Cooper","Davis","Edwards","Evans","Foster","Garcia","Gibson",
-    "Gordon","Graham","Grant","Gray","Green","Griffin","Hall","Hamilton","Harris","Harrison","Hart","Hayes","Henderson","Henry","Hernandez","Hill",
-    "Hoffman","Holmes","Howard","Hudson","Hughes","Hunter","Jackson","James","Jenkins","Johnson","Jones","Jordan","Keller","Kelly","Kennedy",
-    "King","Knight","Lane","Larson","Lawson","Lee","Lewis","Long","Lopez","Marshall","Martin","Mason","Matthews","Maxwell","Meyer","Miller",
-    "Mitchell","Moore","Morgan","Morris","Murphy","Murray","Myers","Nelson","Newman","Nichols","Nolan","Oliver","Olson","Ortega","Owens","Palmer",
-    "Parker","Patterson","Payne","Pearson","Perez","Perry","Peterson","Phillips","Pierce","Porter","Powell","Price","Quinn","Reed","Reeves","Reid",
-    "Reyes","Rhodes","Rice","Richards","Richardson","Riley","Rivera","Roberts","Robertson","Robinson","Rodgers","Rogers","Rose","Ross","Rowe","Russell",
-    "Sanchez","Sanders","Scott","Shaw","Shelton","Sherman","Simmons","Simpson","Smith","Snyder","Spencer","Stanley","Steele","Stewart","Stone","Sullivan",
-    "Taylor","Thomas","Thompson","Torres","Townsend","Turner","Vance","Vaughn","Vega","Wade","Walker","Wallace","Walsh","Walters","Ward","Warren",
-    "Washington","Watson","Weaver","Webb","Weber","West","Wheeler","White","Whitney","Wilcox","Williams","Williamson","Wilson","Winters","Wolfe","Woods",
-    "Wright","Wyatt","Young","Zimmerman"
+  local FEMALE_FIRST_NAMES = {
+    "Abby","Alice","Amber","Amy","Anna","April","Ari","Aria","Ashley","Avery","Bailey","Bianca","Brenda","Brianna","Brooke","Callie","Cara","Carla",
+    "Casey","Cathy","Chloe","Claire","Clara","Courtney","Crystal","Daisy","Daphne","Dawn","Diana","Ella","Ellie","Emily","Emma",
+    "Erin","Eva","Faith","Fiona","Gia","Grace","Hailey","Hannah","Hazel","Heidi","Holly","Iris","Isla","Jackie","Jade",
+    "Jamie","Jasmine","Jenna","Jenny","Jill","Joan","Joy","Julia","Kara","Karen","Kate","Katie","Kayla","Kelly","Kim","Kira","Laura","Lauren","Leah",
+    "Lily","Lucy","Maddie","Mara","Maria","Maya","Megan","Mia","Mila","Molly","Morgan","Nell","Nina","Nora","Paige","Payton","Peyton","Quinn","Rachael","Rae","Riley","Robin","Rosa","Rose","Ruby","Sadie","Samantha",
+    "Sara","Sarah","Serena","Sierra","Sofia","Sophie","Stella","Summer","Tara","Taylor","Tiffany","Tina","Valerie","Vanessa","Violet","Wendy","Yara","Zoe"
   }
 
   local function stableHash(s, modv)
@@ -470,14 +458,47 @@ return function(ctx)
     return h % modv
   end
 
+  local function spriteGender(npc, def)
+    -- Infer gender from sprite name. Returns "male", "female", or nil if unknown.
+    local gid = tonumber(npc and npc.graphicsId or def.graphicsId or def.graphics)
+    if not gid then return nil end
+    local okG, GfxIds = pcall(require, "src.core.game3.scripting.gfx_ids")
+    local sprite = okG and GfxIds and GfxIds.spriteFor and GfxIds.spriteFor(gid) or nil
+    if not sprite then return nil end
+    local s = string.upper(tostring(sprite))
+    -- Female indicators
+    if s:find("LASS") or s:find("LADY") or s:find("SCHOOLGIRL") or s:find("BEAUTY")
+       or s:find("GRANNY") or s:find("POKEFANF") or s:find("_F") or s:find("FEMALE")
+       or s:find("GIRL") or s:find("WOMAN") or s:find("MOM") then
+      return "female"
+    end
+    -- Male indicators
+    if s:find("YOUNGSTER") or s:find("POKEFANM") or s:find("GRAMPS") or s:find("GENTLEMAN")
+       or s:find("SAILOR") or s:find("FISHER") or s:find("_M") or s:find("MALE")
+       or s:find("BOY") or s:find("MAN") or s:find("DAD") then
+      return "male"
+    end
+    return nil
+  end
+
   local function assignedName(npc, def)
     if def.kantoLifeName and def.kantoLifeName ~= "" then return def.kantoLifeName end
     local mapId = (engine("src.core.game3.map") or {}).current or ""
     local raw = tostring(mapId) .. "::" .. tostring(npc and (npc.localId or npc.id or def.localId or def.index or def.name) or "")
-    local h = stableHash(raw, #FIRST_NAMES * #LAST_NAMES)
-    local fi = (h % #FIRST_NAMES) + 1
-    local li = (math.floor(h / #FIRST_NAMES) % #LAST_NAMES) + 1
-    local name = FIRST_NAMES[fi] .. " " .. LAST_NAMES[li]
+    -- Gender-matched first name only (no last names).
+    local gender = spriteGender(npc, def)
+    local nameList = MALE_FIRST_NAMES
+    if gender == "female" then
+      nameList = FEMALE_FIRST_NAMES
+    elseif gender ~= "male" then
+      -- Unknown gender: pick from combined list
+      local combined = {}
+      for _, n in ipairs(MALE_FIRST_NAMES) do table.insert(combined, n) end
+      for _, n in ipairs(FEMALE_FIRST_NAMES) do table.insert(combined, n) end
+      nameList = combined
+    end
+    local h = stableHash(raw, #nameList)
+    local name = nameList[(h % #nameList) + 1]
     def.kantoLifeName = name
     return name
   end

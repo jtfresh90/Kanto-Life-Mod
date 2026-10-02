@@ -413,7 +413,7 @@ return function(ctx)
       if type(h.stepNow) == "function" then
         -- Gold routine NPCs were left at an overly slow 86-frame step.
         -- Use ~57 frames (86 / 1.5) for a 50% speed increase.
-        npc.stepFrames = 18
+        npc.stepFrames = 57
         local okStep = pcall(h.stepNow, h, dir)
         if okStep then
           if c and c.path and #c.path > 0 then table.remove(c.path, 1) end
