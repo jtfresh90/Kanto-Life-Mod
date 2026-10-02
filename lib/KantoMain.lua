@@ -3248,8 +3248,143 @@ function putToSleep(npc)
       NPCMod._kantoLifeSleepWrapped = true
     end
   end
+  -- Voxel/Battle Art mode: NPCs render via NPC:pose(), never NPC:draw(), so
+  -- the 2D draw wrapper above never runs there. Mirror the FireRed
+  -- FieldView-level hook at the world-view stage instead: after the voxel
+  -- world is presented, draw active collision bubbles in screen space using
+  -- Battle Art projection (same Pipelines.worldPresent pattern as the
+  -- FireRed voxel sleep props and the Johto voxel sleep overlay).
+  do
+    local Pipelines = safeRequire("src.render.Pipelines")
+    if Pipelines and type(Pipelines.worldPresent) == "function" and not Pipelines._kantoLifeCollisionBubbleWrapped then
+      local battleLib = nil
+      local function battleVoxelLib()
+        if battleLib ~= nil then
+          return battleLib
+        end
+        if type(mod.find) == "function" then
+          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL" }) do
+            local ok, m = pcall(mod.find, id)
+            local lib = ok and m and m.exports and m.exports.lib or nil
+            if lib and type(lib.require) == "function" then
+              local okV, V3 = pcall(lib.require, "Voxel3D")
+              if okV and V3 and type(V3.project) == "function" then
+                battleLib = lib
+                return battleLib
+              end
+            end
+          end
+        end
+        battleLib = false
+        return nil
+      end
+      local baseWorldPresent = Pipelines.worldPresent
+      Pipelines.worldPresent = function(canvas, ctx)
+        local out = baseWorldPresent(canvas, ctx)
+        if not out then
+          return out
+        end
+        local pipelineId = nil
+        if type(Pipelines.worldPipeline) == "function" then
+          local ok, v = pcall(Pipelines.worldPipeline)
+          if ok then
+            pipelineId = v
+          end
+        end
+        if pipelineId ~= "voxel" then
+          return out
+        end
+        pcall(function()
+          if opt("npc_collision_bubbles") == false then
+            return
+          end
+          local lib = battleVoxelLib()
+          if not lib then
+            return
+          end
+          local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+          if not (okV and Voxel3D and type(Voxel3D.project) == "function") then
+            return
+          end
+          local okS, VS = pcall(lib.require, "VoxelScene")
+          local VoxelScene = (okS and VS) or nil
+          local state = ctx and ctx.state
+          if state and state.firstPerson and state.firstPerson.active then
+            return
+          end
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          local actors, seen = {}, {}
+          local function addActor(n)
+            if n and not seen[n] then
+              seen[n] = true
+              actors[#actors + 1] = n
+            end
+          end
+          local ow = liveWorld()
+          if ow then
+            for _, n in ipairs(ow.npcs or {}) do
+              addActor(n)
+            end
+            for _, e in ipairs(ow.entities or {}) do
+              addActor(e)
+            end
+          end
+          if state then
+            for _, n in ipairs(state.npcs or {}) do
+              addActor(n)
+            end
+            for _, e in ipairs(state.entities or {}) do
+              addActor(e)
+            end
+          end
+          if #actors == 0 then
+            return
+          end
+          local sxRatio, syRatio = 1, 1
+          if type(Voxel3D.size) == "function" then
+            local a, b = Voxel3D.size()
+            if tonumber(a) and a > 0 and tonumber(b) and b > 0 then
+              local cw = (out.getWidth and out:getWidth()) or a
+              local ch = (out.getHeight and out:getHeight()) or b
+              sxRatio, syRatio = cw / a, ch / b
+            end
+          end
+          local G = love.graphics
+          local prev = G.getCanvas()
+          if not pcall(G.setCanvas, out) then
+            return
+          end
+          for _, npc in ipairs(actors) do
+            local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+            if untilAt > now and npc.visible ~= false and not npc.hidden then
+              local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
+              local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
+              local gh = 0
+              if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
+                local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
+                if okH and type(h) == "number" then
+                  gh = h
+                end
+              end
+              local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
+              if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
+                drawCollisionBubble(npc, x * sxRatio, y * syRatio)
+              end
+            end
+          end
+          pcall(G.setCanvas, prev)
+        end)
+        return out
+      end
+      Pipelines._kantoLifeCollisionBubbleWrapped = true
+    end
+  end
 
-  local function courtesyOnWarp(world, warpDef)
+  
+
+
+
+local function courtesyOnWarp(world, warpDef)
     local g = G()
     if not opt("common_courtesy") then return false end
     if not warpDef then return false end
