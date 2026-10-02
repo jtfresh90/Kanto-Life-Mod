@@ -721,17 +721,17 @@ return function(ctx)
     return true
   end
 
-  function api:handleRoutineExit(npc, _, _, avoidX, avoidY)
+  function api:handleRoutineExit(npc, doorX, doorY, avoidX, avoidY) -- doorX/doorY = exit doorway cell
     if type(npc) ~= "table" or npc.kantoLifeAmbient ~= true then return false end
     local ow = world()
     if not ow or not ow.map then return false end
-    local oldX, oldY = tonumber(npc.cellX), tonumber(npc.cellY)
+    local oldX, oldY = tonumber(npc.cellX), tonumber(npc.cellY); local _exitX, _exitY = tonumber(doorX) or oldX, tonumber(doorY) or oldY; local _curId = ow.map.gen3Id or ow.map.id; local _isExit = false; for _, _d in ipairs(routineDoorCells(ow)) do if _d.x == _exitX and _d.y == _exitY then local _destId = _d.destMap or (_d.warp and destinationMapId(_d.warp)); if _destId ~= nil and _curId ~= nil and tostring(_destId):upper() ~= tostring(_curId):upper() then _isExit = true end; break end end
     local Objects = engine("src.core.game3.objects")
     if not Objects or type(Objects.removeObject) ~= "function" then return false end
     local lid = tonumber(npc.localId or (npc.def and npc.def.localId))
     if not lid then return false end
 
-    local replacement = chooseReplacementDoor(ow, oldX, oldY, avoidX, avoidY)
+    local replacement = chooseReplacementDoor(ow, _exitX, _exitY, avoidX, avoidY)
     if not replacement then return false end
     local isPoke = npc.kantoLifePokemon == true
     local gid = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
@@ -741,7 +741,7 @@ return function(ctx)
     -- Keep the population intact if the alternate door is usable: create the
     -- replacement first, then remove the departing actor.  If the only valid
     -- doorway is the same cell, remove first so that doorway can be reused.
-    local sameDoor = replacement.x == oldX and replacement.y == oldY
+    local sameDoor = _isExit or (replacement.x == _exitX and replacement.y == _exitY)
     if sameDoor then
       Objects._tracks[lid] = nil
       Objects._byId[lid] = nil
@@ -761,7 +761,7 @@ return function(ctx)
       -- Do not silently lose a population member. If we had not removed the
       -- old actor yet it remains in place; same-door fallback is the only case
       -- where it was necessarily removed first.
-      if sameDoor then
+      if sameDoor and not _isExit then
         local restored = newObject(oldX, oldY, nil, gid, isPoke)
         return restored ~= nil
       end
