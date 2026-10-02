@@ -3155,6 +3155,32 @@ local nm = storyDisplayName(talker)
           end
         end
       end)
+      -- EXPERIMENTAL: ambient Pokémon cries — wild/ambient Pokémon NPCs
+      -- occasionally vocalize. Long cooldown so it's atmospheric, not spammy.
+      pcall(function()
+        local now3 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        for _, n in ipairs(world.npcs or {}) do
+          if isPokemonLike(n) and not n.nightlifeSleeping and not n.moving then
+            -- Skip followers (they belong to other mods)
+            if not isPokemonFollower(n) then
+              local lastCry = tonumber(n._kantoLifeLastCry) or 0
+              if now3 - lastCry > 60 + math.random() * 60 then  -- 60-120s
+                n._kantoLifeLastCry = now3
+                local species = speciesLabelFromNpc(n)
+                if species and playSpeciesCry then
+                  playSpeciesCry(species)
+                  -- Small bubble with the species name, like the games do
+                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                  if bubbleUntil <= now3 then
+                    n._kantoLifeCollisionBubbleText = species .. "!"
+                    n._kantoLifeCollisionBubbleUntil = now3 + 1.5
+                  end
+                end
+              end
+            end
+          end
+        end
+      end)
     end)
   end
 
