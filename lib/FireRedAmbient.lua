@@ -1017,7 +1017,7 @@ return function(ctx)
               if reacted >= 3 then break end
               if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
                  and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
-                 and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" and lid ~= "_kantoLifePlayerStillSince" and lid ~= "_kantoLifeVisitedMaps" then
+                 and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" and lid ~= "_kantoLifePlayerStillSince" and lid ~= "_kantoLifeVisitedMaps" and lid ~= "_kantoLifeLastTimeOfDay" then
                 local npc = Objects._byId and Objects._byId[lid]
                 if npc and npc.kantoLifeAmbient and not npc.moving then
                   local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -1064,6 +1064,45 @@ return function(ctx)
       elseif hour >= 12 and hour < 18 then timeOfDay = "afternoon"
       elseif hour >= 18 and hour < 22 then timeOfDay = "evening"
       else timeOfDay = "night" end
+      -- EXPERIMENTAL: time transition comments
+      local lastTimeOfDay = spawned._kantoLifeLastTimeOfDay
+      if lastTimeOfDay and lastTimeOfDay ~= timeOfDay then
+        local transitionComments = {
+          morning = { "Morning already?", "Rise and shine!", "A new day!" },
+          afternoon = { "Afternoon already!", "Time flies!", "It's midday!" },
+          evening = { "Getting dark...", "Evening already?", "Sun's setting!" },
+          night = { "It's night...", "So late...", "Time for bed soon." },
+        }
+        local comments = transitionComments[timeOfDay] or {}
+        if #comments > 0 then
+          local commented = 0
+          for lid, _ in pairs(spawned) do
+            if commented >= 2 then break end
+            if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX"
+               and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId"
+               and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn"
+               and lid ~= "_kantoLifePlayerStillSince" and lid ~= "_kantoLifeVisitedMaps"
+               and lid ~= "_kantoLifeLastTimeOfDay" then
+              local npc = Objects._byId and Objects._byId[lid]
+              if npc and npc.kantoLifeAmbient and not npc.moving then
+                local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+                if nx and ny then
+                  local dist = math.abs(nx - px) + math.abs(ny - py)
+                  if dist <= 5 and dist > 0 then
+                    local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                    if bubbleUntil <= now then
+                      npc._kantoLifeCollisionBubbleText = comments[math.random(1, #comments)]
+                      npc._kantoLifeCollisionBubbleUntil = now + 2.0
+                      commented = commented + 1
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      spawned._kantoLifeLastTimeOfDay = timeOfDay
       local greetingsByTime = {
         morning = { "Morning!", "Good morning!", "Hey!", "Hi there!", "Rise and shine!" },
         afternoon = { "Afternoon!", "Hey there!", "Hi!", "Yo!", "How's it going?" },
@@ -1152,6 +1191,27 @@ return function(ctx)
                     npc._kantoLifeCollisionBubbleUntil = now + 1.5
                   end
                 end
+              end
+            end
+          end
+          -- EXPERIMENTAL: companion bond — stay engaged with companion.
+          -- Gen3 dirs: 0=down,1=up,2=left,3=right
+          local companion = npc._kantoLifeCompanion
+          local companionUntil = tonumber(npc._kantoLifeCompanionUntil) or 0
+          if companion and now < companionUntil and not npc.moving then
+            local cx, cy = tonumber(companion.cellX), tonumber(companion.cellY)
+            local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+            if cx and cy and nx and ny then
+              local cdist = math.abs(cx - nx) + math.abs(cy - ny)
+              if cdist <= 4 and cdist > 1 then
+                local dx, dy = cx - nx, cy - ny
+                local faceDir
+                if math.abs(dx) >= math.abs(dy) then
+                  faceDir = dx > 0 and 3 or 2
+                else
+                  faceDir = dy > 0 and 0 or 1
+                end
+                if npc.setDirection then pcall(npc.setDirection, npc, faceDir) end
               end
             end
           end
@@ -1255,7 +1315,7 @@ return function(ctx)
                           if lid2 ~= "_kantoLifeLastChatScan" and lid2 ~= "_kantoLifePlayerLastX"
                              and lid2 ~= "_kantoLifePlayerLastY" and lid2 ~= "_kantoLifeLastMapId"
                              and lid2 ~= "_kantoLifeLastGroupScan" and lid2 ~= "_kantoLifeRecentYawn"
-                             and lid2 ~= "_kantoLifePlayerStillSince" and lid2 ~= "_kantoLifeVisitedMaps" then
+                             and lid2 ~= "_kantoLifePlayerStillSince" and lid2 ~= "_kantoLifeVisitedMaps" and lid2 ~= "_kantoLifeLastTimeOfDay" then
                             local other = Objects._byId and Objects._byId[lid2]
                             if other and other ~= npc and other.kantoLifeAmbient and not other.moving then
                               local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
@@ -1407,6 +1467,11 @@ return function(ctx)
                 end
                 if a.setDirection then pcall(a.setDirection, a, aFace) end
                 if b.setDirection then pcall(b.setDirection, b, bFace) end
+                -- EXPERIMENTAL: walking companions
+                a._kantoLifeCompanion = b
+                b._kantoLifeCompanion = a
+                a._kantoLifeCompanionUntil = now2 + 300
+                b._kantoLifeCompanionUntil = now2 + 300
                 break
               end
             end

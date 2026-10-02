@@ -1814,6 +1814,42 @@ return function(mod)
         elseif hour >= 12 and hour < 18 then timeOfDay = "afternoon"
         elseif hour >= 18 and hour < 22 then timeOfDay = "evening"
         else timeOfDay = "night" end
+        -- EXPERIMENTAL: time transition comments
+        local lastTimeOfDay = world._kantoLifeLastTimeOfDay
+        if lastTimeOfDay and lastTimeOfDay ~= timeOfDay then
+          local transitionComments = {
+            morning = { "Morning already?", "Rise and shine!", "A new day!" },
+            afternoon = { "Afternoon already!", "Time flies!", "It's midday!" },
+            evening = { "Getting dark...", "Evening already?", "Sun's setting!" },
+            night = { "It's night...", "So late...", "Time for bed soon." },
+          }
+          local comments = transitionComments[timeOfDay] or {}
+          if #comments > 0 and player then
+            local px2, py2 = tonumber(player.cellX), tonumber(player.cellY)
+            if px2 and py2 then
+              local commented = 0
+              for _, n in ipairs(world.npcs or {}) do
+                if commented >= 2 then break end
+                local d = n.def or {}
+                if d.johtoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+                  local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
+                  if nx and ny then
+                    local dist = math.abs(nx - px2) + math.abs(ny - py2)
+                    if dist <= 5 and dist > 0 then
+                      local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                      if bubbleUntil <= now then
+                        n._kantoLifeCollisionBubbleText = comments[math.random(1, #comments)]
+                        n._kantoLifeCollisionBubbleUntil = now + 2.0
+                        commented = commented + 1
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+        world._kantoLifeLastTimeOfDay = timeOfDay
         local greetingsByTime = {
           morning = { "Morning!", "Good morning!", "Hey!", "Hi there!", "Rise and shine!" },
           afternoon = { "Afternoon!", "Hey there!", "Hi!", "Yo!", "How's it going?" },
@@ -1901,6 +1937,61 @@ return function(mod)
                       npc._kantoLifeCollisionBubbleText = "?"
                       npc._kantoLifeCollisionBubbleUntil = now + 1.5
                     end
+                  end
+                end
+              end
+            end
+            -- EXPERIMENTAL: NPCs adore Pokémon — humans near Pokémon NPCs show hearts.
+            local npcDef = npc.def or {}
+            if not npc.moving and not npcDef.johtoLifePokemon then
+              local nx0, ny0 = tonumber(npc.cellX), tonumber(npc.cellY)
+              if nx0 and ny0 then
+                local lastAdore = tonumber(npc._kantoLifeLastAdore) or 0
+                if now - lastAdore > 120 then
+                  for _, other in ipairs(world.npcs or {}) do
+                    if other ~= npc then
+                      local od = other.def or {}
+                      if od.johtoLifePokemon and not other.moving then
+                        local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+                        if ox and oy then
+                          local odist = math.abs(ox - nx0) + math.abs(oy - ny0)
+                          if odist <= 3 and odist > 0 then
+                            npc._kantoLifeLastAdore = now
+                            local dx, dy = ox - nx0, oy - ny0
+                            if math.abs(dx) >= math.abs(dy) then
+                              npc.facing = dx > 0 and "right" or "left"
+                            else
+                              npc.facing = dy > 0 and "down" or "up"
+                            end
+                            local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                            if bubbleUntil <= now then
+                              local adores = { "♥", "Cute!", "Aww!", "So cute!", "♥♥" }
+                              npc._kantoLifeCollisionBubbleText = adores[math.random(1, #adores)]
+                              npc._kantoLifeCollisionBubbleUntil = now + 1.5
+                            end
+                            break
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+            -- EXPERIMENTAL: companion bond — stay engaged with companion.
+            local companion = npc._kantoLifeCompanion
+            local companionUntil = tonumber(npc._kantoLifeCompanionUntil) or 0
+            if companion and now < companionUntil and not npc.moving then
+              local cx, cy = tonumber(companion.cellX), tonumber(companion.cellY)
+              local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+              if cx and cy and nx and ny then
+                local cdist = math.abs(cx - nx) + math.abs(cy - ny)
+                if cdist <= 4 and cdist > 1 then
+                  local dx, dy = cx - nx, cy - ny
+                  if math.abs(dx) >= math.abs(dy) then
+                    npc.facing = dx > 0 and "right" or "left"
+                  else
+                    npc.facing = dy > 0 and "down" or "up"
                   end
                 end
               end
@@ -2134,6 +2225,11 @@ return function(mod)
                     a.facing = dy2 > 0 and "down" or "up"
                     b.facing = dy2 > 0 and "up" or "down"
                   end
+                  -- EXPERIMENTAL: walking companions
+                  a._kantoLifeCompanion = b
+                  b._kantoLifeCompanion = a
+                  a._kantoLifeCompanionUntil = now2 + 300
+                  b._kantoLifeCompanionUntil = now2 + 300
                   break
                 end
               end
