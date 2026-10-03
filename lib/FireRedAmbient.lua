@@ -1351,6 +1351,30 @@ return function(ctx)
       local Objects = engine("src.core.game3.objects")
       if not Objects then return end
       local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      -- EXPERIMENTAL: chatter helpers — sleep check via the sleep module, and
+      -- "player engaging" (adjacent + facing) so we never start/sustain a
+      -- chat with an NPC the player is talking to.
+      local Player = engine("src.core.game3.player")
+      local sleepApi = mod.exports and mod.exports.fireRedSleep
+      local function npcAsleep(npc)
+        return sleepApi and type(sleepApi.isSleeping) == "function"
+          and sleepApi.isSleeping(npc)
+      end
+      local px, py, pfacing
+      if Player then
+        px, py = tonumber(Player.cellX), tonumber(Player.cellY)
+        pfacing = Player.facing
+      end
+      local function playerEngaging(npc)
+        if not (px and py and pfacing) then return false end
+        local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
+        if not (nx and ny) then return false end
+        if pfacing == "up" then return px == nx and py - 1 == ny
+        elseif pfacing == "down" then return px == nx and py + 1 == ny
+        elseif pfacing == "left" then return px - 1 == nx and py == ny
+        elseif pfacing == "right" then return px + 1 == nx and py == ny end
+        return false
+      end
       local lastGroupScan = tonumber(spawned._kantoLifeLastGroupScan) or 0
       if now2 - lastGroupScan > 30 then
         spawned._kantoLifeLastGroupScan = now2
@@ -1407,30 +1431,71 @@ return function(ctx)
       for lid, _ in pairs(spawned) do
         local npc = Objects._byId and Objects._byId[lid]
         if npc then
-          local pending = npc._kantoLifeChatReply
-          if pending and tonumber(pending.at) and now2 >= tonumber(pending.at) then
-            npc._kantoLifeChatReply = nil
-            local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-            if bubbleUntil <= now2 and not npc.moving then
-              npc._kantoLifeCollisionBubbleText = pending.text
-              npc._kantoLifeCollisionBubbleUntil = now2 + 2.0
+          local replies = npc._kantoLifeChatReplies
+          if replies and #replies > 0 then
+            local kept = {}
+            for _, r in ipairs(replies) do
+              if tonumber(r.at) and now2 >= tonumber(r.at) then
+                local deadConvos = spawned._kantoLifeChatDead
+                local dead = deadConvos and deadConvos[r.convo]
+                local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                if not dead and bubbleUntil <= now2 and not npc.moving
+                   and not npcAsleep(npc) and not playerEngaging(npc) then
+                  npc._kantoLifeCollisionBubbleText = r.text
+                  npc._kantoLifeCollisionBubbleUntil = now2 + 2.0
+                elseif not dead then
+                  spawned._kantoLifeChatDead = deadConvos or {}
+                  spawned._kantoLifeChatDead[r.convo] = true
+                  local nDead = 0
+                  for _ in pairs(spawned._kantoLifeChatDead) do nDead = nDead + 1 end
+                  if nDead > 40 then spawned._kantoLifeChatDead = {} end
+                end
+              else
+                kept[#kept + 1] = r
+              end
             end
+            npc._kantoLifeChatReplies = kept
           end
         end
       end
-      -- Throttle pair scans (module-level via spawned table metadata)
+      -- Throttle pair scans (module-level via spawned table metadata).
+      -- When two idle NPCs meet, they exchange a short 2-4 bubble
+      -- conversation: greeting -> reply -> [follow-up] -> [farewell].
       local lastChatScan = tonumber(spawned._kantoLifeLastChatScan) or 0
       if now2 - lastChatScan > 10 then
         spawned._kantoLifeLastChatScan = now2
-        local chatterOpeners = { "Hey!", "Psst!", "Yo!", "..." }
-        local chatterReplies = { "Huh?", "Yeah?", "Hi!", "!", "..." }
+        local hour = tonumber(os.date("%H")) or 12
+        local chatOpeners = { "Hey!", "Hi there!", "Psst!", "Yo!", "Hiya!", "Hey you!" }
+        if hour >= 5 and hour < 12 then
+          chatOpeners[#chatOpeners + 1] = "Morning!"
+          chatOpeners[#chatOpeners + 1] = "Good morning!"
+        elseif hour >= 18 or hour < 5 then
+          chatOpeners[#chatOpeners + 1] = "Evening!"
+        end
+        local chatReplies = { "Oh, hi!", "Hey!", "Hiya!", "What's up?", "Oh! Hi!", "Hey there!" }
+        local chatFollowUps = {
+          "Nice day, huh?", "Lovely weather!", "Hope it holds up.", "So windy today!",
+          "Busy day?", "Almost lunchtime!", "Getting late...", "Long day, huh?",
+          "Seen any rare ones?", "My team's doing great!", "Caught a new one!",
+          "Been to the MART?", "Heard about MT. MOON?", "Quiet around here.",
+          "Heard the rumor?", "Busy lately, huh?",
+        }
+        local chatFarewells = { "See ya!", "Bye!", "Take care!", "Later!", "Well, bye!" }
+        local function pick(t) return t[math.random(1, #t)] end
+        local function chatBusy(npc)
+          local pr = npc._kantoLifeChatReplies
+          if pr and #pr > 0 then return true end
+          return (tonumber(npc._kantoLifeChatUntil) or 0) > now2
+        end
         local candidates = {}
         for lid, _ in pairs(spawned) do
           if lid ~= "_kantoLifeLastChatScan" and lid ~= "_kantoLifePlayerLastX" and lid ~= "_kantoLifePlayerLastY" and lid ~= "_kantoLifeLastMapId" and lid ~= "_kantoLifeLastGroupScan" and lid ~= "_kantoLifeRecentYawn" and lid ~= "_kantoLifePlayerStillSince" then
             local npc = Objects._byId and Objects._byId[lid]
-            if npc and npc.kantoLifeAmbient and not npc.moving then
+            if npc and npc.kantoLifeAmbient and not npc.moving
+               and not npc._kantoLifeFRRoutine and not npcAsleep(npc)
+               and not playerEngaging(npc) then
               local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-              if bubbleUntil <= now2 and not npc._kantoLifeChatReply then
+              if bubbleUntil <= now2 and not chatBusy(npc) then
                 local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
                 if nx and ny then candidates[#candidates + 1] = npc end
               end
@@ -1444,16 +1509,41 @@ return function(ctx)
             local b = candidates[j]
             local bx, by = tonumber(b.cellX), tonumber(b.cellY)
             if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
-              local lastChat = math.max(tonumber(a._kantoLifeLastChat) or 0, tonumber(b._kantoLifeLastChat) or 0)
-              if now2 - lastChat > 60 then
+              -- Per-pair cooldown (3 min) so the same two don't chatter constantly
+              local aPairs = a._kantoLifeChatPartners or {}
+              local pairLast = math.max(aPairs[b] or 0,
+                (b._kantoLifeChatPartners or {})[a] or 0)
+              if now2 - pairLast > 180 then
                 a._kantoLifeLastChat = now2
                 b._kantoLifeLastChat = now2
-                a._kantoLifeCollisionBubbleText = chatterOpeners[math.random(1, #chatterOpeners)]
+                aPairs[b] = now2
+                a._kantoLifeChatPartners = aPairs
+                local bPairs = b._kantoLifeChatPartners or {}
+                bPairs[a] = now2
+                b._kantoLifeChatPartners = bPairs
+                do
+                  local nPairs = 0
+                  for _ in pairs(aPairs) do nPairs = nPairs + 1 end
+                  if nPairs > 24 then a._kantoLifeChatPartners = { [b] = now2 } end
+                end
+                -- Build the conversation: opener -> reply -> [follow-up] -> [farewell]
+                spawned._kantoLifeChatConvoSeq = (tonumber(spawned._kantoLifeChatConvoSeq) or 0) + 1
+                local convo = spawned._kantoLifeChatConvoSeq
+                local stepAt = now2 + 2.3
+                a._kantoLifeCollisionBubbleText = pick(chatOpeners)
                 a._kantoLifeCollisionBubbleUntil = now2 + 2.0
-                b._kantoLifeChatReply = {
-                  text = chatterReplies[math.random(1, #chatterReplies)],
-                  at = now2 + 1.5,
-                }
+                b._kantoLifeChatReplies = { { text = pick(chatReplies), at = stepAt, convo = convo } }
+                if math.random() < 0.65 then
+                  stepAt = stepAt + 2.3
+                  a._kantoLifeChatReplies = { { text = pick(chatFollowUps), at = stepAt, convo = convo } }
+                  if math.random() < 0.7 then
+                    stepAt = stepAt + 2.3
+                    b._kantoLifeChatReplies[#b._kantoLifeChatReplies + 1] =
+                      { text = pick(chatFarewells), at = stepAt, convo = convo }
+                  end
+                end
+                a._kantoLifeChatUntil = stepAt + 1
+                b._kantoLifeChatUntil = stepAt + 1
                 -- EXPERIMENTAL: face each other while chatting
                 -- Gen3 dirs: 0=down,1=up,2=left,3=right
                 local dx2, dy2 = tonumber(b.cellX) - tonumber(a.cellX), tonumber(b.cellY) - tonumber(a.cellY)

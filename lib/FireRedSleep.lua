@@ -494,6 +494,8 @@ return function(ctx)
   function api:wakeAll()
     for i = #sleepList, 1, -1 do clearOne(sleepList[i]); sleepList[i] = nil end
   end
+  -- EXPERIMENTAL: lets other modules (e.g. ambient chatter) skip sleepers.
+  function api.isSleeping(npc) return npc ~= nil and sleeping[npc] ~= nil end
   function api:update()
     installDrawWrapper()
     installVoxelSleepProps()

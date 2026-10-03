@@ -3461,30 +3461,83 @@ local nm = storyDisplayName(talker)
             end
           end
         end
-        -- First, deliver any pending responses that are due
+        -- First, deliver any pending chatter lines that are due. A
+        -- conversation is a short chain of bubbles; if one link can't be
+        -- delivered (bubble busy, NPC moved/sleeping/talked-to), the rest of
+        -- that conversation is cancelled so nobody talks to the air.
         for _, n in ipairs(world.npcs or {}) do
-          local pending = n._kantoLifeChatReply
-          if pending and tonumber(pending.at) and now2 >= tonumber(pending.at) then
-            n._kantoLifeChatReply = nil
-            local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-            if bubbleUntil <= now2 and not n.nightlifeSleeping and not n.moving then
-              n._kantoLifeCollisionBubbleText = pending.text
-              n._kantoLifeCollisionBubbleUntil = now2 + 2.0
+          local replies = n._kantoLifeChatReplies
+          if replies and #replies > 0 then
+            local kept = {}
+            for _, r in ipairs(replies) do
+              if tonumber(r.at) and now2 >= tonumber(r.at) then
+                local deadConvos = world._kantoLifeChatDead
+                local dead = deadConvos and deadConvos[r.convo]
+                local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
+                local talkedTo = world.talkNpc == n
+                  and (now2 - (tonumber(world._kantoLifeTalkNpcAt) or 0)) < 30
+                if not dead and bubbleUntil <= now2 and not n.nightlifeSleeping
+                   and not n.moving and not talkedTo then
+                  n._kantoLifeCollisionBubbleText = r.text
+                  n._kantoLifeCollisionBubbleUntil = now2 + 2.0
+                elseif not dead then
+                  world._kantoLifeChatDead = deadConvos or {}
+                  world._kantoLifeChatDead[r.convo] = true
+                  local nDead = 0
+                  for _ in pairs(world._kantoLifeChatDead) do nDead = nDead + 1 end
+                  if nDead > 40 then world._kantoLifeChatDead = {} end
+                end
+              else
+                kept[#kept + 1] = r
+              end
             end
+            n._kantoLifeChatReplies = kept
           end
         end
-        -- Look for a new chatter pair (throttled: check every ~10s)
+        -- Look for a new chatter pair (throttled: check every ~10s).
+        -- When two idle NPCs meet, they exchange a short 2-4 bubble
+        -- conversation: greeting -> reply -> [follow-up] -> [farewell].
         local lastChatScan = tonumber(world._kantoLifeLastChatScan) or 0
         if now2 - lastChatScan > 10 then
           world._kantoLifeLastChatScan = now2
-          local chatterOpeners = { "Hey!", "Psst!", "Yo!", "..." }
-          local chatterReplies = { "Huh?", "Yeah?", "Hi!", "!", "..." }
+          local hour = tonumber(os.date("%H")) or 12
+          local chatOpeners = { "Hey!", "Hi there!", "Psst!", "Yo!", "Hiya!", "Hey you!" }
+          if hour >= 5 and hour < 12 then
+            chatOpeners[#chatOpeners + 1] = "Morning!"
+            chatOpeners[#chatOpeners + 1] = "Good morning!"
+          elseif hour >= 18 or hour < 5 then
+            chatOpeners[#chatOpeners + 1] = "Evening!"
+          end
+          local chatReplies = { "Oh, hi!", "Hey!", "Hiya!", "What's up?", "Oh! Hi!", "Hey there!" }
+          local chatFollowUps = {
+            -- weather
+            "Nice day, huh?", "Lovely weather!", "Hope it holds up.", "So windy today!",
+            -- time of day
+            "Busy day?", "Almost lunchtime!", "Getting late...", "Long day, huh?",
+            -- Pokémon they've seen
+            "Seen any rare ones?", "My team's doing great!", "Caught a new one!",
+            -- local flavor / rumors
+            "SAFFRON's packed!", "Heard about MT. MOON?", "Quiet around here.",
+            "Heard the rumor?", "Busy lately, huh?",
+          }
+          local chatFarewells = { "See ya!", "Bye!", "Take care!", "Later!", "Well, bye!" }
+          local function pick(t) return t[math.random(1, #t)] end
+          local function chatBusy(n)
+            local pr = n._kantoLifeChatReplies
+            if pr and #pr > 0 then return true end
+            return (tonumber(n._kantoLifeChatUntil) or 0) > now2
+          end
+          local function playerTalkingTo(n)
+            return world.talkNpc == n
+              and (now2 - (tonumber(world._kantoLifeTalkNpcAt) or 0)) < 30
+          end
           local candidates = {}
           for _, n in ipairs(world.npcs or {}) do
             local d = n.def or {}
-            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
+            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving
+               and not n._kantoRoutineTraveling and not playerTalkingTo(n) then
               local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-              if bubbleUntil <= now2 and not n._kantoLifeChatReply then
+              if bubbleUntil <= now2 and not chatBusy(n) then
                 local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
                 if nx and ny then candidates[#candidates + 1] = n end
               end
@@ -3498,16 +3551,41 @@ local nm = storyDisplayName(talker)
               local b = candidates[j]
               local bx, by = tonumber(b.cellX), tonumber(b.cellY)
               if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
-                local lastChat = math.max(tonumber(a._kantoLifeLastChat) or 0, tonumber(b._kantoLifeLastChat) or 0)
-                if now2 - lastChat > 60 then  -- 60s cooldown per pair
+                -- Per-pair cooldown (3 min) so the same two don't chatter constantly
+                local aPairs = a._kantoLifeChatPartners or {}
+                local pairLast = math.max(aPairs[b] or 0,
+                  (b._kantoLifeChatPartners or {})[a] or 0)
+                if now2 - pairLast > 180 then
                   a._kantoLifeLastChat = now2
                   b._kantoLifeLastChat = now2
-                  a._kantoLifeCollisionBubbleText = chatterOpeners[math.random(1, #chatterOpeners)]
+                  aPairs[b] = now2
+                  a._kantoLifeChatPartners = aPairs
+                  local bPairs = b._kantoLifeChatPartners or {}
+                  bPairs[a] = now2
+                  b._kantoLifeChatPartners = bPairs
+                  do
+                    local nPairs = 0
+                    for _ in pairs(aPairs) do nPairs = nPairs + 1 end
+                    if nPairs > 24 then a._kantoLifeChatPartners = { [b] = now2 } end
+                  end
+                  -- Build the conversation: opener -> reply -> [follow-up] -> [farewell]
+                  world._kantoLifeChatConvoSeq = (tonumber(world._kantoLifeChatConvoSeq) or 0) + 1
+                  local convo = world._kantoLifeChatConvoSeq
+                  local stepAt = now2 + 2.3
+                  a._kantoLifeCollisionBubbleText = pick(chatOpeners)
                   a._kantoLifeCollisionBubbleUntil = now2 + 2.0
-                  b._kantoLifeChatReply = {
-                    text = chatterReplies[math.random(1, #chatterReplies)],
-                    at = now2 + 1.5,
-                  }
+                  b._kantoLifeChatReplies = { { text = pick(chatReplies), at = stepAt, convo = convo } }
+                  if math.random() < 0.65 then
+                    stepAt = stepAt + 2.3
+                    a._kantoLifeChatReplies = { { text = pick(chatFollowUps), at = stepAt, convo = convo } }
+                    if math.random() < 0.7 then
+                      stepAt = stepAt + 2.3
+                      b._kantoLifeChatReplies[#b._kantoLifeChatReplies + 1] =
+                        { text = pick(chatFarewells), at = stepAt, convo = convo }
+                    end
+                  end
+                  a._kantoLifeChatUntil = stepAt + 1
+                  b._kantoLifeChatUntil = stepAt + 1
                   -- EXPERIMENTAL: face each other while chatting
                   local dx, dy = bx - ax, by - ay
                   if math.abs(dx) >= math.abs(dy) then
@@ -5120,7 +5198,10 @@ local function nightlifeTick(world, dt)
       Overworld.talkTo = function(self, npc)
         if npc then
           rememberTalker(npc)
-          if self then self.talkNpc = npc end
+          if self then
+            self.talkNpc = npc
+            self._kantoLifeTalkNpcAt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+          end
         end
         if courtesyTalk(self, npc) then return end
         return base(self, npc)
@@ -5145,7 +5226,10 @@ local function nightlifeTick(world, dt)
     Overworld.talkTo = function(world, npc)
       if npc then
         rememberTalker(npc)
-        if world then world.talkNpc = npc end
+        if world then
+          world.talkNpc = npc
+          world._kantoLifeTalkNpcAt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        end
       end
       if courtesyTalk(world, npc) then return true end
       if type(baseTalk) == "function" then return baseTalk(world, npc) end
