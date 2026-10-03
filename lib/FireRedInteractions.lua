@@ -452,7 +452,7 @@ return function(ctx)
     "Sara","Sarah","Serena","Sierra","Sofia","Sophie","Stella","Summer","Tara","Taylor","Tiffany","Tina","Valerie","Vanessa","Violet","Wendy","Yara","Zoe"
       }
 
-  local function stableHash(s, modv)  end
+  local function stableHash(s, modv)
     local h = 2166136261
     for i=1,#s do h = (h * 16777619 + s:byte(i)) % 2147483647 end
     return h % modv
@@ -463,38 +463,38 @@ return function(ctx)
   
 
 local function spriteGender(npc, def)
-    -- Infer gender from sprite name. Returns \"male\", \"female\", or nil if unknown.
+    -- Infer gender from sprite name. Returns "male", "female", or nil if unknown.
     local gid = tonumber(npc and npc.graphicsId or def.graphicsId or def.graphics)
     if not gid then return nil end
-    local okG, GfxIds = pcall(require, \"src.core.game3.scripting.gfx_ids\")
+    local okG, GfxIds = pcall(require, "src.core.game3.scripting.gfx_ids")
     local sprite = okG and GfxIds and GfxIds.spriteFor and GfxIds.spriteFor(gid) or nil
     if not sprite then return nil end
     local s = string.upper(tostring(sprite))
     -- Female indicators
-    if s:find(\"LASS\") or s:find(\"LADY\") or s:find(\"SCHOOLGIRL\") or s:find(\"BEAUTY\")
-       or s:find(\"GRANNY\") or s:find(\"POKEFANF\") or s:find(\"_F\") or s:find(\"FEMALE\")
-       or s:find(\"GIRL\") or s:find(\"WOMAN\") or s:find(\"MOM\") then
-      return \"female\"
+    if s:find("LASS") or s:find("LADY") or s:find("SCHOOLGIRL") or s:find("BEAUTY")
+       or s:find("GRANNY") or s:find("POKEFANF") or s:find("_F") or s:find("FEMALE")
+       or s:find("GIRL") or s:find("WOMAN") or s:find("MOM") then
+      return "female"
     end
     -- Male indicators
-    if s:find(\"YOUNGSTER\") or s:find(\"POKEFANM\") or s:find(\"GRAMPS\") or s:find(\"GENTLEMAN\")
-       or s:find(\"SAILOR\") or s:find(\"FISHER\") or s:find(\"_M\") or s:find(\"MALE\")
-       or s:find(\"BOY\") or s:find(\"MAN\") or s:find(\"DAD\") then
-      return \"male\"
+    if s:find("YOUNGSTER") or s:find("POKEFANM") or s:find("GRAMPS") or s:find("GENTLEMAN")
+       or s:find("SAILOR") or s:find("FISHER") or s:find("_M") or s:find("MALE")
+       or s:find("BOY") or s:find("MAN") or s:find("DAD") then
+      return "male"
     end
     return nil
   end
 
   local function assignedName(npc, def)
-    if def.kantoLifeName and def.kantoLifeName ~= \"\" then return def.kantoLifeName end
-    local mapId = (engine(\"src.core.game3.map\") or {}).current or \"\"
-    local raw = tostring(mapId) .. \"::\" .. tostring(npc and (npc.localId or npc.id or def.localId or def.index or def.name) or \"\")
+    if def.kantoLifeName and def.kantoLifeName ~= "" then return def.kantoLifeName end
+    local mapId = (engine("src.core.game3.map") or {}).current or ""
+    local raw = tostring(mapId) .. "::" .. tostring(npc and (npc.localId or npc.id or def.localId or def.index or def.name) or "")
     -- Gender-matched first name only (no last names).
     local gender = spriteGender(npc, def)
     local nameList = MALE_FIRST_NAMES
-    if gender == \"female\" then
+    if gender == "female" then
       nameList = FEMALE_FIRST_NAMES
-    elseif gender ~= \"male\" then
+    elseif gender ~= "male" then
       -- Unknown gender: pick from combined list
       local combined = {}
       for _, n in ipairs(MALE_FIRST_NAMES) do table.insert(combined, n) end
