@@ -408,6 +408,29 @@ return function(ctx)
     return candidates[1].x, candidates[1].y
   end
 
+  -- Downhill ledge-hop support. The engine only hops the player, so NPCs
+  -- emulate it via Objects.scriptJump (2 cells), mirroring
+  -- Handle:stepNow's frozen/scriptBusy restore so routine state is
+  -- unaffected. Collision.ledgeLanding (game3) validates the facing against
+  -- the ROM ledge table and returns the 2-away landing cell.
+  local function ledgeHopLandingXY(world, x, y, dir)
+    local Runtime = engine("src.core.game3.runtime")
+    local Collision = engine("src.core.game3.collision")
+    local game = Runtime and Runtime._game or nil
+    if not (Collision and game and type(Collision.ledgeLanding) == "function") then return nil end
+    local ok, lx, ly = pcall(Collision.ledgeLanding, game, x, y, dir)
+    if not ok or lx == nil or ly == nil then return nil end
+    if occupiedByAmbient(world, lx, ly, nil) then return nil end
+    local Player = engine("src.core.game3.player")
+    if Player and Player.cellX == lx and Player.cellY == ly then return nil end
+    return lx, ly
+  end
+
+  local function ledgeHopLanding(world, npc, dir)
+    local x, y = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    return ledgeHopLandingXY(world, x, y, dir)
+  end
+
   local function pathFirst(world, npc, tx, ty)
     local map = world and world.map
     if not map then return nil end
@@ -443,6 +466,18 @@ return function(ctx)
             seen[key] = true
             parent[key] = { prev = x .. ":" .. y, dir = d[3] }
             qx[#qx + 1], qy[#qy + 1] = nx, ny
+          else
+            -- Ledge transit: the 1-ahead cell is an impassable hop metatile;
+            -- the traversable node is the 2-away landing when facing matches.
+            local lx, ly = ledgeHopLandingXY(world, x, y, d[3])
+            if lx and lx >= 0 and ly >= 0 and lx < width and ly < height then
+              local lk = lx .. ":" .. ly
+              if not seen[lk] then
+                seen[lk] = true
+                parent[lk] = { prev = x .. ":" .. y, dir = d[3] }
+                qx[#qx + 1], qy[#qy + 1] = lx, ly
+              end
+            end
           end
         end
       end
@@ -567,7 +602,9 @@ return function(ctx)
         travel = true
         npc._kantoLifeFRForceRoutine = nil
       else
-        travel = travelPct > 0 and hash(npc) < travelPct
+        -- Late spawns get the same assignment rebuild() applies: everyone
+        -- travels indoors, travelPct% outdoors.
+        travel = isIndoor(world) or (travelPct > 0 and hash(npc) < travelPct)
       end
     end
     local agenda = false
@@ -622,7 +659,9 @@ return function(ctx)
     end
     for i = 1, desired do routineAssigned[actorKey(candidates[i])] = true end
     for _, npc in ipairs(list) do
-      stateFor(world, npc, routineAssigned[actorKey(npc)] and true or nil)
+      -- Explicit false: NPCs rebuild() deliberately excluded must not get a
+      -- second roll in stateFor; only genuinely late spawns (nil state) roll.
+      stateFor(world, npc, routineAssigned[actorKey(npc)] and true or false)
     end
   end
 
@@ -720,10 +759,22 @@ return function(ctx)
     end
 
     if st.targetX == nil then
-      st.routine = false
-      setNativeWander(npc)
+      -- No reachable doorway right now (transient collision/grid state).
+      -- Keep wandering and retry instead of permanently retiring the routine.
+      st.doorRetryAt = (st.doorRetryAt or 0) + 1
+      npc._kantoLifeFRRoutinePhase = "door_retry"
+      st.wanderTime = 0
+      -- Surf/fly last resort: after sustained failure outdoors, leave via the
+      -- paired exit primitive (despawn here, replacement pops at another
+      -- exit) so the population keeps cycling. Never indoors.
+      if st.doorRetryAt >= 4 and not isIndoor(world) then
+        st.doorRetryAt = 0
+        npc._kantoLifeFRRoutinePhase = "exit_surf_fly"
+        exitAmbient(world, npc, st)
+      end
       return
     end
+    st.doorRetryAt = 0
 
     local x, y = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
     local atTarget = (x == st.targetX and y == st.targetY)
@@ -795,6 +846,27 @@ return function(ctx)
       return
     end
     local free = not occupiedByAmbient(world, nx, ny, npc)
+    -- Downhill ledge hop: bypass canStep and jump the 2 cells directly via
+    -- Objects.scriptJump, mirroring Handle:stepNow's frozen/scriptBusy
+    -- restore so routine state is unaffected.
+    local hopLx, hopLy = ledgeHopLanding(world, npc, dir)
+    if hopLx then
+      local Objects = engine("src.core.game3.objects")
+      if Objects and type(Objects.scriptJump) == "function" then
+        local wasFrozen = npc.frozen
+        npc.stepFrames = 21
+        local okJump = pcall(Objects.scriptJump, npc, dir, 2)
+        npc.frozen = wasFrozen
+        npc.scriptBusy = false
+        if okJump then
+          st.blockedTime = 0
+          st.blockedCount = 0
+        else
+          st.blockedTime = (st.blockedTime or 0) + dt
+        end
+        return
+      end
+    end
     local ok, can = pcall(h.canStep, h, dir)
     if free and ok and can and slowStep(h, npc, dir) then
       st.blockedTime = 0
