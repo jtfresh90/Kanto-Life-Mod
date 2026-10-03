@@ -25,6 +25,52 @@ return function(ctx)
     {1,0,"right"}, {-1,0,"left"}, {0,1,"down"}, {0,-1,"up"},
   }
 
+  -- Downhill ledge-hop support. The engine only hops the player, so NPCs get
+  -- the follower's proven hop write (targetX/targetY two cells out + hopStep,
+  -- animated by NPC:update with span 2). Ledge rows live in
+  -- game.data.field.ledges; matching mirrors the engine's own ledge check.
+  -- Returns the landing cell for a hop from (cx,cy) facing dir, or nil.
+  local function ledgeHopLanding(world, cx, cy, dir)
+    local map = world and world.map
+    if not map or type(map.cellTile) ~= "function" then return nil end
+    local dd = dir == "up" and {0,-1} or dir == "down" and {0,1}
+      or dir == "left" and {-1,0} or dir == "right" and {1,0} or nil
+    if not dd then return nil end
+    local fx, fy = cx + dd[1], cy + dd[2]
+    local lx, ly = cx + dd[1] * 2, cy + dd[2] * 2
+    local tileset = map.def and map.def.tileset
+    local okS, standing = pcall(map.cellTile, map, cx, cy)
+    local okF, front = pcall(map.cellTile, map, fx, fy)
+    if not okS or not okF then return nil end
+    local g = type(getGame) == "function" and getGame() or nil
+    local ledges = g and g.data and g.data.field and g.data.field.ledges or {}
+    for _, ledge in ipairs(ledges) do
+      if (ledge.tileset or "OVERWORLD") == tileset
+         and ledge.facing == dir and ledge.input == dir
+         and ledge.standingTile == standing and ledge.ledgeTile == front then
+        if type(map.inBounds) == "function" then
+          local okB, ib = pcall(map.inBounds, map, lx, ly)
+          if not okB or not ib then return nil end
+        end
+        local okW, walk = pcall(map.isWalkableCell, map, lx, ly)
+        if okW and walk then
+          local clear = true
+          if world.player and world.player.cellX == lx and world.player.cellY == ly then clear = false end
+          if clear then
+            for _, n in ipairs(world.npcs or {}) do
+              if n.passable ~= true and ((n.cellX == lx and n.cellY == ly) or (n.cellX == fx and n.cellY == fy)) then
+                clear = false; break
+              end
+            end
+          end
+          if clear then return lx, ly end
+        end
+        return nil
+      end
+    end
+    return nil
+  end
+
   local BUBBLE_TEXT = { ":)", ":D", ":-)", ";)", "^_^", "!!", "?", "...", "<3", ":P", "^^", "o_o" }
   local function setCollisionBubble(a, b)
     if not a or not b then return end
@@ -214,15 +260,35 @@ return function(ctx)
       for dir, conn in pairs(conns) do
         local dest = type(conn) == "table" and (conn.map or conn.mapId or conn.dest) or conn
         if dest and tostring(dest):upper() ~= currentId:upper() then
+          local destId = tostring(dest)
+          -- Real connections carry an offset (in blocks) aligning the strip;
+          -- the map center is usually a wall. Seed the scan at the offset
+          -- position and walk outward along the edge for a walkable cell.
+          local off = 0
+          if type(conn) == "table" then off = tonumber(conn.offset) or 0 end
+          local horizontal = dir == "north" or dir == "south"
+          local span = horizontal and mw or mh
+          local seed = math.floor((span - 1) / 2) - off * 2
           local x, y
-          if dir == "north" then x,y = math.floor((mw-1)/2),0
-          elseif dir == "south" then x,y = math.floor((mw-1)/2),mh-1
-          elseif dir == "west" then x,y = 0,math.floor((mh-1)/2)
-          elseif dir == "east" then x,y = mw-1,math.floor((mh-1)/2) end
-          if x and y and x >= 0 and y >= 0 and x < mw and y < mh then
-            local ok, walk = pcall(map.isWalkableCell, map, x, y)
-            if ok and walk then out[#out+1] = {x,y,"route",tostring(dest),conn,dir} end
+          for step = 0, math.max(0, span - 1) do
+            local i
+            if step == 0 then i = seed
+            else i = seed + (step % 2 == 1 and math.ceil(step / 2) or -math.ceil(step / 2)) end
+            if i >= 0 and i < span then
+              local cx, cy
+              if dir == "north" then cx, cy = i, 0
+              elseif dir == "south" then cx, cy = i, mh - 1
+              elseif dir == "west" then cx, cy = 0, i
+              elseif dir == "east" then cx, cy = mw - 1, i end
+              if cx and cy then
+                local ok, walk = pcall(map.isWalkableCell, map, cx, cy)
+                if ok and walk then x, y = cx, cy; break end
+              end
+            end
           end
+          -- 4-element entries only: positional slots 5/6 must stay coordinates
+          -- (a table there crashed the controller via string concatenation).
+          if x and y then out[#out + 1] = {x, y, "route", destId} end
         end
       end
     end
@@ -374,6 +440,18 @@ return function(ctx)
             seen[k] = true
             parent[k] = {x=x, y=y, dir=d[3]}
             qx[#qx+1], qy[#qy+1] = nx, ny
+          else
+            -- The neighbor may be a ledge tile: the traversable node is the
+            -- 2-away landing cell when the hop pattern matches.
+            local lx, ly = ledgeHopLanding(world, x, y, d[3])
+            if lx then
+              local lk = lx..","..ly
+              if not seen[lk] and not occupied[lk] then
+                seen[lk] = true
+                parent[lk] = {x=x, y=y, dir=d[3]}
+                qx[#qx+1], qy[#qy+1] = lx, ly
+              end
+            end
           end
         end
       end
@@ -424,6 +502,20 @@ return function(ctx)
     end
 
     for _, dir in ipairs(candidates) do
+      -- Downhill ledge hop: bypass the engine step API and write the 2-cell
+      -- hop directly (NPC:update animates hopStep with span 2). The landing
+      -- was already validated by ledgeHopLanding.
+      local lx, ly = ledgeHopLanding(world, npc.cellX or 0, npc.cellY or 0, dir)
+      if lx then
+        npc.targetX, npc.targetY = lx, ly
+        npc.goalX, npc.goalY = lx, ly
+        npc.hopStep = true
+        npc.moving = true
+        npc.progress = 0
+        npc.facing = dir
+        npc.stepDir = dir
+        return true
+      end
       local dd = ({up={0,-1},down={0,1},left={-1,0},right={1,0}})[dir]
       local nx = (npc.cellX or 0) + (dd and dd[1] or 0)
       local ny = (npc.cellY or 0) + (dd and dd[2] or 0)
@@ -703,7 +795,7 @@ return function(ctx)
       if ha == hb then return actorKey(a) < actorKey(b) end
       return ha < hb
     end)
-    local indoorNow = isIndoor(world)
+    local indoorNow = isIndoor(tostring(world.map and world.map.id or ""), world.map)
     local desired = indoorNow and #candidates or math.ceil(#candidates * pct / 100)
     if not indoorNow then
       if pct <= 0 then desired = 0 elseif pct >= 100 then desired = #candidates end
@@ -928,7 +1020,7 @@ return function(ctx)
       if not st.target then st.target = destinationFor(world, npc, nil, st.travelKind) end
       local t = st.target
       if not t then goto continue end
-      local tx, ty = t[5] or t[1], t[6] or t[2]
+      local tx, ty = tonumber(t[5]) or t[1], tonumber(t[6]) or t[2]
       if npc.cellX == tx and npc.cellY == ty then
         local blocked = occupied(world, tx, ty, npc)
         if blocked then
@@ -976,6 +1068,13 @@ return function(ctx)
             st.target = destinationFor(world, npc, st.target, st.travelKind)
             if st.blockedCount >= 3 then
               st.blockedCount = 0
+              -- Last resort: the NPC leaves by surf/fly. Uses the same paired
+              -- primitive as a doorway exit (despawn here, a replacement pops
+              -- at another exit), so the population stays stable.
+              local replacement = destinationFor(world, npc, st.target, st.travelKind)
+              if replacement and spawnReplacement(world, npc, replacement, st.target) then
+                states[key] = nil; stateKeys[key] = nil; goto continue
+              end
               st.phase = "wander"
               st.wait = 1.0
               st.wanderTarget = nil
