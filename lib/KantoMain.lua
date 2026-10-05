@@ -3236,7 +3236,40 @@ function putToSleep(npc)
           local px0 = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py0 = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local psx, psy = px0 - (camX or 0), py0 - (camY or 0)
-          baseNpcDraw(self, camX, camY)
+          -- For HGSS sprites in 2D, baseNpcDraw doesn't render sleeping NPCs.
+      -- Draw the hgssNativeImage directly with 90° rotation (lying down).
+      local isHgss = self._kantoSleepIsHgss == true or
+        (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
+      local hgssDrawn = false
+      if isHgss and not (isVoxelPresentation and isVoxelPresentation()) then
+        hgssDrawn = pcall(function()
+          local def = self.sprite and self.sprite.def or {}
+          local nativePath = def.hgssNativeImage
+          if not nativePath or nativePath == "" then return end
+          local img = nil
+          if love and love.graphics then
+            local ok, result = pcall(love.graphics.newImage, nativePath)
+            if ok then img = result end
+          end
+          if not img then return end
+          local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
+          local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
+          local angle = self.kantoLifeSleepAngle or (math.pi / 2)
+          love.graphics.push("all")
+          love.graphics.setColor(1, 1, 1, 1)
+          -- Draw centered at NPC position, rotated 90° to lie down
+          love.graphics.translate(psx + 8, psy + 8)
+          love.graphics.rotate(angle)
+          love.graphics.translate(-fw/2, -fh/2)
+          -- Draw first frame (standing frame works for sleeping)
+          local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
+          love.graphics.draw(img, quad, 0, 0)
+          love.graphics.pop()
+        end) and true or false
+      end
+      if not hgssDrawn then
+        baseNpcDraw(self, camX, camY)
+      end
           pcall(drawSleepAccessory, self, psx, psy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
@@ -5028,9 +5061,14 @@ local function nightlifeTick(world, dt)
         end
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
+          -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
+          local propRotation = Mat4.rotateY(yaw)
+          if propStyle ~= 1 then
+            propRotation = Mat4.mul(propRotation, Mat4.rotateX(sign * math.pi / 2))
+          end
           local propModel = Mat4.mul(
             Mat4.translate(px, gh + 0.05, py + 8),
-            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+            propRotation
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
         end
