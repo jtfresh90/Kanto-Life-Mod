@@ -2561,7 +2561,7 @@ function isVoxelPresentation()
       love.graphics.scale(s, s)
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
       love.graphics.translate(px + 8 + shiftX, py + 8)
-      if style == 2 then love.graphics.rotate(angle) end
+      if style == 2 or style == 3 then love.graphics.rotate(angle) end
       love.graphics.translate(-iw/2,-ih)
       love.graphics.draw(img,0,0)
       love.graphics.pop()
@@ -2928,9 +2928,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               -- diorama. The battle-authored 160x144 object therefore needs
               -- a larger presentation scale to match the 2D sleep effect.
               if freeCamera then scale = scale * 2.0 end
-              if scale < 0.35 then scale = 0.35 end
-              if scale > 8.0 then scale = 8.0 end
 
+              if scale > 8.0 then scae = 8.0 end
+-- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
+                local pang = math.pi/2
               Gfx.push()
               local tx = x - BATTLE_ANCHOR_X * scale
               local ty = y - BATTLE_ANCHOR_Y * scale
@@ -2951,8 +2952,8 @@ end
 local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
-                local pscale = scale * 0.62
-                if pscale < 0.45 then pscale = 0.45 end
+                local pscale = scale * 1.0
+                if pscale < 0.8 then pscale = 0.8 end; local pang = (propStyle == 1) and 0 or (math.pi/2) -- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
                 local pang = math.pi/2
                 Gfx.push("all")
                                 Gfx.setColor(1,1,1,1)
