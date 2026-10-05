@@ -155,7 +155,7 @@ return function(ctx)
     local okRuntime, Runtime = pcall(require, "src.core.game3.runtime")
     local g = okRuntime and Runtime and Runtime._game or nil
     local def = g and g.data and g.data.maps and g.data.maps[destId]
-    if not def then return false end        
+    if not def then return false end
     local okMoves, FieldMoves = pcall(require, "src.core.game3.field_moves")
     if okMoves and FieldMoves and type(FieldMoves.isOutdoors) == "function" then
       local ok, out = pcall(FieldMoves.isOutdoors, def and def.mapType)
