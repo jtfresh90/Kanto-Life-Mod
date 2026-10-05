@@ -2855,7 +2855,7 @@ local nm = storyDisplayName(talker)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
-    if sprite._kantoSleepBaked then return true end; local def = sprite.def or {}; if def.hgssNativeImage or npc._kantoSleepIsHgss then sprite._kantoSleepBaked = true; return true end -- Skip baking for HGSS sprites: HGSS_SPRITES uses its own native-sheet rendering path (hgssNativeImage) and the canvas bake produces an invisible result.
+    if sprite._kantoSleepBaked then return true end
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
