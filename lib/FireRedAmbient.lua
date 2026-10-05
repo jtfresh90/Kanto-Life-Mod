@@ -35,7 +35,7 @@ return function(ctx)
     end
     if _G.overworld_wild_spawns or _G.wilds_of_kanto or _G.wild_skies then return true end
     return false
-end
+  end
   local function gameLayout()
     local GV = engine("src.core.GameVersion")
     return GV and GV.layout and GV.layout() or "frlg"
