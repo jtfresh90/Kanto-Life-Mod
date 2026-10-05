@@ -2639,7 +2639,7 @@ function isVoxelPresentation()
       local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
       local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
-      local s = (scale or 1) * 1.5
+      local s = scale or 1
       love.graphics.push("all")
       -- Match the transform order used by drawZzzForNpc: translate by camera
       -- offset, apply scale, then position in world coordinates. The old code
