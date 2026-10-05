@@ -2606,7 +2606,7 @@ function isVoxelPresentation()
     end
     return cached
   end
-  local function drawSleepAccessory(self, ox, oy, scale)
+    local function drawSleepAccessory(self, ox, oy, scale)
       local style = resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
@@ -2614,16 +2614,22 @@ function isVoxelPresentation()
       local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
       local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
+      local s = (scale or 1) * 1.5
       love.graphics.push("all")
+      -- Match the transform order used by drawZzzForNpc: translate by camera
+      -- offset, apply scale, then position in world coordinates. The old code
+      -- added (ox+px) before scaling, which placed props at wrong positions
+      -- whenever scale ~= 1 and offset them even at scale == 1.
+      love.graphics.translate(ox or 0, oy or 0)
+      love.graphics.scale(s, s)
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
-      love.graphics.translate((ox or 0) + px + 8 + shiftX, (oy or 0) + py + 8)
-      love.graphics.scale((scale or 1) * 1.5, (scale or 1) * 1.5)
+      love.graphics.translate(px + 8 + shiftX, py + 8)
       if style == 2 then love.graphics.rotate(angle) end
       love.graphics.translate(-iw/2,-ih)
       love.graphics.draw(img,0,0)
       love.graphics.pop()
     end
-    local function drawSleepTentOverlay(self, ox, oy, scale) return end
+local function drawSleepTentOverlay(self, ox, oy, scale) return end
     local function drawCollisionBubble(self, ox, oy, scale)
       if opt("npc_collision_bubbles") == false then return end
       local untilAt = tonumber(self and self._kantoLifeCollisionBubbleUntil) or 0
@@ -3012,10 +3018,11 @@ local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
                 if pscale < 0.45 then pscale = 0.45 end
                 local pang = math.pi/2
                 Gfx.push("all")
-                Gfx.setColor(1,1,1,1)
-                local propX = ((groundX + x) * 0.5) * sxRatio
-                local propY = ((groundY + y) * 0.5) * syRatio
-                Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
+                -- groundX/groundY are unscaled; x/y were already scaled at line 2987.
+                -- Scale ground before averaging, don't scale the result.
+                local propX = (groundX * sxRatio + x) * 0.5
+                local propY = (groundY * syRatio + y) * 0.5
+            Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
                 Gfx.pop()
               end
             end
