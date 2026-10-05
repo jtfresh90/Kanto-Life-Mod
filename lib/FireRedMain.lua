@@ -35,6 +35,7 @@ return function(mod)
     { key = "firered_common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "firered_npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
     { key = "firered_npc_travel_pct", type = "number", label = "NPC TRAVEL %", default = 70, min = 0, max = 100, step = 10 },
+    { key = "firered_npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "firered_npc_agenda", type = "choice", label = "NPC AGENDA", default = 0, choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } } },
     -- EXPERIMENTAL: Lifelike feature toggles
     { key = "firered_exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },

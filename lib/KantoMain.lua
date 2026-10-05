@@ -340,6 +340,7 @@ return function(mod)
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
     { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
       default = 30, min = 0, max = 100, step = 10 },
+    { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     -- EXPERIMENTAL: Lifelike feature toggles
@@ -2438,6 +2439,7 @@ local nm = storyDisplayName(talker)
         isRoute = isRoute,
         resolveDestMap = resolveDestMap,
         onRoutineExit = onRoutineExit,
+        getOption = function(k) return opt(k) end,
       })
       if okInit and instance then
         kantoRoutines = instance

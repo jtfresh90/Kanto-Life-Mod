@@ -20,6 +20,65 @@ return function(ctx)
   local handles = {}
   local handlesMap = nil
   local destinations = {}
+  local lastWorld = nil
+
+  -- Random travel methods: door, route, fly, teleport, surf.
+  -- Fly/teleport/surf NPCs depart in place with a visual effect instead of
+  -- walking to an exit. Surf requires water nearby.
+  local function waterNearby(world, npc, radius)
+    local map = world and world.map
+    if not map then return false end
+    local cx, cy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    radius = radius or 4
+    for dy = -radius, radius do
+      for dx = -radius, radius do
+        local ok, isWater = pcall(function()
+          if type(map.isWaterCell) == "function" then return map:isWaterCell(cx+dx, cy+dy) end
+          if type(map.waterAt) == "function" then return map:waterAt(cx+dx, cy+dy) end
+          if type(map.isWater) == "function" then return map:isWater(cx+dx, cy+dy) end
+          return false
+        end)
+        if ok and isWater then return true end
+      end
+    end
+    return false
+  end
+
+  local function travelMethodsEnabled()
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, "npc_travel_methods")
+      if ok and v ~= nil then return v ~= false end
+    end
+    return true
+  end
+
+  local function pickTravelKind(npc, world)
+    if not travelMethodsEnabled() then
+      return (hash(npc) < 50) and "route" or "door"
+    end
+    local roll = math.random(100)
+    if roll <= 30 then return "door"
+    elseif roll <= 60 then return "route"
+    elseif roll <= 75 then return "fly"
+    elseif roll <= 90 then return "teleport"
+    else
+      if world and waterNearby(world, npc, 4) then return "surf" end
+      return (hash(npc) < 50) and "route" or "door"
+    end
+  end
+
+  -- Visual departure effect markers. The main controller's draw wrappers can
+  -- use these for fancier effects; the routines themselves just need the
+  -- timing. Fail-open: if nothing reads them, the NPC still despawns.
+  local function startDepartEffect(npc, method)
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    npc._kantoLifeDepartMethod = method
+    npc._kantoLifeDepartUntil = now + 1.2
+    -- Show a cue bubble so the departure doesn't look like a pop.
+    local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
+    npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
 
   local DIRS = {
     {1,0,"right"}, {-1,0,"left"}, {0,1,"down"}, {0,-1,"up"},
@@ -370,7 +429,7 @@ return function(ctx)
     npc.steps = true
   end
 
-  local function setState(npc, traveling, exits)
+  local function setState(npc, traveling, exits, world)
     local key = actorKey(npc)
     local st = states[key]
     if not st then st = {}; states[key] = st; stateKeys[key] = npc end
@@ -387,7 +446,7 @@ return function(ctx)
     st.localRoamRadius = 18
     st.blockedTime = 0
     st.blockedCount = 0
-    st.travelKind = (hash(npc) < 50) and "route" or "door"
+    st.travelKind = pickTravelKind(npc, world or lastWorld)
     npc._kantoRoutineTraveling = traveling and true or false
     -- Travel-selected actors use the route/door controller. Everyone else is
     -- intentionally returned to the engine's native wander AI; this is the
@@ -794,6 +853,7 @@ return function(ctx)
 
   local function refresh(world, force)
     destinations = buildDestinations(world)
+    lastWorld = world
     local pct = optionPct()
     local candidates = {}
     for _, npc in ipairs(world.npcs or {}) do
@@ -822,7 +882,7 @@ return function(ctx)
       local traveling = selected[actorKey(npc)] == true
       local st = states[actorKey(npc)]
       if force or not st or st.traveling ~= traveling then
-        setState(npc, traveling, destinations)
+        setState(npc, traveling, destinations, world)
       end
     end
     dirty = false
@@ -1018,11 +1078,48 @@ return function(ctx)
         local wt = st.wanderTarget
         if wt and npc.cellX == wt[1] and npc.cellY == wt[2] then st.wanderTarget = nil end
         if st.wait <= 0 then
-          st.phase = "outbound"
-          st.target = destinationFor(world, npc, nil, st.travelKind)
-          st.repath = 0
+          -- Fly/teleport/surf NPCs depart in place with a visual effect
+          -- instead of walking to a door or route exit.
+          local kind = st.travelKind
+          if kind == "fly" or kind == "teleport" or kind == "surf" then
+            st.phase = "special_depart"
+            st.wait = 1.2
+            startDepartEffect(npc, kind)
+          else
+            st.phase = "outbound"
+            st.target = destinationFor(world, npc, nil, st.travelKind)
+            st.repath = 0
+          end
         elseif st.wanderTarget then
           if not npc.moving then stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2]) end
+        end
+        goto continue
+      end
+
+      -- Special departure: fly/teleport/surf. The NPC plays its effect in
+      -- place, then despawns and a replacement spawns at a random exit.
+      if st.phase == "special_depart" then
+        st.wait = (st.wait or 0) - (dt or 0)
+        if st.wait <= 0 then
+          local kind = st.travelKind
+          local dest = destinationFor(world, npc, nil, "door")
+          if not dest then dest = destinationFor(world, npc, nil, "route") end
+          if dest then
+            -- Mark the replacement with the arrival method for effect hooks.
+            local ok = spawnReplacement(world, npc, dest, nil)
+            if ok then
+              for _, q in ipairs(world.npcs or {}) do
+                if q._kantoRoutineArrival then
+                  q._kantoLifeArriveMethod = kind
+                  break
+                end
+              end
+              states[key] = nil; stateKeys[key] = nil; goto continue
+            end
+          end
+          -- Fallback: couldn't spawn, return to wandering.
+          st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil
+          npc._kantoLifeDepartMethod = nil
         end
         goto continue
       end

@@ -32,6 +32,68 @@ return function(ctx)
   local handles = {}
   local routineAssigned = {}
 
+  -- Random travel methods: door, route, fly, teleport, surf.
+  -- Fly/teleport/surf NPCs depart in place via exitAmbient instead of walking
+  -- to a door. Surf requires water nearby.
+  local function waterNearby(world, npc, radius)
+    local map = world and world.map
+    if not map then
+      -- Try engine map access
+      local Map = engine("src.core.game3.map")
+      map = Map and Map.current and { } or nil
+      if not map then return false end
+    end
+    local cx, cy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    radius = radius or 4
+    for dy = -radius, radius do
+      for dx = -radius, radius do
+        local ok, isWater = pcall(function()
+          if type(map.isWaterCell) == "function" then return map:isWaterCell(cx+dx, cy+dy) end
+          if type(map.waterAt) == "function" then return map:waterAt(cx+dx, cy+dy) end
+          if type(map.isWater) == "function" then return map:isWater(cx+dx, cy+dy) end
+          return false
+        end)
+        if ok and isWater then return true end
+      end
+    end
+    return false
+  end
+
+  local function travelMethodsEnabled()
+    if type(ctx.getOption) == "function" then
+      -- FireRed uses firered_ prefix; also check unprefixed for consistency.
+      local ok, v = pcall(ctx.getOption, "firered_npc_travel_methods")
+      if ok and v ~= nil then return v ~= false end
+      local ok2, v2 = pcall(ctx.getOption, "npc_travel_methods")
+      if ok2 and v2 ~= nil then return v2 ~= false end
+    end
+    return true
+  end
+
+  local function pickTravelKind(npc, world)
+    if not travelMethodsEnabled() then
+      return (hash(npc) < 50) and "route" or "door"
+    end
+    local roll = math.random(100)
+    if roll <= 30 then return "door"
+    elseif roll <= 60 then return "route"
+    elseif roll <= 75 then return "fly"
+    elseif roll <= 90 then return "teleport"
+    else
+      if world and waterNearby(world, npc, 4) then return "surf" end
+      return (hash(npc) < 50) and "route" or "door"
+    end
+  end
+
+  local function startDepartEffect(npc, method)
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    npc._kantoLifeFRDepartMethod = method
+    npc._kantoLifeFRDepartUntil = now + 1.2
+    local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
+    npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
+
   local function actorKey(npc)
     return tonumber(npc and (npc.localId or (npc.def and npc.def.localId) or npc.id))
       or tostring(npc and npc.id or npc)
@@ -616,7 +678,7 @@ return function(ctx)
     st.routine = travel or agenda
     st.ambientRoutine = ambient and st.routine
     if st.routine then
-      npc._kantoLifeFRTravelKind = (hash(npc) < 50) and "route" or "door"
+      npc._kantoLifeFRTravelKind = pickTravelKind(npc, world)
       npc.movement = "STAY"
       npc.range = "DOWN"
       if npc.def then npc.def.movement = "STAY"; npc.def.range = "DOWN" end
@@ -740,6 +802,27 @@ return function(ctx)
     end
 
     if st.targetX == nil then
+      -- Fly/teleport/surf NPCs depart in place with a visual effect instead
+      -- of walking to a doorway. Uses the paired exit primitive.
+      local kind = npc._kantoLifeFRTravelKind
+      if kind == "fly" or kind == "teleport" or kind == "surf" then
+        if not st.specialDepartStarted then
+          st.specialDepartStarted = true
+          st.specialDepartWait = 1.2
+          startDepartEffect(npc, kind)
+          return
+        end
+        st.specialDepartWait = (st.specialDepartWait or 0) - dt
+        if st.specialDepartWait <= 0 then
+          npc._kantoLifeFRRoutinePhase = "exit_special"
+          if exitAmbient(world, npc, st) then return end
+          -- Fallback: exit failed, resume wandering.
+          st.specialDepartStarted = nil
+          st.wanderTime = 0
+          npc._kantoLifeFRDepartMethod = nil
+        end
+        return
+      end
       local target
       -- Towns and routes both expose the same mixed destination pool. A stable
       -- per-actor travel kind is applied by nearestDoor, so some actors use
