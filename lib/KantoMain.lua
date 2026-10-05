@@ -3158,7 +3158,7 @@ function putToSleep(npc)
   local function drawSleepAccessory(npc, sx, sy)
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
-    local img = sleepAccessoryImage(style); if not img then return end
+    local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
     local iw, ih = img:getDimensions()
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
@@ -3236,7 +3236,7 @@ function putToSleep(npc)
           local py0 = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local psx, psy = px0 - (camX or 0), py0 - (camY or 0)
           baseNpcDraw(self, camX, camY)
-          drawSleepAccessory(self, psx, psy)
+          pcall(drawSleepAccessory, self, psx, psy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
