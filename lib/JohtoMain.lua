@@ -2929,7 +2929,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               -- a larger presentation scale to match the 2D sleep effect.
               if freeCamera then scale = scale * 2.0 end
 
-              if scale > 8.0 then scae = 8.0 end
+              if scale < 0.35 then scale = 0.35 end; if scale > 8.0 then scale = 8.0 end
 -- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
                 local pang = math.pi/2
               Gfx.push()
