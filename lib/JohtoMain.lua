@@ -79,152 +79,7 @@ return function(mod)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
 
-    -- HGSS_SPRITES replaces the Gen-2 source with a native 32px overworld
-    -- sheet and advertises that source through hgssNativeImage. When that
-    -- contract is present, build the sleeping frame from that exact authored
-    -- HGSS sprite instead of rotating the small Gold sprite. This keeps the
-    -- sleep frame at the same native footprint that the HGSS voxel renderer
-    -- already uses. If the optional mod is absent, the original Gold path
-    -- below remains byte-for-byte the fallback.
-    local hgssPath = sprite.def and sprite.def.hgssNativeImage
-    local hgssFW = tonumber(sprite.def and (sprite.def.hgssFrameWidth or sprite.def.frameWidth)) or 32
-    local hgssFH = tonumber(sprite.def and (sprite.def.hgssFrameHeight or sprite.def.frameHeight)) or 32
-    if type(hgssPath) == "string" and hgssPath ~= "" and love.image and love.image.newImageData then
-      local okHgss, hgssData = pcall(love.image.newImageData, hgssPath)
-      if okHgss and hgssData then
-        local iw, ih = hgssData:getDimensions()
-        hgssFW = math.min(hgssFW, iw)
-        hgssFH = math.min(hgssFH, ih)
-        if hgssFW >= 1 and hgssFH >= 1 then
-          local okCanvas, hgssCanvas = pcall(function()
-            local src = love.graphics.newImage(hgssData)
-            src:setFilter("nearest", "nearest")
-            local c = love.graphics.newCanvas(hgssFW, hgssFH)
-            local prev = love.graphics.getCanvas()
-            love.graphics.setCanvas(c); love.graphics.clear(0,0,0,0)
-            love.graphics.setBlendMode("alpha"); love.graphics.setColor(1,1,1,1)
-            local gray = getSleepGrayShader()
-            if gray then love.graphics.setShader(gray) end
-            love.graphics.push()
-            love.graphics.translate(hgssFW/2, hgssFH/2)
-            love.graphics.rotate(angle)
-            love.graphics.translate(-hgssFW/2, -hgssFH/2)
-            local q = love.graphics.newQuad(0,0,hgssFW,hgssFH,iw,ih)
-            love.graphics.draw(src,q,0,0)
-            love.graphics.pop()
-            love.graphics.setShader(); love.graphics.setCanvas(prev)
-            return c
-          end)
-          if okCanvas and hgssCanvas then
-            local sleepKey = "__johto_life_hgss_sleep__" .. tostring(npc)
-            johtoSleepImages[sleepKey] = hgssCanvas
-            sprite._johtoSleepImageKey = sleepKey
-            sprite._johtoOrigImage = sprite.image
-            sprite._johtoOrigFrames = sprite.frames
-            sprite._johtoOrigFrameCount = sprite.frameCount
-            sprite._johtoOrigDef = sprite.def
-            sprite._johtoOrigFrameWidth = sprite.frameWidth
-            sprite._johtoOrigFrameHeight = sprite.frameHeight
-            sprite._johtoOrigAnchorX = sprite.anchorX
-            sprite._johtoOrigAnchorY = sprite.anchorY
-            sprite.image = hgssCanvas
-            sprite.frameWidth = hgssFW
-            sprite.frameHeight = hgssFH
-            sprite.anchorX = hgssFW / 2
-            sprite.anchorY = hgssFH
-            local qok, q = pcall(love.graphics.newQuad,0,0,hgssFW,hgssFH,hgssFW,hgssFH)
-            if qok then sprite.frames = { [0] = q } end
-            sprite.frameCount = 1
-            local newDef = {}
-            if type(sprite.def) == "table" then for k,v in pairs(sprite.def) do newDef[k]=v end end
-            newDef.trueColor = true
-            newDef.image = sleepKey
-            newDef.frames = 1
-            newDef.walker = false
-            newDef.frameWidth = hgssFW
-            newDef.frameHeight = hgssFH
-            newDef.anchorX = hgssFW / 2
-            newDef.anchorY = hgssFH
-            newDef.hgssNativeImage = sleepKey
-            newDef.hgssFrameWidth = hgssFW
-            newDef.hgssFrameHeight = hgssFH
-            newDef.hgssDrawWidth = hgssFW
-            newDef.hgssDrawHeight = hgssFH
-            newDef.hgssBaseDrawWidth = hgssFW
-            newDef.hgssBaseDrawHeight = hgssFH
-            newDef.hgssVoxelWidth = hgssFW
-            newDef.hgssVoxelHeight = hgssFH
-            newDef.hgssBaseVoxelWidth = hgssFW
-            newDef.hgssBaseVoxelHeight = hgssFH
-            newDef.hgssPreserveAspect = false
-            newDef.hgssPostPresent = true
-            sprite.def = newDef
-            sprite._johtoSleepBaked = true
-            sprite._johtoSleepIsHgss = true
-            return true
-          end
-        end
-      end
-    end
-
-    local ok, canvas = pcall(function()
-      local img = nil
-      if type(sprite.resolveImage) == "function" then
-        local ok2, r = pcall(function() return sprite:resolveImage() end)
-        if ok2 then img = r end
-      end
-      if not img then img = sprite.image end
-      if not img then return nil end
-      local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
-      local c = love.graphics.newCanvas(fw, fh)
-      local prev = love.graphics.getCanvas()
-      love.graphics.setCanvas(c)
-      love.graphics.clear(0, 0, 0, 0)
-      love.graphics.setBlendMode("alpha")
-      love.graphics.setColor(1, 1, 1, 1)
-      local gray = getSleepGrayShader()
-      if gray then love.graphics.setShader(gray) end
-      love.graphics.push()
-      love.graphics.translate(fw / 2, fh / 2)
-      love.graphics.rotate(angle)
-      love.graphics.translate(-fw / 2, -fh / 2)
-      if quad then
-        love.graphics.draw(img, quad, 0, 0)
-      else
-        love.graphics.draw(img, 0, 0)
-      end
-      love.graphics.pop()
-      love.graphics.setShader()
-      love.graphics.setCanvas(prev)
-      return c
-    end)
-    if not (ok and canvas) then return false end
-    local sleepKey = "__johto_life_sleep__" .. tostring(npc)
-    johtoSleepImages[sleepKey] = canvas
-    sprite._johtoSleepImageKey = sleepKey
-    sprite._johtoOrigImage = sprite.image
-    sprite._johtoOrigFrames = sprite.frames
-    sprite._johtoOrigFrameCount = sprite.frameCount
-    sprite._johtoOrigDef = sprite.def
-    sprite.image = canvas
-    local qok, q = pcall(love.graphics.newQuad, 0, 0, fw, fh, fw, fh)
-    if qok then
-      sprite.frames = { [0] = q }
-      sprite.frameCount = 1
-    end
-    local newDef = {}
-    if type(sprite.def) == "table" then
-      for k, v in pairs(sprite.def) do newDef[k] = v end
-    end
-    newDef.trueColor = true
-    newDef.image = sleepKey
-    newDef.frames = 1
-    newDef.walker = false
-    sprite.def = newDef
-    sprite._johtoSleepBaked = true
-    return true
-  end
-
+  
   local function restoreRotatedSleepSprite(npc)
     if not npc or not npc.sprite or not npc.sprite._johtoSleepBaked then return end
     local sprite = npc.sprite
@@ -609,14 +464,38 @@ return function(mod)
     if n > 0 then return n end
     return defaultCount(mapId)
   end
+    -- Detect wild-spawn mods (Untamed Advance, Wild Followers, Untamed Hoenn, etc.)
+  -- to reduce NPC-list pressure when they are active.
+  local function wildSpawnModActive()
+    if not mod then return false end
+    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", }
+    if mod.list and type(mod.list) == "function" then
+      local ok, list = pcall(mod.list)
+      if ok and type(list) == "table" then
+        for _, m in ipairs(list) do
+          local id = (type(m) == "table" and (m.id or m.name)) or tostring(m)
+          id = string.lower(tostring(id))
+          for _, known in ipairs(knownIds) do
+            if string.find(id, known, 1, true) then return true end
+          end
+        end
+      end
+    end
+    if _G.overworld_wild_spawns or _G.wilds_of_kanto or _G.wild_skies then return true end
+    return false
+  end
   local function pokeTarget(mapId, map)
     if not opt("pokemon_npcs") then return 0 end
     if isIndoor(mapId, map) then
       if not opt("indoor_npcs") then return 0 end
-      return math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+      local base = math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+  if base > 1 and wildSpawnModActive() then base = math.floor(base / 2) end
+  return base
     end
     if not (isTown(mapId) or isRoute(mapId)) then return 0 end
-    return math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+    local base = math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+  if base > 1 and wildSpawnModActive() then base = math.floor(base / 2) end
+  return base
   end
   local function cellHasWarp(map, x, y)
     if not map then return false end
@@ -2689,7 +2568,7 @@ function isVoxelPresentation()
     
         local baked = self.sprite and self.sprite._johtoSleepBaked
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP).
-        if sleeping and baked and not voxel then
+        if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)
           drawSleepAccessory(self, ox, oy, scale)
           if not voxel then
