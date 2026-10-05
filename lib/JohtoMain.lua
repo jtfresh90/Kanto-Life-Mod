@@ -278,7 +278,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -972,9 +972,9 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
-        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
-          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%4; setOpt("sleep_style",n) end,
-          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%4; setOpt("sleep_style",n) end },
+        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
+          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
+          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_collision_bubbles", not (opt("npc_collision_bubbles") ~= false)) end },
         { label = "NPC ROUTINES", right = opt("npc_routines") and "ON" or "OFF", stepper = true,
@@ -2595,8 +2595,19 @@ function isVoxelPresentation()
     end
 
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
-    local function drawSleepAccessory(self, ox, oy, scale)
-      local style = math.floor(tonumber(opt("sleep_style")) or 0)
+      -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
+  local function resolveSleepStyle(npc)
+    local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style ~= 4 then return style end
+    local cached = npc.kantoLifeRandomSleepStyle
+    if cached == nil then
+      cached = math.random(0, 3)
+      npc.kantoLifeRandomSleepStyle = cached
+    end
+    return cached
+  end
+  local function drawSleepAccessory(self, ox, oy, scale)
+      local style = resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
