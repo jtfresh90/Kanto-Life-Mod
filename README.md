@@ -1,6 +1,33 @@
-# Kanto Life
+# Kanto Life — Experimental Fork
 
-**Kanto Life** adds a living, moving population to the overworlds of **Gen 1, Gen 2, and Gen 3** while keeping the original games and their maps at the center of the experience.
+**This is the experimental fork** of Kanto Life (`experimental/lifelike-features` branch). It includes everything from the main mod, PLUS experimental lifelike NPC features that are still in testing.
+
+## Fork vs Main: What's Different?
+
+The **main branch** is the stable release track — bug fixes, compatibility, and polished features.
+
+This **experimental fork** adds lifelike social behaviors:
+
+- **Traveler arrival greetings** — NPCs arriving from other maps greet you
+- **Proximity greetings** — nearby NPCs greet you (mood-colored, 30s cooldown)
+- **Group conversations** — NPCs gather and chat in groups
+- **NPC-to-NPC chatter** — nearby idle NPCs have real 2-4 bubble conversations
+- **Contagious yawning** — yawns spread between nearby NPCs
+- **Idle-player curiosity** — NPCs show "?" bubbles when you stand still
+- **Welcome-back greetings** — NPCs greet you when you return
+- **Sneezes with bless-yous** — NPCs sneeze, others respond
+- **Time-of-day comments** — NPCs comment on morning/noon/evening/night transitions
+- **Pokémon adoration** — NPCs react to nearby Pokémon (Gen 1/2)
+- **Walking companions** — NPCs form bonds and walk together
+- **Combinatorial dialogue** — DialogueGen.lua generates varied lines from parts
+
+These features are experimental and may have bugs. For the stable experience, use the main branch releases.
+
+---
+
+**Kanto Life** (main mod) adds a living, moving population to the overworlds of **Gen 1, Gen 2, and Gen 3** while keeping the original games and their maps at the center of the experience.
+
+
 
 It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emerald/Gen 3**. Features are adapted to each generation's native NPC, map, graphics, and world systems.
 
