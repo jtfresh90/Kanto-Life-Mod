@@ -16,6 +16,26 @@ return function(ctx)
     local ok, value = pcall(require, name)
     return ok and value or nil
   end
+    -- Detect wild-spawn mods (Untamed Advance, Wild Followers, Untamed Hoenn, etc.)
+  -- to reduce NPC-list pressure when they are active.
+  local function wildSpawnModActive()
+    if not mod then return false end
+    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", }
+    if mod.list and type(mod.list) == "function" then
+      local ok, list = pcall(mod.list)
+      if ok and type(list) == "table" then
+        for _, m in ipairs(list) do
+          local id = (type(m) == "table" and (m.id or m.name)) or tostring(m)
+          id = string.lower(tostring(id))
+          for _, known in ipairs(knownIds) do
+            if string.find(id, known, 1, true) then return true end
+          end
+        end
+      end
+    end
+    if _G.overworld_wild_spawns or _G.wilds_of_kanto or _G.wild_skies then return true end
+    return false
+  end
   local function gameLayout()
     local GV = engine("src.core.GameVersion")
     return GV and GV.layout and GV.layout() or "frlg"
@@ -645,6 +665,7 @@ return function(ctx)
     local wantHumans = indoor and indoorCount or extra
     local pokeEnabled = opt("firered_poke_npcs", false) ~= false
     local wantPoke = pokeEnabled and math.max(0, math.floor(tonumber(opt("firered_poke_npc_count", 0)) or 0)) or 0
+    if wantPoke > 0 and wildSpawnModActive() then wantPoke = math.floor(wantPoke / 2) end
     if wantHumans <= 0 and wantPoke <= 0 then return end
 
     local cells = candidateCells(ow)
