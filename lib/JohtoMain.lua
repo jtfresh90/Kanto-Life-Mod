@@ -640,7 +640,7 @@ return function(mod)
     else
       base = math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
     end
-    if base > 0 and wildSpawnModActive() then base = math.floor(base / 2) end
+    if base > 1 and wildSpawnModActive() then base = math.floor(base / 2) end
     return base
   end
   local function cellHasWarp(map, x, y)
