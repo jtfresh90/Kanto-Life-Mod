@@ -159,7 +159,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -1722,11 +1722,11 @@ return function(mod)
           label = "SLEEP STYLE",
           stepper = true,
           kind = "number",
-          min = 0, max = 3, step = 1, stepFast = 1,
+          min = 0, max = 4, step = 1, stepFast = 1,
           current = math.floor(tonumber(opt("sleep_style")) or 0),
-          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed"})[math.floor(tonumber(v) or 0)] or "Default" end,
-          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
-          apply = function(v) setOpt("sleep_style", math.max(0, math.min(3, math.floor(tonumber(v) or 0)))) end,
+          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(v) or 0)] or "Default" end,
+          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
+          apply = function(v) setOpt("sleep_style", math.max(0, math.min(4, math.floor(tonumber(v) or 0)))) end,
         },
         {
           label = "NPC TALK BUBBLES",
@@ -3144,8 +3144,19 @@ function putToSleep(npc)
     if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
     return nil
   end
-  local function drawSleepAccessory(npc, sx, sy)
+  -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
+  local function resolveSleepStyle(npc)
     local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style ~= 4 then return style end
+    local cached = npc.kantoLifeRandomSleepStyle
+    if cached == nil then
+      cached = math.random(0, 3)
+      npc.kantoLifeRandomSleepStyle = cached
+    end
+    return cached
+  end
+  local function drawSleepAccessory(npc, sx, sy)
+    local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then return end
     local iw, ih = img:getDimensions()
@@ -5007,6 +5018,13 @@ local function nightlifeTick(world, dt)
         Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
 
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+        if propStyle == 4 then
+          propStyle = npc.kantoLifeRandomSleepStyle
+          if propStyle == nil then
+            propStyle = math.random(0, 3)
+            npc.kantoLifeRandomSleepStyle = propStyle
+          end
+        end
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
           local propModel = Mat4.mul(
