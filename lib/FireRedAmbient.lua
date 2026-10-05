@@ -15,6 +15,7 @@ return function(ctx)
   local function engine(name)
     local ok, value = pcall(require, name)
     return ok and value or nil
+  end
 
   -- Detect wild-spawn mods to reduce NPC-list pressure when they are active.
   local function wildSpawnModActive()
@@ -34,8 +35,7 @@ return function(ctx)
     end
     if _G.overworld_wild_spawns or _G.wilds_of_kanto or _G.wild_skies then return true end
     return false
-  end
-  end
+end
   local function gameLayout()
     local GV = engine("src.core.GameVersion")
     return GV and GV.layout and GV.layout() or "frlg"
@@ -124,7 +124,6 @@ return function(ctx)
         seen[species] = true
         dst[#dst + 1] = species
       end
-    end
   end
 
   local function destinationMapId(warp)
@@ -693,7 +692,6 @@ return function(ctx)
       end
       local pick, species = choosePokemonGfx(mapId, map, water)
       newObject(c[1], c[2], nil, pick, true, species)
-    end
   end
 
   function api:markPokemonBattle(npc, species)
