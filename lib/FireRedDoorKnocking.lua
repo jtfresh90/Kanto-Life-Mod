@@ -17,6 +17,8 @@ return function(ctx)
   local installed = false
   local modalActive = false
   local suppressAUntilRelease = false
+  local warpInProgress = false
+  local warpStartMap = nil
 
   local function opt(key, default)
     if type(getOption) == "function" then
@@ -140,6 +142,12 @@ return function(ctx)
             local Runtime = engine("src.core.game3.runtime")
             local g = game or (Runtime and Runtime._game)
             local m = Runtime and Runtime._mod
+            -- Mark warp in progress BEFORE starting it, so the A press that
+            -- dismissed this message can't re-trigger knock during transition.
+            warpInProgress = true
+            local Map = engine("src.core.game3.map")
+            warpStartMap = (Map and Map.current) or (g and g.currentMap)
+            suppressAUntilRelease = true
             if Warp and type(Warp.startDoorEntrance) == "function" then
               pcall(Warp.startDoorEntrance, m, g, info.destMap, info.destX, info.destY, info.x, info.y)
             end
@@ -195,7 +203,7 @@ return function(ctx)
         local input = game and game.input
         local isA = input and input.keyBindings and ev
           and ev.phase == "pressed" and input.keyBindings[ev.key] == "a"
-        if isA and not modalActive and not suppressAUntilRelease
+        if isA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" and knock(game) then
           return true
@@ -210,7 +218,7 @@ return function(ctx)
         local input = game and game.input
         local isA = input and input.padBindings and ev
           and ev.phase == "pressed" and input.padBindings[ev.button] == "a"
-        if isA and not modalActive and not suppressAUntilRelease
+        if isA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" and knock(game) then
           return true
@@ -241,7 +249,7 @@ return function(ctx)
             if btn == "a" then queuedA = true; break end
           end
         end
-        if queuedA and not modalActive and not suppressAUntilRelease
+        if queuedA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" then
           if knock(game) then
@@ -323,6 +331,11 @@ return function(ctx)
           end
         end
         lastMap = current
+        -- Warp completed (map changed), clear the knock suppression.
+        if warpInProgress and warpStartMap ~= nil and tostring(current) ~= tostring(warpStartMap) then
+          warpInProgress = false
+          warpStartMap = nil
+        end
       end)
     end)
     installed = ok
