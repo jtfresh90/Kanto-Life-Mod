@@ -3217,7 +3217,8 @@ function putToSleep(npc)
     G.setColor(1,1,1,1); G.rectangle("fill", x, y, w, h, 2, 2)
     G.setColor(0.1,0.1,0.1,1); G.rectangle("line", x, y, w, h, 2, 2)
     G.polygon("fill", x + w/2 - 2, y + h, x + w/2 + 2, y + h, x + w/2, y + h + 3)
-    G.print(text, x + 4, y + 1)
+    local th = font and font:getHeight() or 8
+    G.print(text, x + (w - tw)/2, y + (h - th)/2)
     G.pop()
   end
 
