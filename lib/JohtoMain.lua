@@ -2998,7 +2998,14 @@ function isVoxelPresentation()
               -- Non-default tent/bag/bed props are presentation-only additions.
               -- The default Gold sleep sprite above is never replaced.
               local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
-              local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
+              if propStyle == 4 then
+  propStyle = npc.kantoLifeRandomSleepStyle
+  if propStyle == nil then
+    propStyle = math.random(0, 3)
+    npc.kantoLifeRandomSleepStyle = propStyle
+  end
+end
+local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
                 local pscale = scale * 0.62
