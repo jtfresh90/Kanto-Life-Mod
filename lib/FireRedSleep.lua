@@ -155,7 +155,7 @@ return function(ctx)
     local okRuntime, Runtime = pcall(require, "src.core.game3.runtime")
     local g = okRuntime and Runtime and Runtime._game or nil
     local def = g and g.data and g.data.maps and g.data.maps[destId]
-    if not def then return false end
+    if not def then return false end        
     local okMoves, FieldMoves = pcall(require, "src.core.game3.field_moves")
     if okMoves and FieldMoves and type(FieldMoves.isOutdoors) == "function" then
       local ok, out = pcall(FieldMoves.isOutdoors, def and def.mapType)
@@ -174,6 +174,9 @@ return function(ctx)
       local x, y = tonumber(wd.x), tonumber(wd.y)
       if x and y then
         warpCells[tostring(x) .. ":" .. tostring(y)] = true
+        -- Block the cell directly in front of the door (where the player
+        -- stands to enter). A sleeping NPC here would block the entrance.
+        warpCells[tostring(x) .. ":" .. tostring(y + 1)] = true
         -- For outdoor maps, a warp into an indoor map is a building entrance.
         -- FireRed house/center roofs sit immediately behind that entrance.
         -- Keep a conservative footprint around the building side only; this
