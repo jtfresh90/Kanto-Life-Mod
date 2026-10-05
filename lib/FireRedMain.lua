@@ -36,6 +36,15 @@ return function(mod)
     { key = "firered_npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
     { key = "firered_npc_travel_pct", type = "number", label = "NPC TRAVEL %", default = 70, min = 0, max = 100, step = 10 },
     { key = "firered_npc_agenda", type = "choice", label = "NPC AGENDA", default = 0, choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } } },
+    -- EXPERIMENTAL: Lifelike feature toggles
+    { key = "firered_exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
+    { key = "firered_exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
+    { key = "firered_exp_moods", type = "toggle", label = "NPC MOODS", default = true },
+    { key = "firered_exp_idle", type = "toggle", label = "IDLE BEHAVIORS", default = true },
+    { key = "firered_exp_timeaware", type = "toggle", label = "TIME AWARENESS", default = true },
+    { key = "firered_exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
+    { key = "firered_exp_companions", type = "toggle", label = "COMPANIONS", default = true },
+    { key = "firered_exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
   })
 
   if mod.save and type(mod.save.get) == "function" and type(mod.save.set) == "function" then

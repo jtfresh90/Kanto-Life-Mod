@@ -342,6 +342,15 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
+    -- EXPERIMENTAL: Lifelike feature toggles
+    { key = "exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
+    { key = "exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
+    { key = "exp_moods", type = "toggle", label = "NPC MOODS", default = true },
+    { key = "exp_idle", type = "toggle", label = "IDLE BEHAVIORS", default = true },
+    { key = "exp_timeaware", type = "toggle", label = "TIME AWARENESS", default = true },
+    { key = "exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
+    { key = "exp_companions", type = "toggle", label = "COMPANIONS", default = true },
+    { key = "exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
   })
 
   local function opt(key)
