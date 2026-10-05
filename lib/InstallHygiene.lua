@@ -28,6 +28,9 @@
 -- Usage (top of main.lua's installer, before generation dispatch):
 --   local hygiene = loadLocal("lib/InstallHygiene.lua")
 --   hygiene(mod)  -- true, reason when a wipe happened
+-- Because mod.save only carries the slot's real data after save.loaded /
+-- save.created, main.lua also re-runs hygiene on those events; the
+-- entry-time run is harmless and the event-time run does the real work.
 
 local MARKER_KEY = "kanto_life_install"
 
