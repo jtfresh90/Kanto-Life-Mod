@@ -4705,7 +4705,7 @@ local function nightlifeTick(world, dt)
       if not (okR and SR and SR.new) then return false end
       local sleepIsHgss = npc._kantoSleepIsHgss == true
       local proxyW = sleepIsHgss and 32 or 16
-      local proxyH = sleepIsHgss and 48 or 32
+      local proxyH = sleepIsHgss and 32 or 16
       local def = {
         id = "KANTO_SLEEP_" .. tostring(npc.id or baseRel),
         image = rels[1],
