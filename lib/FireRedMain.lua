@@ -423,7 +423,7 @@ return function(mod)
           return r.names[tonumber(v) or 0] or "OFF"
         end
         if r.kind == "sleepstyle" then
-          return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed"})[tonumber(v) or 0] or "Default"
+          return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[tonumber(v) or 0] or "Default"
         end
         return tostring(tonumber(v) or r.default)
       end
