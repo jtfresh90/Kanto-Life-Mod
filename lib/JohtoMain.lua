@@ -573,6 +573,26 @@ return function(mod)
   local spawnSerial = 0
   local function isTown(id) return townDefaults[id] ~= nil end
   local function isRoute(id) return type(id) == "string" and id:match("^ROUTE_") ~= nil end
+
+  -- Detect wild-spawn mods to reduce NPC-list pressure when they are active.
+  local function wildSpawnModActive()
+    if not mod then return false end
+    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", }
+    if mod.list and type(mod.list) == "function" then
+      local ok, list = pcall(mod.list)
+      if ok and type(list) == "table" then
+        for _, m in ipairs(list) do
+          local id = (type(m) == "table" and (m.id or m.name)) or tostring(m)
+          id = string.lower(tostring(id))
+          for _, known in ipairs(knownIds) do
+            if string.find(id, known, 1, true) then return true end
+          end
+        end
+      end
+    end
+    if _G.overworld_wild_spawns or _G.wilds_of_kanto or _G.wild_skies then return true end
+    return false
+  end
   local function isIndoor(id, map)
     -- Gold's Map exposes the ROM's environment directly.  Prefer it over
     -- filename heuristics so indoor maps whose ids do not contain HOUSE/MART/
@@ -611,12 +631,17 @@ return function(mod)
   end
   local function pokeTarget(mapId, map)
     if not opt("pokemon_npcs") then return 0 end
+    local base = 0
     if isIndoor(mapId, map) then
       if not opt("indoor_npcs") then return 0 end
-      return math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+      base = math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+    elseif not (isTown(mapId) or isRoute(mapId)) then
+      return 0
+    else
+      base = math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
     end
-    if not (isTown(mapId) or isRoute(mapId)) then return 0 end
-    return math.max(0, math.floor(tonumber(opt("pokemon_npc_count")) or 0))
+    if base > 0 and wildSpawnModActive() then base = math.floor(base / 2) end
+    return base
   end
   local function cellHasWarp(map, x, y)
     if not map then return false end
