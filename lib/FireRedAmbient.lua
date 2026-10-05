@@ -125,7 +125,7 @@ end
         dst[#dst + 1] = species
       end
   end
-
+  end
   local function destinationMapId(warp)
     if not warp then return nil end
     if warp.destMap then return warp.destMap end
@@ -693,7 +693,7 @@ end
       local pick, species = choosePokemonGfx(mapId, map, water)
       newObject(c[1], c[2], nil, pick, true, species)
   end
-
+  end
   function api:markPokemonBattle(npc, species)
     if type(npc) ~= "table" or not npc.kantoLifePokemon then return false end
     pendingPokemonBattle = {
