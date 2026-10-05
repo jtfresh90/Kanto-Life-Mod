@@ -261,6 +261,17 @@ return function(ctx)
   end
 
   local accessoryCache = {}
+  -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
+  local function resolveSleepStyle(npc)
+    local s = math.floor(tonumber(opt("firered_sleep_style")) or 0)
+    if s ~= 4 or npc == nil then return s end
+    local cached = npc.kantoLifeRandomSleepStyle
+    if cached == nil then
+      cached = math.random(0, 3)
+      npc.kantoLifeRandomSleepStyle = cached
+    end
+    return cached
+  end
   local function accessoryImage(style)
     style = math.floor(tonumber(style) or 0)
     if style == 0 then return nil end
@@ -284,13 +295,13 @@ return function(ctx)
     return nil
   end
 
-  local function makeSleepImage(key, image, quad, fw, fh, flip)
+  local function makeSleepImage(npc, key, image, quad, fw, fh, flip)
     local cached = imageCache[key]
     if cached then return cached end
     if not (love and love.graphics and love.graphics.newCanvas) then return nil end
     fw, fh = tonumber(fw) or 16, tonumber(fh) or 16
     if fw < 1 or fh < 1 then return nil end
-    local style = math.floor(tonumber(opt("firered_sleep_style")) or 0)
+    local style = resolveSleepStyle(npc)
     -- Default is kept on the original 1.2.29 path exactly.
     if style == 0 then
       local canvas = love.graphics.newCanvas(fh, fw)
@@ -352,9 +363,9 @@ return function(ctx)
       if sleeping[npc] and npc.visible ~= false and npc.hidden ~= true then
         local image, quad, fw, fh, flip = spriteFor(game, npc)
         if image then
-          local style = math.floor(tonumber(opt("firered_sleep_style")) or 0)
+          local style = resolveSleepStyle(npc)
           local key = tostring(npc.graphicsId or npc.sprite or "") .. ":" .. tostring(npc.facing or "down") .. ":" .. tostring(fw) .. ":" .. tostring(fh) .. ":style" .. tostring(style)
-          local sleepImg = makeSleepImage(key, image, quad, fw, fh, flip)
+          local sleepImg = makeSleepImage(npc, key, image, quad, fw, fh, flip)
           if sleepImg then
             local iw, ih = sleepImg:getDimensions()
             local baseX = (tonumber(npc.px) or (npc.cellX or 0) * 16) - camX + 8
@@ -445,10 +456,10 @@ return function(ctx)
         local ok, v = pcall(Pipelines.worldPipeline); if ok then id = v end
       end
       if id ~= "voxel" or not out then return out end
-      local style = math.floor(tonumber(opt("firered_sleep_style")) or 0)
+      local style = resolveSleepStyle(npc)
       if style == 0 then return out end
       local prop = accessoryImage(style)
-      if not prop then return out end
+      if not prop and style ~= 4 then return out end
       local prev = love.graphics.getCanvas()
       if not pcall(love.graphics.setCanvas, out) then return out end
       local iw, ih = 1, 1
@@ -460,7 +471,8 @@ return function(ctx)
       local sxRatio, syRatio = ow/iw, oh/ih
       local ground = 0
       for _, npc in ipairs(sleepList) do
-        if sleeping[npc] and npc.visible ~= false then
+        local npcProp = accessoryImage(resolveSleepStyle(npc))
+        if sleeping[npc] and npc.visible ~= false and npcProp then
           local px = tonumber(npc.px or npc.cellX*16) or 0
           local py = tonumber(npc.py or npc.cellY*16) or 0
           local gh = 0
@@ -474,11 +486,11 @@ return function(ctx)
           if okP and x and y then
             perspective = math.max(0.35, math.min(3.0, tonumber(perspective) or 1))
             local scale = (tonumber(ctx and ctx.scale) or 1) * perspective * sxRatio
-            local pw, ph = prop:getDimensions()
+            local pw, ph = npcProp:getDimensions()
             love.graphics.push("all")
             love.graphics.setColor(1,1,1,1)
             local angle = (npc.kantoLifeSleepAngle or (math.pi/2))
-            love.graphics.draw(prop, x*sxRatio, y*syRatio, angle, scale, scale, pw/2, ph/2)
+            love.graphics.draw(npcProp, x*sxRatio, y*syRatio, angle, scale, scale, pw/2, ph/2)
             love.graphics.pop()
           end
         end
