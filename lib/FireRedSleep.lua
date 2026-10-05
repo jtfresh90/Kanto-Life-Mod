@@ -95,6 +95,16 @@ return function(ctx)
     npc.kantoLifeSleepAngle = nil
     npc.kantoLifeSleepSide = nil
     if npc.def then npc.def.kantoLifeSleeping = nil end
+    -- EXPERIMENTAL: wake-up stretch — NPCs yawn/stretch when they wake up.
+    pcall(function()
+      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+      local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
+      local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+      if bubbleUntil <= now then
+        npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
+        npc._kantoLifeCollisionBubbleUntil = now + 2.0
+      end
+    end)
     sleeping[npc] = nil
   end
 
