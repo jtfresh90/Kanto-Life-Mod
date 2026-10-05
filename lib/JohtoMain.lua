@@ -194,8 +194,9 @@ return function(mod)
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
-    { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
+        { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
       default = 30, min = 0, max = 100, step = 10 },
+    { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
   })
@@ -775,6 +776,7 @@ return function(mod)
       resolveDestMap = function(data, warpDef)
         return warpDef and warpDef.destMap
       end,
+      getOption = function(k) return opt(k) end,
     })
     if ok and instance then
       johtoRoutines = instance
