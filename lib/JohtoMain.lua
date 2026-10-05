@@ -3018,7 +3018,8 @@ local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
                 if pscale < 0.45 then pscale = 0.45 end
                 local pang = math.pi/2
                 Gfx.push("all")
-                -- groundX/groundY are unscaled; x/y were already scaled at line 2987.
+                                Gfx.setColor(1,1,1,1)
+-- groundX/groundY are unscaled; x/y were already scaled at line 2987.
                 -- Scale ground before averaging, don't scale the result.
                 local propX = (groundX * sxRatio + x) * 0.5
                 local propY = (groundY * syRatio + y) * 0.5
