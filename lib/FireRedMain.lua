@@ -30,7 +30,7 @@ return function(mod)
     { key = "firered_sleep_pct", type = "number", label = "SLEEP RATE %", default = 10, min = 0, max = 100, step = 10 },
     { key = "firered_day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "firered_sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "firered_sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 } } },
+    { key = "firered_sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "firered_npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "firered_common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "firered_npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
