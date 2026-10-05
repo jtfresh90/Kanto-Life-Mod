@@ -532,7 +532,9 @@ return function(ctx)
         -- stepNow uses the actor's current step timing; set it before the
         -- step, never after. The old post-step 43-frame override made Gen1
         -- appear to take a few steps and then stall.
-        npc.stepFrames = 16
+        
+        -- Match Gold's normal walking speed (32). 16 was sprinting.
+        npc.stepFrames = 32
         local okStep = pcall(h.stepNow, h, dir)
         if okStep then
           local okMoving, moving = false, false
