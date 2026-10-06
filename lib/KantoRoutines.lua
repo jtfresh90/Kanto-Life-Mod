@@ -52,6 +52,10 @@ return function(ctx)
     return true
   end
 
+  -- Forward declaration: hash is defined further below but used by
+  -- pickTravelKind above its definition point.
+  local hash
+
   local function pickTravelKind(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
@@ -181,7 +185,7 @@ return function(ctx)
     return tostring(npc and (npc.id or d.name or (tostring(npc.cellX or 0)..":"..tostring(npc.cellY or 0))) or "")
   end
 
-  local function hash(npc)
+  hash = function(npc)
     local s = actorKey(npc)
     if s == "" then s = tostring(npc and npc.def and npc.def.name or "") end
     if s == "" then s = tostring(npc and npc.cellX or 0) .. ":" .. tostring(npc and npc.cellY or 0) end

@@ -12,6 +12,9 @@ return function(ctx)
   end
   local installed = false
   local dialogueSerials = {}
+  -- Forward declarations: holdActor/releaseActor are assigned further below
+  -- but are called by dialogue/trade handlers defined above that point.
+  local holdActor, releaseActor
   local GFX_SPECIES = {
     [109]="SNORLAX", [110]="SPEAROW", [111]="CUBONE", [112]="POLIWRATH",
     [113]="CLEFAIRY", [114]="PIDGEOT", [115]="JIGGLYPUFF", [116]="PIDGEY",
@@ -632,13 +635,13 @@ return function(ctx)
     return 0
   end
 
-  local function holdActor(npc, seconds)
+  holdActor = function(npc, seconds)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = realNow() + (tonumber(seconds) or 30)
     npc._kantoLifeFRTalkPaused = true
   end
 
-  local function releaseActor(npc)
+  releaseActor = function(npc)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = nil
     npc._kantoLifeFRTalkPaused = nil

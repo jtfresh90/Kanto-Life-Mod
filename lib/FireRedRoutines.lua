@@ -70,6 +70,10 @@ return function(ctx)
     return true
   end
 
+  -- Forward declaration: hash is defined further below but used by
+  -- pickTravelKind above its definition point.
+  local hash
+
   local function pickTravelKind(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
@@ -104,7 +108,7 @@ return function(ctx)
     { 0, 1, "down" }, { 0, -1, "up" },
   }
 
-  local function hash(npc)
+  hash = function(npc)
     local id = npc and (npc.localId or npc.id or (npc.def and npc.def.localId)) or 0
     local s = tostring(id)
     local h = 0
@@ -804,7 +808,14 @@ return function(ctx)
     if st.targetX == nil then
       -- Fly/teleport/surf NPCs depart in place with a visual effect instead
       -- of walking to a doorway. Uses the paired exit primitive.
-      local kind = npc._kantoLifeFRTravelKind
+      -- Fall back to picking the kind now if it wasn't set at assignment
+      -- (e.g., state reused across NPC objects).
+      local kind = npc._kantoLifeFRTravelKind or st.travelKind
+      if not kind then
+        kind = pickTravelKind(npc, world)
+        npc._kantoLifeFRTravelKind = kind
+        st.travelKind = kind
+      end
       if kind == "fly" or kind == "teleport" or kind == "surf" then
         if not st.specialDepartStarted then
           st.specialDepartStarted = true

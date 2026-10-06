@@ -511,7 +511,7 @@ return function(mod)
   -- Detect wild-spawn mods to reduce NPC-list pressure when they are active.
   local function wildSpawnModActive()
     if not mod then return false end
-    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", }
+    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_tohoj", "untamed_advance", "wild_followers", }
     if mod.list and type(mod.list) == "function" then
       local ok, list = pcall(mod.list)
       if ok and type(list) == "table" then
@@ -3715,9 +3715,11 @@ function isVoxelPresentation()
               local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
-                local pscale = scale * 0.62
-                if pscale < 0.45 then pscale = 0.45 end
-                local pang = math.pi/2
+                -- Props need to be larger than the NPC sprite scale to be visible.
+                local pscale = scale * 2.0
+                if pscale < 1.6 then pscale = 1.6 end
+                -- Tent (style 1) stays upright (angle 0); sleeping bag (2) and bed (3) lie flat (90°).
+                local pang = (propStyle == 1) and 0 or (math.pi/2)
                 Gfx.push("all")
                 Gfx.setColor(1,1,1,1)
                 local propX = ((groundX + x) * 0.5) * sxRatio
