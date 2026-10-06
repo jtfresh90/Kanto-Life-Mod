@@ -867,7 +867,9 @@ return function(ctx)
   end
 
   local function refresh(world, force)
-    destinations = buildDestinations(world)
+    -- pcall: wild mods may modify map structure, breaking destination building.
+    local ok, dests = pcall(buildDestinations, world)
+    destinations = ok and dests or {}
     lastWorld = world
     local pct = optionPct()
     local candidates = {}
@@ -1055,7 +1057,13 @@ return function(ctx)
 
   function api.update(world, dt, force)
     if not world or not world.map or not world.npcs then return end
-    agendaUpdate(world, dt or 0, force)
+    -- pcall: protect against wild mod interference breaking the entire update.
+    local ok, err = pcall(function()
+      agendaUpdate(world, dt or 0, force)
+    end)
+    if not ok and mod and mod.log then
+      mod.log:warn("KantoRoutines agendaUpdate failed: %s", tostring(err))
+    end
     if not enabled then return end
     local mapId = tostring(world.map.id or "")
     local pct = optionPct()
