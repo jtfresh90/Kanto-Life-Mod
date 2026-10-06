@@ -5112,7 +5112,6 @@ local function nightlifeTick(world, dt)
           Mat4.translate(px, gh + 0.25, py + 8),
           Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
         )
-        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
 
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
         if propStyle == 4 then
@@ -5122,12 +5121,19 @@ local function nightlifeTick(world, dt)
             npc.kantoLifeRandomSleepStyle = propStyle
           end
         end
+        -- If an accessory (bed/tent/bag) is set, it REPLACES the gray body.
+        -- Only draw the body for default style (0).
+        if propStyle == 0 then
+          Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        end
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
-          local propRotation = Mat4.rotateY(yaw)
+          -- Tent uses pure facing yaw (no sleep tilt offset).
+          local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+          local propRotation = Mat4.rotateY(tentYaw)
           if propStyle ~= 1 then
-            propRotation = Mat4.mul(propRotation, Mat4.rotateX(sign * math.pi / 2))
+            propRotation = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
           end
           local propModel = Mat4.mul(
             Mat4.translate(px, gh + 0.05, py + 8),
