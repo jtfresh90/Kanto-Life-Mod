@@ -413,6 +413,7 @@ return function(mod)
           { key="firered_common_courtesy", label="DOOR KNOCKING", kind="bool", default=true },
           { key="firered_npc_routines", label="NPC ROUTINES", kind="bool", default=true },
           { key="firered_npc_travel_pct", label="NPC TRAVEL %", kind="number", default=70, min=0, max=100, step=10 },
+          { key="firered_npc_travel_methods", label="TRAVEL METHODS", kind="bool", default=true },
           { key="firered_npc_agenda", label="NPC AGENDA", kind="agenda", default=0, min=0, max=2, names=agendaNames },
         }
       end
