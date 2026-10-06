@@ -407,8 +407,16 @@ return function(ctx)
       return message(display .. ":\nI'd battle you,\nbut you need a PARTY!", function() releaseActor(npc) end)
     end
     local lv = math.max(2, math.min(40, lowestPartyLevel(s) - 10))
-    local foeId = randomSpeciesId()
-    local foeSpecies = speciesName(foeId)
+    -- For Pokémon NPCs, the wild encounter is WITH THAT POKÉMON (the NPC
+    -- itself), not a random species. For trainers, use a random species.
+    local foeId
+    if isPoke then
+      foeId = speciesId(species)
+      if not foeId then foeId = randomSpeciesId() end
+    else
+      foeId = randomSpeciesId()
+    end
+    local foeSpecies = speciesName(foeId) or species or "???"
     st.event, st.eventDetail = "battle", foeSpecies
     st.pendingTrade = nil
     putState(key, st, all)
