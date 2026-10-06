@@ -1,4 +1,5 @@
 -- Kanto Life custom routines controller 0.8.96
+
 -- Controls only Kanto Life ambient actors. It uses Gen1Recomp's public NPC
 -- handle API and does not modify Battle Art, Porygonal, HGSS_SPRITES, or Terrarium.
 return function(ctx)
@@ -20,6 +21,65 @@ return function(ctx)
   local handles = {}
   local handlesMap = nil
   local destinations = {}
+  local lastWorld = nil
+
+  -- Random travel methods: door, route, fly, teleport, surf.
+  -- Fly/teleport/surf NPCs depart in place with a visual effect instead of
+  -- walking to an exit. Surf requires water nearby.
+  local function waterNearby(world, npc, radius)
+    local map = world and world.map
+    if not map then return false end
+    local cx, cy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    radius = radius or 4
+    for dy = -radius, radius do
+      for dx = -radius, radius do
+        local ok, isWater = pcall(function()
+          if type(map.isWaterCell) == "function" then return map:isWaterCell(cx+dx, cy+dy) end
+          if type(map.waterAt) == "function" then return map:waterAt(cx+dx, cy+dy) end
+          if type(map.isWater) == "function" then return map:isWater(cx+dx, cy+dy) end
+          return false
+        end)
+        if ok and isWater then return true end
+      end
+    end
+    return false
+  end
+
+  local function travelMethodsEnabled()
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, "npc_travel_methods")
+      if ok and v ~= nil then return v ~= false end
+    end
+    return true
+  end
+
+  local function pickTravelKind(npc, world)
+    if not travelMethodsEnabled() then
+      return (hash(npc) < 50) and "route" or "door"
+    end
+    local roll = math.random(100)
+    if roll <= 30 then return "door"
+    elseif roll <= 60 then return "route"
+    elseif roll <= 75 then return "fly"
+    elseif roll <= 90 then return "teleport"
+    else
+      if world and waterNearby(world, npc, 4) then return "surf" end
+      return (hash(npc) < 50) and "route" or "door"
+    end
+  end
+
+  -- Visual departure effect markers. The main controller's draw wrappers can
+  -- use these for fancier effects; the routines themselves just need the
+  -- timing. Fail-open: if nothing reads them, the NPC still despawns.
+  local function startDepartEffect(npc, method)
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    npc._kantoLifeDepartMethod = method
+    npc._kantoLifeDepartUntil = now + 1.2
+    -- Show a cue bubble so the departure doesn't look like a pop.
+    local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
+    npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
 
   local DIRS = {
     {1,0,"right"}, {-1,0,"left"}, {0,1,"down"}, {0,-1,"up"},
@@ -370,7 +430,7 @@ return function(ctx)
     npc.steps = true
   end
 
-  local function setState(npc, traveling, exits)
+  local function setState(npc, traveling, exits, world)
     local key = actorKey(npc)
     local st = states[key]
     if not st then st = {}; states[key] = st; stateKeys[key] = npc end
@@ -387,7 +447,7 @@ return function(ctx)
     st.localRoamRadius = 18
     st.blockedTime = 0
     st.blockedCount = 0
-    st.travelKind = (hash(npc) < 50) and "route" or "door"
+    st.travelKind = pickTravelKind(npc, world or lastWorld)
     npc._kantoRoutineTraveling = traveling and true or false
     -- Travel-selected actors use the route/door controller. Everyone else is
     -- intentionally returned to the engine's native wander AI; this is the
@@ -787,6 +847,7 @@ return function(ctx)
 
   local function refresh(world, force)
     destinations = buildDestinations(world)
+    lastWorld = world
     local pct = optionPct()
     local candidates = {}
     for _, npc in ipairs(world.npcs or {}) do
@@ -814,7 +875,7 @@ return function(ctx)
       local traveling = selected[actorKey(npc)] == true
       local st = states[actorKey(npc)]
       if force or not st or st.traveling ~= traveling then
-        setState(npc, traveling, destinations)
+        setState(npc, traveling, destinations, world)
       end
     end
     dirty = false
