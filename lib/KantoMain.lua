@@ -1008,9 +1008,9 @@ return function(mod)
     if not map or (map.id and map.id ~= mapId) then
       if ow.map and ow.map.id == mapId then map = ow.map else return end
     end
-    -- Celadon Living District compatibility: skip Kanto Life spawns in Celadon
-    -- when that mod is active (it has its own ambient NPC system).
-    if celadonLivingDistrictActive() and isCeladonMap(mapId) then return end
+    -- Note: Celadon Living District compatibility is handled via NPC flag isolation.
+    -- Kanto Life only affects NPCs with kantoLifeAmbient flags; Celadon Living
+    -- District's NPCs are untouched. Both mods can spawn in Celadon City.
 
     local function syncKind(kind, want, spawnOne)
       local have = collectLiveAmbient(ow, kind)
