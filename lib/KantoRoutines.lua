@@ -60,13 +60,22 @@ return function(ctx)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
     end
+    -- Context-aware: if water is nearby, the NPC chooses to surf most of
+    -- the time (70%). Otherwise, use the standard distribution.
+    if world and waterNearby(world, npc, 4) then
+      local roll = math.random(100)
+      if roll <= 70 then return "surf"
+      elseif roll <= 80 then return "door"
+      elseif roll <= 90 then return "route"
+      elseif roll <= 95 then return "fly"
+      else return "teleport" end
+    end
     local roll = math.random(100)
     if roll <= 30 then return "door"
     elseif roll <= 60 then return "route"
     elseif roll <= 75 then return "fly"
     elseif roll <= 90 then return "teleport"
     else
-      if world and waterNearby(world, npc, 4) then return "surf" end
       return (hash(npc) < 50) and "route" or "door"
     end
   end
