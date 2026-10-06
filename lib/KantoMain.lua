@@ -3283,14 +3283,6 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
-        -- Only handle Kanto Life NPCs. Wild mods (Wilds of Kanto, Untamed, etc.)
-        -- and HGSS have their own NPCs; do not interfere with their drawing.
-        local d = self.def or {}
-        local isKantoLife = self.kantoLifeAmbient or self.kantoLifePokeAmbient
-          or d.kantoLifeAmbient or d.kantoLifePokeAmbient
-        if not isKantoLife then
-          return baseNpcDraw(self, camX, camY)
-        end
         if self.nightlifeSleeping then
           if self.sprite and not self.sprite._kantoSleepBaked and not (isVoxelPresentation and isVoxelPresentation()) then
             pcall(bakeSleepSprite, self)

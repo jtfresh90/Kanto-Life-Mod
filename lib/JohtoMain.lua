@@ -2652,15 +2652,6 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       NPC._johtoLifeZzzWrapped = nil
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
-        -- Only handle Johto Life NPCs. Wild/Untamed mods have their own NPCs;
-        -- do not interfere with their drawing.
-        local d = self.def or {}
-        local isJohtoLife = self.johtoLifeAmbient or self.johtoLifePokeAmbient
-          or d.johtoLifeAmbient or d.johtoLifePokeAmbient
-        -- Always draw Zzz/bubbles for our NPCs, but use base draw for others.
-        if not isJohtoLife then
-          return baseDraw(self, ox, oy, scale)
-        end
         local sleeping = self.nightlifeSleeping
         -- Always preserve original 2-arg behavior through base, BUT
         -- sleeping NPCs need the rotation even in the 2-arg path.
