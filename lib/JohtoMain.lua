@@ -2627,7 +2627,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     pcall(function()
       local NPC = require("src.world.gen2.Npc")
       if not (NPC and type(NPC.draw) == "function") then return end
-      if NPC._johtoLifeZzzWrapped then return end
+      -- Reset the wrap flag on every mod load. The flag persists on the NPC
+      -- class across mod updates; without resetting, a fixed draw hook would
+      -- never install because the old (broken) wrap is still marked as done.
+      NPC._johtoLifeZzzWrapped = nil
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
         local sleeping = self.nightlifeSleeping
