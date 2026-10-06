@@ -70,6 +70,10 @@ return function(ctx)
     return true
   end
 
+  -- Forward declaration: hash is defined further below but used by
+  -- pickTravelKind above its definition point.
+  local hash
+
   local function pickTravelKind(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
@@ -104,7 +108,7 @@ return function(ctx)
     { 0, 1, "down" }, { 0, -1, "up" },
   }
 
-  local function hash(npc)
+  hash = function(npc)
     local id = npc and (npc.localId or npc.id or (npc.def and npc.def.localId)) or 0
     local s = tostring(id)
     local h = 0
