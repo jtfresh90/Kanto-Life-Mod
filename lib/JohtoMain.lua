@@ -2954,9 +2954,12 @@ end
 local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
-                local pscale = scale * 1.0
-                if pscale < 0.8 then pscale = 0.8 end; local pang = (propStyle == 1) and 0 or (math.pi/2) -- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
-                local pang = math.pi/2
+                -- Props need to be larger than the NPC sprite scale to be visible.
+                -- Use 2x the NPC scale so bed/tent/sleeping bag are prominent.
+                local pscale = scale * 2.0
+                if pscale < 1.6 then pscale = 1.6 end
+                -- Tent (style 1) stays upright (angle 0); sleeping bag (2) and bed (3) lie flat (90°).
+                local pang = (propStyle == 1) and 0 or (math.pi/2)
                 Gfx.push("all")
                                 Gfx.setColor(1,1,1,1)
 -- groundX/groundY are unscaled; x/y were already scaled at line 2987.
