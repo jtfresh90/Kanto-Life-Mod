@@ -728,11 +728,19 @@ return function(ctx)
     local pct = optionPct()
     local candidates = {}
     for _, npc in ipairs(world.npcs or {}) do
-      if eligible(npc) then candidates[#candidates + 1] = npc end
+      -- pcall protects against other mods' NPCs with unexpected structures.
+      local ok, isEligible = pcall(eligible, npc)
+      if ok and isEligible then candidates[#candidates + 1] = npc end
     end
     table.sort(candidates, function(a,b)
-      local ha, hb = hash(a), hash(b)
-      if ha == hb then return actorKey(a) < actorKey(b) end
+      local okA, ha = pcall(hash, a)
+      local okB, hb = pcall(hash, b)
+      ha, hb = okA and ha or 0, okB and hb or 0
+      if ha == hb then
+        local okKa, ka = pcall(actorKey, a)
+        local okKb, kb = pcall(actorKey, b)
+        return (okKa and ka or "") < (okKb and kb or "")
+      end
       return ha < hb
     end)
     local indoorNow = isIndoor(tostring(world.map and world.map.id or ""), world.map)
@@ -941,7 +949,13 @@ return function(ctx)
     -- Detect newly spawned Kanto/Johto Life actors so they are assigned on
     -- the following frame instead of waiting for another map change.
     for _, candidate in ipairs(world.npcs or {}) do
-      if eligible(candidate) and not states[actorKey(candidate)] then dirty = true; break end
+      -- Wrap in pcall: other mods may add NPCs with unexpected structures
+      -- that could break eligibility checks.
+      local ok, isEligible = pcall(eligible, candidate)
+      if ok and isEligible then
+        local ok2, key = pcall(actorKey, candidate)
+        if ok2 and key and not states[key] then dirty = true; break end
+      end
     end
     local mapChanged = lastMap ~= mapId
     if mapChanged then lastMap = mapId; dirty = true end
@@ -949,8 +963,10 @@ return function(ctx)
 
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
-      if not npc or not eligible(npc) then
-        if npc then releaseNative(npc) end
+      -- pcall: the NPC may have been removed/modified by another mod.
+      local ok, isEligible = pcall(eligible, npc)
+      if not npc or not ok or not isEligible then
+        if npc then pcall(releaseNative, npc) end
         states[key] = nil; stateKeys[key] = nil; goto continue
       end
       activateNative(npc)

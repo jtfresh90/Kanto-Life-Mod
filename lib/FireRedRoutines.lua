@@ -1033,17 +1033,25 @@ return function(ctx)
     local tick = elapsed
     elapsed = 0
     for _, npc in ipairs(actors()) do
-      local key = actorKey(npc)
-      if npc._kantoLifeFRForceRoutine and eligible(npc) and isAmbient(npc) then
-        -- A doorway replacement is part of the same routine population. Force
-        -- its state immediately instead of waiting for the next percentage
-        -- assignment pass, which would otherwise treat it as a fresh spawn.
-        states[key] = nil
-        npc._kantoLifeFRForceRoutine = nil
-        stateFor(world, npc, true)
+      -- pcall: wild-spawn mods (Untamed Advance, Wild Followers) may add NPCs
+      -- with unexpected structures. Skip them instead of breaking routines.
+      local okKey, key = pcall(actorKey, npc)
+      if not okKey then goto continue end
+      local okElig, isElig = pcall(eligible, npc)
+      if npc._kantoLifeFRForceRoutine and okElig and isElig then
+        local okAmb, isAmb = pcall(isAmbient, npc)
+        if okAmb and isAmb then
+          -- A doorway replacement is part of the same routine population. Force
+          -- its state immediately instead of waiting for the next percentage
+          -- assignment pass, which would otherwise treat it as a fresh spawn.
+          states[key] = nil
+          npc._kantoLifeFRForceRoutine = nil
+          stateFor(world, npc, true)
+        end
       end
       local st = states[key] or stateFor(world, npc)
-      if st and eligible(npc) then
+      local okElig2, isElig2 = pcall(eligible, npc)
+      if st and okElig2 and isElig2 then
         -- FireRed's native Field.interact ignores a moving EventObject. Pause
         -- only an ambient actor that is actually in the player's facing cell;
         -- that makes A reliable for dialogue, item, trade, and battle events
@@ -1061,6 +1069,7 @@ return function(ctx)
           updateActor(world, npc, st, tick)
         end
       end
+      ::continue::
     end
   end
 
