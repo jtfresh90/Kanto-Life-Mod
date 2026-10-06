@@ -70,14 +70,12 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
+    -- 25% each: fly, teleport, door, route (per user request, matches main 1.4.24+)
     local roll = math.random(100)
-    if roll <= 30 then return "door"
-    elseif roll <= 60 then return "route"
-    elseif roll <= 75 then return "fly"
-    elseif roll <= 90 then return "teleport"
-    else
-      return (hash(npc) < 50) and "route" or "door"
-    end
+    if roll <= 25 then return "fly"
+    elseif roll <= 50 then return "teleport"
+    elseif roll <= 75 then return "door"
+    else return "route" end
   end
 
   -- Visual departure effect markers. Fail-open: if nothing reads them, the

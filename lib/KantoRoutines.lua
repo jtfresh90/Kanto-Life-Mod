@@ -70,14 +70,12 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
+    -- 25% each: fly, teleport, door, route (per user request, matches main 1.4.24+)
     local roll = math.random(100)
-    if roll <= 30 then return "door"
-    elseif roll <= 60 then return "route"
-    elseif roll <= 75 then return "fly"
-    elseif roll <= 90 then return "teleport"
-    else
-      return (hash(npc) < 50) and "route" or "door"
-    end
+    if roll <= 25 then return "fly"
+    elseif roll <= 50 then return "teleport"
+    elseif roll <= 75 then return "door"
+    else return "route" end
   end
 
   -- Visual departure effect markers. The main controller's draw wrappers can
@@ -875,12 +873,16 @@ return function(ctx)
   end
 
   local function refresh(world, force)
-    destinations = buildDestinations(world)
+    -- pcall: wild mods may modify map structure, breaking destination building.
+    local ok, dests = pcall(buildDestinations, world)
+    destinations = ok and dests or {}
     lastWorld = world
     local pct = optionPct()
     local candidates = {}
     for _, npc in ipairs(world.npcs or {}) do
-      if eligible(npc) then candidates[#candidates + 1] = npc end
+      -- pcall protects against other mods' NPCs with unexpected structures.
+      local ok, isEligible = pcall(eligible, npc)
+      if ok and isEligible then candidates[#candidates + 1] = npc end
     end
     table.sort(candidates, function(a,b)
       local ha, hb = hash(a), hash(b)
@@ -977,7 +979,9 @@ return function(ctx)
       for npc in pairs(agendaStates) do agendaStates[npc] = nil end
     end
     for _, npc in ipairs(world.npcs or {}) do
-      if agendaEligible(npc) then
+      -- pcall: wild mods may add NPCs with unexpected structure.
+      local ok, isElig = pcall(agendaEligible, npc)
+      if ok and isElig then
         local st = agendaStates[npc]
         if not st then
           local participate = (agendaMode == 2 and night) or ((not night) and (agendaMode >= 1) and hash(npc) < 10)
@@ -1042,8 +1046,10 @@ return function(ctx)
     -- engine ticks them; changing wanders only after base Overworld:update
     -- still permits one vanilla step per frame.
     if not enabled or not world or not world.npcs then return end
-    for _, npc in ipairs(world.npcs) do
-      if isKantoSpawn(npc) and not npc.nightlifeSleeping
+    for _, npc in ipairs(world.npcs or {}) do
+      -- pcall: wild mods may add NPCs with unexpected structure.
+      local ok, isSpawn = pcall(isKantoSpawn, npc)
+      if ok and isSpawn and not npc.nightlifeSleeping
          and npc._kantoRoutineTraveling == true then
         npc.wanders = false
       end
@@ -1052,7 +1058,13 @@ return function(ctx)
 
   function api.update(world, dt, force)
     if not world or not world.map or not world.npcs then return end
-    agendaUpdate(world, dt or 0, force)
+    -- pcall: protect against wild mod interference breaking the entire update.
+    local ok, err = pcall(function()
+      agendaUpdate(world, dt or 0, force)
+    end)
+    if not ok and mod and mod.log then
+      mod.log:warn("KantoRoutines agendaUpdate failed: %s", tostring(err))
+    end
     if not enabled then return end
     local mapId = tostring(world.map.id or "")
     local pct = optionPct()
@@ -1061,7 +1073,13 @@ return function(ctx)
     -- Detect newly spawned Kanto/Johto Life actors so they are assigned on
     -- the following frame instead of waiting for another map change.
     for _, candidate in ipairs(world.npcs or {}) do
-      if eligible(candidate) and not states[actorKey(candidate)] then dirty = true; break end
+      -- Wrap in pcall: other mods (e.g., Wilds of Kanto Revival) may add NPCs
+      -- with unexpected structures that could break eligibility checks.
+      local ok, isEligible = pcall(eligible, candidate)
+      if ok and isEligible then
+        local ok2, key = pcall(actorKey, candidate)
+        if ok2 and key and not states[key] then dirty = true; break end
+      end
     end
     local mapChanged = lastMap ~= mapId
     if mapChanged then lastMap = mapId; dirty = true end
@@ -1069,8 +1087,10 @@ return function(ctx)
 
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
-      if not npc or not eligible(npc) then
-        if npc then releaseNative(npc) end
+      -- pcall: the NPC may have been removed/modified by another mod.
+      local ok, isEligible = pcall(eligible, npc)
+      if not npc or not ok or not isEligible then
+        if npc then pcall(releaseNative, npc) end
         states[key] = nil; stateKeys[key] = nil; goto continue
       end
       if not st.traveling then

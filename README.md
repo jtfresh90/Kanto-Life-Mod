@@ -1,4 +1,16 @@
-# Kanto Life
+# Kanto Life — Experimental Fork
+
+> **This is the experimental fork** (`experimental/lifelike-features`) of [Kanto Life](https://github.com/jtfresh90/Kanto-Life-Mod).
+> It contains all main-mod features **plus 23+ experimental lifelike NPC behaviors** that are being tested before (or instead of) merging to main.
+>
+> **Key differences from main:**
+> - **Lifelike NPC behaviors:** Proximity greetings, mood-colored bubbles, group conversations, contagious yawning, idle-player curiosity, welcome-back greetings, sneezes with bless-yous, time-of-day comments, Pokémon adoration, NPC walking-companion bonds, NPC-to-NPC chatter with real dialogue exchanges, traveler arrival greetings, and more.
+> - **Sleep:** Retains bed/tent/sleeping-bag accessories and the experimental random sleep style option (main disabled accessories in 1.4.31 due to visual regressions).
+> - **Travel:** 25% fly / 25% teleport / 25% door / 25% route (synced with main).
+> - **Wild mod compatibility:** pcall protections against Wilds of Kanto, Wilds of Kanto Revival, Untamed mods (synced with main).
+> - **Celadon Living District:** Compatible via NPC flag isolation; both mods can coexist in Celadon City.
+>
+> **Warning:** Experimental features may be unstable. For the stable release, use the [main mod](https://github.com/jtfresh90/Kanto-Life-Mod).
 
 **Kanto Life** adds a living, moving population to the overworlds of **Gen 1, Gen 2, and Gen 3** while keeping the original games and their maps at the center of the experience.
 
