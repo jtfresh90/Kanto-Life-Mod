@@ -2165,6 +2165,12 @@ local nm = storyDisplayName(talker)
       return true
     end
     if d.item or d.pokemon then return true end
+    -- Never sleep: boat boarders (S.S. Anne, etc.), story NPCs
+    if sprite:find("SAILOR", 1, true) or name:find("SAILOR", 1, true) then return true end
+    if sprite:find("BOAT", 1, true) or name:find("BOAT", 1, true) then return true end
+    if text:find("S.S.", 1, true) or text:find("SS ANNE", 1, true) then return true end
+    -- Story NPCs: gym guides, plot-critical characters
+    if sprite:find("GUIDE", 1, true) or name:find("GUIDE", 1, true) then return true end
     return false
   end
 

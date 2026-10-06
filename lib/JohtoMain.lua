@@ -1423,7 +1423,12 @@ return function(mod)
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
       if d.johtoLifeAmbient and not d.johtoLifePokemon then
-        if chosen[npc] then
+        -- Never sleep story-critical NPCs (safety check)
+        local spr = tostring(d.sprite or ""):upper()
+        local nm = tostring(d.name or ""):upper()
+        local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
+          or spr:find("CLERK", 1, true) or spr:find("SAILOR", 1, true)
+        if chosen[npc] and not isExcluded then
           if not npc.nightlifeSleeping then
             npc.frozen = true; npc.nightlifeSleeping = true
             if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
