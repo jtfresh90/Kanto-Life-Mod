@@ -1039,7 +1039,7 @@ return function(ctx)
       -- pcall: wild-spawn mods (Untamed Advance, Wild Followers) may add NPCs
       -- with unexpected structures. Skip them instead of breaking routines.
       local okKey, key = pcall(actorKey, npc)
-      if not okKey then goto continue end
+      if not okKey or key == nil then goto continue end
       local okElig, isElig = pcall(eligible, npc)
       if npc._kantoLifeFRForceRoutine and okElig and isElig then
         local okAmb, isAmb = pcall(isAmbient, npc)
