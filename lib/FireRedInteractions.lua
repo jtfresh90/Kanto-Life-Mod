@@ -12,9 +12,9 @@ return function(ctx)
   end
   local installed = false
   local dialogueSerials = {}
-  -- Forward declarations: holdActor/releaseActor are assigned further below
+  -- Forward declarations: holdActor/releaseActor/realNow are assigned further below
   -- but are called by dialogue/trade handlers defined above that point.
-  local holdActor, releaseActor
+  local holdActor, releaseActor, realNow
   local GFX_SPECIES = {
     [109]="SNORLAX", [110]="SPEAROW", [111]="CUBONE", [112]="POLIWRATH",
     [113]="CLEFAIRY", [114]="PIDGEOT", [115]="JIGGLYPUFF", [116]="PIDGEY",
@@ -241,6 +241,7 @@ return function(ctx)
           s.party[slot] = received
           st.event, st.eventDetail = "trade", rare
           st.pendingTrade, st.retryAt = nil, nil
+          st.lastFifthAt = realNow()
           putState(key, st, all)
           message("Trade complete!\nYou got " .. speciesName(rid) .. "!", function() releaseActor(npc) end)
         end,
@@ -317,6 +318,30 @@ return function(ctx)
   end
 
   local function fifthEvent(game, npc, st, key, all, isPoke, display, species)
+    -- One-hour real-time cooldown between 5th-interaction rewards.
+    -- After a reward is given, the next 5th interaction (5 talks later)
+    -- shows a "come back later" message until the hour has passed.
+    local lastFifth = tonumber(st.lastFifthAt)
+    if lastFifth and (realNow() - lastFifth < 3600) then
+      local waitMsg
+      if isPoke then
+        waitMsg = display .. " looks at you expectantly...\n(Check back in a bit!)"
+      else
+        -- Reference the earlier trade/item per the spec.
+        if st.lastKind == "trade" then
+          waitMsg = display .. ":\nEnjoy that trade! Let's do\nanother in a little while."
+        elseif st.lastKind == "item" then
+          waitMsg = display .. ":\nI already gave you something.\nCome back later!"
+        else
+          waitMsg = display .. ":\nThat was fun! Give me some\ntime before our next match."
+        end
+      end
+      if isPoke then
+        return cryMessage(display, species, function() message(waitMsg, function() releaseActor(npc) end) end)
+      end
+      return message(waitMsg, function() releaseActor(npc) end)
+    end
+
     local kindPool = isPoke and { "item", "battle" } or { "item", "trade", "battle" }
     local last = st.lastKind
     local battleReady = (tonumber(st.lastBattleAt) == nil) or (realNow() - tonumber(st.lastBattleAt) >= 3600)
@@ -346,6 +371,7 @@ return function(ctx)
       local given, id = giftItem(s)
       st.event, st.eventDetail = "item", id
       st.pendingTrade, st.retryAt = nil, nil
+      st.lastFifthAt = realNow()
       putState(key, st, all)
       local nice = itemName(id)
       if isPoke then
@@ -373,6 +399,7 @@ return function(ctx)
     local foeSpecies = speciesName(foeId)
     st.event, st.eventDetail = "battle", foeSpecies
     st.pendingTrade = nil
+    st.lastFifthAt = realNow()
     putState(key, st, all)
 
     if isPoke then
@@ -626,7 +653,7 @@ return function(ctx)
     return body
   end
 
-  local function realNow()
+  realNow = function()
     if os and os.time then
       local ok, t = pcall(os.time)
       if ok and tonumber(t) then return tonumber(t) end
