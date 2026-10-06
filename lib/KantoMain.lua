@@ -3188,6 +3188,7 @@ function putToSleep(npc)
     -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
     -- Bed/tent/sleeping bag caused worse visuals; reverting to pre-accessory behavior.
     return
+    --[[ Disabled accessory code below
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
@@ -3215,6 +3216,7 @@ function putToSleep(npc)
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
+    -- End disabled accessory code ]]
   end
   local function drawSleepTentOverlay(npc, sx, sy) return end
 
