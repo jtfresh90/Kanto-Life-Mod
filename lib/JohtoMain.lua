@@ -2630,8 +2630,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if NPC._johtoLifeZzzWrapped then return end
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
-        -- Always preserve original 2-arg behavior through base
-        if scale == nil then
+        local sleeping = self.nightlifeSleeping
+        -- Always preserve original 2-arg behavior through base, BUT
+        -- sleeping NPCs need the rotation even in the 2-arg path.
+        -- (Bug: the scale==nil early return was skipping sleep visuals.)
+        if scale == nil and not sleeping then
           local r = baseDraw(self, ox, oy)
           if not isVoxelPresentation() then
             drawZzzForNpc(self, ox, oy, nil)
@@ -2639,8 +2642,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           drawCollisionBubble(self, ox, oy, nil)
           return r
         end
-
-        local sleeping = self.nightlifeSleeping
+        -- If sleeping and scale is nil, use scale=1 for the sleep path below.
+        if scale == nil then scale = 1 end
         local voxel = isVoxelPresentation()
         local angle = self.johtoLifeSleepAngle or (math.pi / 2)
     
