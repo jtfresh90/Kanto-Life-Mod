@@ -3227,7 +3227,14 @@ function putToSleep(npc)
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
   local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
-    local NPCMod = NPC or safeRequire("src.world.NPC")
+    -- Try multiple paths for platform compatibility.
+    local NPCMod = NPC
+    if not (NPCMod and type(NPCMod.draw) == "function") then
+      for _, path in ipairs({"src.world.NPC", "src.world.npc", "world.NPC"}) do
+        local m = safeRequire(path)
+        if m and type(m.draw) == "function" then NPCMod = m; break end
+      end
+    end
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)

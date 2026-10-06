@@ -2625,7 +2625,21 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     end
 
     pcall(function()
-      local NPC = require("src.world.gen2.Npc")
+      -- Try multiple require paths for iOS/Android compatibility.
+      -- The engine's module structure may differ across platforms.
+      local NPC = nil
+      for _, path in ipairs({
+        "src.world.gen2.Npc",
+        "src.world.Npc",
+        "world.gen2.Npc",
+        "world.Npc",
+      }) do
+        local ok, mod = pcall(require, path)
+        if ok and mod and type(mod.draw) == "function" then
+          NPC = mod
+          break
+        end
+      end
       if not (NPC and type(NPC.draw) == "function") then return end
       -- Reset the wrap flag on every mod load. The flag persists on the NPC
       -- class across mod updates; without resetting, a fixed draw hook would
