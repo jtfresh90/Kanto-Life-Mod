@@ -1,5 +1,8 @@
 -- Kanto Life 0.8.96 — public voxel sleep renderer for Porygonal compatibility
 return function(mod)
+  -- Double cache clear (pass 1): set flag on mod load.
+  -- Pass 2 runs on first sleep tick to clear stale baked sprites.
+  _G._kantoLifeSleepCacheClearPending = true
   local function loadBundled(rel)
     local src, err = mod:read(rel)
     if type(src) ~= "string" then return nil, err end
@@ -1430,6 +1433,25 @@ return function(mod)
       end
       -- Allow day/night schedule to refresh when rate toggles
       -- (keep schedule so same NPCs tend to re-sleep unless rate excludes them)
+    end
+    -- Double cache clear (pass 2): clear baked flags on first run after load.
+    -- Handles iOS file caching where old broken sprites persist.
+    if _G._kantoLifeSleepCacheClearPending then
+      _G._kantoLifeSleepCacheClearPending = nil
+      local ow2 = mod.world and mod.world:overworld()
+      if ow2 then
+        for _, npc in ipairs(ow2.npcs or {}) do
+          if npc.sprite then
+            npc.sprite._kantoSleepBaked = nil
+            npc.sprite._kantoSleepIsHgss = nil
+          end
+          -- Force re-evaluation of sleep state
+          if npc.nightlifeSleeping then
+            npc.nightlifeSleeping = nil
+            npc.frozen = false
+          end
+        end
+      end
     end
     if not opt("sleeping_npcs") then return end
     local isNight = night(ow)

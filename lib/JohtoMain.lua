@@ -27,6 +27,22 @@ return function(mod)
     end
   end
   local johtoSleepImages = SleepAssets._johtoLifeSleepImages
+  -- Double cache clear on version update.
+  -- Pass 1: clear the global image cache immediately.
+  -- Pass 2: clear again after a tick to catch late-loading assets.
+  -- This handles iOS file caching where old broken sprites persist.
+  local function clearSleepCache()
+    if SleepAssets._johtoLifeSleepImages then
+      for k in pairs(SleepAssets._johtoLifeSleepImages) do
+        SleepAssets._johtoLifeSleepImages[k] = nil
+      end
+    end
+    -- Reset the baked flag version to force draw-time fallback.
+    SleepAssets._johtoLifeSleepCacheVersion = 2
+  end
+  clearSleepCache()  -- Pass 1
+  -- Pass 2 is scheduled via the sleep tick (clears again on first run).
+  SleepAssets._johtoLifeSleepCacheClearPending = true
   -- Clear any stale baked-sleep flags from previous mod versions.
   -- The 1.4.0 bake produced blank canvases; if an NPC still carries the
   -- _johtoSleepBaked flag, the draw code will use the broken cached image.
@@ -1372,6 +1388,16 @@ return function(mod)
   end
 
   johtoSleepTick = function(world)
+    -- Pass 2 of double cache clear: runs on first tick after mod load.
+    if SleepAssets and SleepAssets._johtoLifeSleepCacheClearPending then
+      SleepAssets._johtoLifeSleepCacheClearPending = nil
+      if SleepAssets._johtoLifeSleepImages then
+        for k in pairs(SleepAssets._johtoLifeSleepImages) do
+          SleepAssets._johtoLifeSleepImages[k] = nil
+        end
+      end
+      SleepAssets._johtoLifeSleepCacheVersion = 2
+    end
     if not world or not opt("sleeping_npcs") then return end
     local function safe(npc)
       local map = world.map
