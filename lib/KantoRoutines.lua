@@ -1056,7 +1056,7 @@ return function(ctx)
           if tx and ty then st.localTarget = {tx, ty} end
         end
         if st.localTarget and not npc.moving then
-          if not stepToward(world, npc, st.localTarget[1], st.localTarget[2]) then
+          if not stepToward(world, npc, st.localTarget[1], st.localTarget[2]) then          
             st.localTarget = nil
             st.localWait = 0
           end
@@ -1071,9 +1071,18 @@ return function(ctx)
         local wt = st.wanderTarget
         if wt and npc.cellX == wt[1] and npc.cellY == wt[2] then st.wanderTarget = nil end
         if st.wait <= 0 then
-          st.phase = "outbound"
-          st.target = destinationFor(world, npc, nil, st.travelKind)
-          st.repath = 0
+          -- Fly/teleport/surf NPCs depart in place with a visual effect
+          -- instead of walking to a door or route exit.
+          local kind = st.travelKind
+          if kind == "fly" or kind == "teleport" or kind == "surf" then
+            st.phase = "special_depart"
+            st.wait = 1.2
+            startDepartEffect(npc, kind)
+          else
+            st.phase = "outbound"
+            st.target = destinationFor(world, npc, nil, st.travelKind)
+            st.repath = 0
+          end
         elseif st.wanderTarget then
           if not npc.moving then stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2]) end
         end
