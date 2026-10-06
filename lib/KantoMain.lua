@@ -3238,9 +3238,42 @@ function putToSleep(npc)
           local px0 = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py0 = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local psx, psy = px0 - (camX or 0), py0 - (camY or 0)
-          -- Pre-1.4.0: simple draw. The 1.4.0 HGSS-specific block caused
-          -- invisible NPCs when the HGSS image failed to load.
-          baseNpcDraw(self, camX, camY)
+          -- For HGSS sprites in 2D, baseNpcDraw doesn't render sleeping NPCs.
+      -- Draw the hgssNativeImage directly with 90° rotation (lying down).
+      local isHgss = self._kantoSleepIsHgss == true or
+        (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
+      local hgssDrawn = false
+      if isHgss and not (isVoxelPresentation and isVoxelPresentation()) then
+        local okDraw, drew = pcall(function()
+          local def = self.sprite and self.sprite.def or {}
+          local nativePath = def.hgssNativeImage
+          if not nativePath or nativePath == "" then return false end
+          local img = nil
+          if love and love.graphics then
+            local ok, result = pcall(love.graphics.newImage, nativePath)
+            if ok then img = result end
+          end
+          if not img then return false end
+          local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
+          local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
+          local angle = self.kantoLifeSleepAngle or (math.pi / 2)
+          love.graphics.push("all")
+          love.graphics.setColor(1, 1, 1, 1)
+          -- Draw centered at NPC position, rotated 90° to lie down
+          love.graphics.translate(psx + 8, psy + 8)
+          love.graphics.rotate(angle)
+          love.graphics.translate(-fw/2, -fh/2)
+          -- Draw first frame (standing frame works for sleeping)
+          local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
+          love.graphics.draw(img, quad, 0, 0)
+          love.graphics.pop()
+          return true
+        end)
+        hgssDrawn = okDraw and drew == true
+      end
+      if not hgssDrawn then
+        baseNpcDraw(self, camX, camY)
+      end
           pcall(drawSleepAccessory, self, psx, psy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0

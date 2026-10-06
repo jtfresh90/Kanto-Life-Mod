@@ -27,6 +27,16 @@ return function(mod)
     end
   end
   local johtoSleepImages = SleepAssets._johtoLifeSleepImages
+  -- Clear any stale baked-sleep flags from previous mod versions.
+  -- The 1.4.0 bake produced blank canvases; if an NPC still carries the
+  -- _johtoSleepBaked flag, the draw code will use the broken cached image.
+  -- Resetting forces the draw-time fallback (pre-1.4.0 behavior).
+  pcall(function()
+    local G = _G or {}
+    -- Cannot access world NPCs yet at load time; the flag is cleared
+    -- lazily in the draw path via the version check below.
+    SleepAssets._johtoLifeSleepCacheVersion = 2
+  end)
   local sleepGrayShader
 
   local function getSleepGrayShader()
@@ -2635,6 +2645,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local angle = self.johtoLifeSleepAngle or (math.pi / 2)
     
         local baked = self.sprite and self.sprite._johtoSleepBaked
+        -- Invalidate stale bakes from 1.4.0-1.4.14 (blank canvases).
+        -- Cache version 2 = bake disabled, use draw-time fallback.
+        if SleepAssets and SleepAssets._johtoLifeSleepCacheVersion == 2 then
+          baked = false
+        end
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP).
         if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)
