@@ -27,32 +27,6 @@ return function(mod)
     end
   end
   local johtoSleepImages = SleepAssets._johtoLifeSleepImages
-  -- Double cache clear on version update.
-  -- Pass 1: clear the global image cache immediately.
-  -- Pass 2: clear again after a tick to catch late-loading assets.
-  -- This handles iOS file caching where old broken sprites persist.
-  local function clearSleepCache()
-    if SleepAssets._johtoLifeSleepImages then
-      for k in pairs(SleepAssets._johtoLifeSleepImages) do
-        SleepAssets._johtoLifeSleepImages[k] = nil
-      end
-    end
-    -- Reset the baked flag version to force draw-time fallback.
-    SleepAssets._johtoLifeSleepCacheVersion = 2
-  end
-  clearSleepCache()  -- Pass 1
-  -- Pass 2 is scheduled via the sleep tick (clears again on first run).
-  SleepAssets._johtoLifeSleepCacheClearPending = true
-  -- Clear any stale baked-sleep flags from previous mod versions.
-  -- The 1.4.0 bake produced blank canvases; if an NPC still carries the
-  -- _johtoSleepBaked flag, the draw code will use the broken cached image.
-  -- Resetting forces the draw-time fallback (pre-1.4.0 behavior).
-  pcall(function()
-    local G = _G or {}
-    -- Cannot access world NPCs yet at load time; the flag is cleared
-    -- lazily in the draw path via the version check below.
-    SleepAssets._johtoLifeSleepCacheVersion = 2
-  end)
   local sleepGrayShader
 
   local function getSleepGrayShader()
@@ -1388,16 +1362,6 @@ return function(mod)
   end
 
   johtoSleepTick = function(world)
-    -- Pass 2 of double cache clear: runs on first tick after mod load.
-    if SleepAssets and SleepAssets._johtoLifeSleepCacheClearPending then
-      SleepAssets._johtoLifeSleepCacheClearPending = nil
-      if SleepAssets._johtoLifeSleepImages then
-        for k in pairs(SleepAssets._johtoLifeSleepImages) do
-          SleepAssets._johtoLifeSleepImages[k] = nil
-        end
-      end
-      SleepAssets._johtoLifeSleepCacheVersion = 2
-    end
     if not world or not opt("sleeping_npcs") then return end
     local function safe(npc)
       local map = world.map
@@ -1455,8 +1419,7 @@ return function(mod)
             if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
             local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
             npc.johtoLifeSleepAngle = sign * (math.pi / 2); npc.johtoLifeSleepSide = sign
-            -- Pre-1.4.0: no bake. The bake (added in 1.4.0) produced blank sprites.
-            -- pcall(bakeRotatedSleepSprite, npc)
+            pcall(bakeRotatedSleepSprite, npc)
             pcall(function() if type(npc.face) == "function" then npc:face(sign > 0 and "LEFT" or "RIGHT") else npc.facing = sign > 0 and "LEFT" or "RIGHT" end end)
           end
         elseif npc.nightlifeSleeping then
@@ -1628,8 +1591,7 @@ return function(mod)
                 local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
                 npc.johtoLifeSleepAngle = sign * (math.pi / 2)
                 npc.johtoLifeSleepSide = sign
-                -- Pre-1.4.0: no bake.
-                -- pcall(bakeRotatedSleepSprite, npc)
+                pcall(bakeRotatedSleepSprite, npc)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
@@ -2651,33 +2613,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     end
 
     pcall(function()
-      -- Try multiple require paths for iOS/Android compatibility.
-      -- The engine's module structure may differ across platforms.
-      local NPC = nil
-      for _, path in ipairs({
-        "src.world.gen2.Npc",
-        "src.world.Npc",
-        "world.gen2.Npc",
-        "world.Npc",
-      }) do
-        local ok, mod = pcall(require, path)
-        if ok and mod and type(mod.draw) == "function" then
-          NPC = mod
-          break
-        end
-      end
+      local NPC = require("src.world.gen2.Npc")
       if not (NPC and type(NPC.draw) == "function") then return end
-      -- Reset the wrap flag on every mod load. The flag persists on the NPC
-      -- class across mod updates; without resetting, a fixed draw hook would
-      -- never install because the old (broken) wrap is still marked as done.
-      NPC._johtoLifeZzzWrapped = nil
+      if NPC._johtoLifeZzzWrapped then return end
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
-        local sleeping = self.nightlifeSleeping
-        -- Always preserve original 2-arg behavior through base, BUT
-        -- sleeping NPCs need the rotation even in the 2-arg path.
-        -- (Bug: the scale==nil early return was skipping sleep visuals.)
-        if scale == nil and not sleeping then
+        -- Always preserve original 2-arg behavior through base
+        if scale == nil then
           local r = baseDraw(self, ox, oy)
           if not isVoxelPresentation() then
             drawZzzForNpc(self, ox, oy, nil)
@@ -2685,17 +2627,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           drawCollisionBubble(self, ox, oy, nil)
           return r
         end
-        -- If sleeping and scale is nil, use scale=1 for the sleep path below.
-        if scale == nil then scale = 1 end
+
+        local sleeping = self.nightlifeSleeping
         local voxel = isVoxelPresentation()
         local angle = self.johtoLifeSleepAngle or (math.pi / 2)
     
         local baked = self.sprite and self.sprite._johtoSleepBaked
-        -- Invalidate stale bakes from 1.4.0-1.4.14 (blank canvases).
-        -- Cache version 2 = bake disabled, use draw-time fallback.
-        if SleepAssets and SleepAssets._johtoLifeSleepCacheVersion == 2 then
-          baked = false
-        end
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP).
         if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)

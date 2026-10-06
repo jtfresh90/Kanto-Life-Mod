@@ -1,8 +1,5 @@
 -- Kanto Life 0.8.96 — public voxel sleep renderer for Porygonal compatibility
 return function(mod)
-  -- Double cache clear (pass 1): set flag on mod load.
-  -- Pass 2 runs on first sleep tick to clear stale baked sprites.
-  _G._kantoLifeSleepCacheClearPending = true
   local function loadBundled(rel)
     local src, err = mod:read(rel)
     if type(src) ~= "string" then return nil, err end
@@ -1433,25 +1430,6 @@ return function(mod)
       end
       -- Allow day/night schedule to refresh when rate toggles
       -- (keep schedule so same NPCs tend to re-sleep unless rate excludes them)
-    end
-    -- Double cache clear (pass 2): clear baked flags on first run after load.
-    -- Handles iOS file caching where old broken sprites persist.
-    if _G._kantoLifeSleepCacheClearPending then
-      _G._kantoLifeSleepCacheClearPending = nil
-      local ow2 = mod.world and mod.world:overworld()
-      if ow2 then
-        for _, npc in ipairs(ow2.npcs or {}) do
-          if npc.sprite then
-            npc.sprite._kantoSleepBaked = nil
-            npc.sprite._kantoSleepIsHgss = nil
-          end
-          -- Force re-evaluation of sleep state
-          if npc.nightlifeSleeping then
-            npc.nightlifeSleeping = nil
-            npc.frozen = false
-          end
-        end
-      end
     end
     if not opt("sleeping_npcs") then return end
     local isNight = night(ow)
@@ -3249,14 +3227,7 @@ function putToSleep(npc)
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
   local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
-    -- Try multiple paths for platform compatibility.
-    local NPCMod = NPC
-    if not (NPCMod and type(NPCMod.draw) == "function") then
-      for _, path in ipairs({"src.world.NPC", "src.world.npc", "world.NPC"}) do
-        local m = safeRequire(path)
-        if m and type(m.draw) == "function" then NPCMod = m; break end
-      end
-    end
+    local NPCMod = NPC or safeRequire("src.world.NPC")
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
@@ -3273,16 +3244,16 @@ function putToSleep(npc)
         (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
       local hgssDrawn = false
       if isHgss and not (isVoxelPresentation and isVoxelPresentation()) then
-        local okDraw, drew = pcall(function()
+        hgssDrawn = pcall(function()
           local def = self.sprite and self.sprite.def or {}
           local nativePath = def.hgssNativeImage
-          if not nativePath or nativePath == "" then return false end
+          if not nativePath or nativePath == "" then return end
           local img = nil
           if love and love.graphics then
             local ok, result = pcall(love.graphics.newImage, nativePath)
             if ok then img = result end
           end
-          if not img then return false end
+          if not img then return end
           local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
           local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
           local angle = self.kantoLifeSleepAngle or (math.pi / 2)
@@ -3296,9 +3267,7 @@ function putToSleep(npc)
           local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
           love.graphics.draw(img, quad, 0, 0)
           love.graphics.pop()
-          return true
-        end)
-        hgssDrawn = okDraw and drew == true
+        end) and true or false
       end
       if not hgssDrawn then
         baseNpcDraw(self, camX, camY)
