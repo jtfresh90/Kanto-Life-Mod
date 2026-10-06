@@ -1089,6 +1089,34 @@ return function(ctx)
         goto continue
       end
 
+      -- Special departure: fly/teleport/surf. The NPC plays its effect in
+      -- place, then despawns and a replacement spawns at a random exit.
+      if st.phase == "special_depart" then
+        st.wait = (st.wait or 0) - (dt or 0)
+        if st.wait <= 0 then
+          local kind = st.travelKind
+          local dest = destinationFor(world, npc, nil, "door")
+          if not dest then dest = destinationFor(world, npc, nil, "route") end
+          if dest then
+            -- Mark the replacement with the arrival method for effect hooks.
+            local ok = spawnReplacement(world, npc, dest, nil)
+            if ok then
+              for _, q in ipairs(world.npcs or {}) do
+                if q._kantoRoutineArrival then
+                  q._kantoLifeArriveMethod = kind
+                  break
+                end
+              end
+              states[key] = nil; stateKeys[key] = nil; goto continue
+            end
+          end
+          -- Fallback: couldn't spawn, return to wandering.
+          st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil
+          npc._kantoLifeDepartMethod = nil
+        end
+        goto continue
+      end
+
       if not st.target then st.target = destinationFor(world, npc, nil, st.travelKind) end
       local t = st.target
       if not t then goto continue end
