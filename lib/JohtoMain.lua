@@ -2992,10 +2992,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                   npc.kantoLifeRandomSleepStyle = propStyle
                 end
               end
-              -- Tent (style 1) REPLACES the default sprite; skip it.
-              -- Bed/bag (2,3) and default (0) draw the sprite.
-              if propStyle ~= 1 then
-                -- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
+              -- FALLBACK (1.4.31): Always draw default sprite. Accessories disabled.
+              if true then
                 local pang = math.pi/2
                 Gfx.push()
                 local tx = x - BATTLE_ANCHOR_X * scale
@@ -3007,6 +3005,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
               -- Draw the prop (tent/bag/bed). Tent replaces the sprite (already skipped above);
               -- bed/bag are drawn on top of the sprite.
+              -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
+              -- Bed/tent/sleeping bag caused worse visuals.
+              local prop = nil
+              --[[ Disabled prop drawing
               local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
@@ -3025,6 +3027,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
                 Gfx.pop()
               end
+              -- End disabled prop drawing ]]
             end
           end
         end

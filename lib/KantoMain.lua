@@ -3185,6 +3185,9 @@ function putToSleep(npc)
     return cached
   end
   local function drawSleepAccessory(npc, sx, sy)
+    -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
+    -- Bed/tent/sleeping bag caused worse visuals; reverting to pre-accessory behavior.
+    return
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
@@ -5128,12 +5131,10 @@ local function nightlifeTick(world, dt)
             npc.kantoLifeRandomSleepStyle = propStyle
           end
         end
-        -- Tent (style 1) REPLACES the gray body.
-        -- Bed (3) and sleeping bag (2) are drawn ON TOP of the gray body.
-        -- Default (0): body only.
-        if propStyle ~= 1 then
-          Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
-        end
+        -- FALLBACK (1.4.31): Accessories disabled. Draw body only (default).
+        -- Bed/tent/sleeping bag caused worse visuals.
+        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        --[[ Disabled prop drawing
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
@@ -5149,6 +5150,7 @@ local function nightlifeTick(world, dt)
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
         end
+        -- End disabled prop drawing ]]
 
         -- One Z, upright and camera-facing like the native voxel billboard.
         local host = ctx.host or {}
