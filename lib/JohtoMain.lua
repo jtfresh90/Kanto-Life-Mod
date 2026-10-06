@@ -2652,37 +2652,26 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       NPC._johtoLifeZzzWrapped = nil
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
-        local sleeping = self.nightlifeSleeping
-        -- Always preserve original 2-arg behavior through base, BUT
-        -- sleeping NPCs need the rotation even in the 2-arg path.
-        -- (Bug: the scale==nil early return was skipping sleep visuals.)
-        if scale == nil and not sleeping then
+        -- Always preserve original 2-arg behavior through base
+        if scale == nil then
           local r = baseDraw(self, ox, oy)
           if not isVoxelPresentation() then
             drawZzzForNpc(self, ox, oy, nil)
           end
-          drawCollisionBubble(self, ox, oy, nil)
           return r
         end
-        -- If sleeping and scale is nil, use scale=1 for the sleep path below.
-        if scale == nil then scale = 1 end
+
+        local sleeping = self.nightlifeSleeping
         local voxel = isVoxelPresentation()
         local angle = self.johtoLifeSleepAngle or (math.pi / 2)
-    
         local baked = self.sprite and self.sprite._johtoSleepBaked
-        -- Invalidate stale bakes from 1.4.0-1.4.14 (blank canvases).
-        -- Cache version 2 = bake disabled, use draw-time fallback.
-        if SleepAssets and SleepAssets._johtoLifeSleepCacheVersion == 2 then
-          baked = false
-        end
-        -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP).
+
+        -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
         if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)
-          drawSleepAccessory(self, ox, oy, scale)
           if not voxel then
             drawZzzForNpc(self, ox, oy, scale)
           end
-          drawCollisionBubble(self, ox, oy, scale)
           return r
         end
 
@@ -2705,12 +2694,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           if not okRot then
             baseDraw(self, ox, oy, scale)
           end
-          if sleeping then drawSleepAccessory(self, ox, oy, scale) end
         else
           baseDraw(self, ox, oy, scale)
-          if sleeping then drawSleepAccessory(self, ox, oy, scale) end
         end
-        drawCollisionBubble(self, ox, oy, scale)
 
         if not voxel then
           drawZzzForNpc(self, ox, oy, scale)
