@@ -2983,26 +2983,31 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               if freeCamera then scale = scale * 2.0 end
 
               if scale < 0.35 then scale = 0.35 end; if scale > 8.0 then scale = 8.0 end
--- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
-                local pang = math.pi/2
-              Gfx.push()
-              local tx = x - BATTLE_ANCHOR_X * scale
-              local ty = y - BATTLE_ANCHOR_Y * scale
-              Gfx.scale(scale, scale)
-              drawSleepObjectsWithOutline(tx / scale, ty / scale, scale)
-              Gfx.pop()
-
-              -- Non-default tent/bag/bed props are presentation-only additions.
-              -- The default Gold sleep sprite above is never replaced.
+              -- Determine prop style first (tent replaces, others go on top).
               local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
               if propStyle == 4 then
-  propStyle = npc.kantoLifeRandomSleepStyle
-  if propStyle == nil then
-    propStyle = math.random(0, 3)
-    npc.kantoLifeRandomSleepStyle = propStyle
-  end
-end
-local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
+                propStyle = npc.kantoLifeRandomSleepStyle
+                if propStyle == nil then
+                  propStyle = math.random(0, 3)
+                  npc.kantoLifeRandomSleepStyle = propStyle
+                end
+              end
+              -- Tent (style 1) REPLACES the default sprite; skip it.
+              -- Bed/bag (2,3) and default (0) draw the sprite.
+              if propStyle ~= 1 then
+                -- Tent (style 1) stays upright; sleeping bag (2) and bed (3) lie flat.
+                local pang = math.pi/2
+                Gfx.push()
+                local tx = x - BATTLE_ANCHOR_X * scale
+                local ty = y - BATTLE_ANCHOR_Y * scale
+                Gfx.scale(scale, scale)
+                drawSleepObjectsWithOutline(tx / scale, ty / scale, scale)
+                Gfx.pop()
+              end
+
+              -- Draw the prop (tent/bag/bed). Tent replaces the sprite (already skipped above);
+              -- bed/bag are drawn on top of the sprite.
+              local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
                 -- Props need to be larger than the NPC sprite scale to be visible.

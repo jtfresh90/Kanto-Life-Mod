@@ -5121,9 +5121,10 @@ local function nightlifeTick(world, dt)
             npc.kantoLifeRandomSleepStyle = propStyle
           end
         end
-        -- If an accessory (bed/tent/bag) is set, it REPLACES the gray body.
-        -- Only draw the body for default style (0).
-        if propStyle == 0 then
+        -- Tent (style 1) REPLACES the gray body.
+        -- Bed (3) and sleeping bag (2) are drawn ON TOP of the gray body.
+        -- Default (0): body only.
+        if propStyle ~= 1 then
           Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
         end
         local pm = sleepPropMesh(propStyle)
