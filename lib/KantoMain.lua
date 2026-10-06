@@ -569,6 +569,10 @@ return function(mod)
   end
 
   local function wildSpawnModActive() if not mod then return false end; local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_tohoj", "untamed_advance", "wild_followers", } if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); for _, known in ipairs(knownIds) do if string.find(id, known, 1, true) then return true end end end end end return false end -- Pokemon ambient NPCs use their OWN count; human EXTRA NPC COUNT never drives them.
+  -- Celadon Living District (by 1Jamie) has its own ambient NPC system for Celadon City.
+  -- When active, Kanto Life skips spawning in Celadon to avoid conflicts.
+  local function celadonLivingDistrictActive() if not mod then return false end; if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); if string.find(id, "celadon", 1, true) and string.find(id, "living", 1, true) then return true end end end end return false end
+  local function isCeladonMap(mapId) if not mapId then return false end; local id = string.upper(tostring(mapId)); return id:find("CELADON", 1, true) ~= nil end
   local function pokeTargetCount(mapId, map)
     if not opt("poke_npcs") then return 0 end
     if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map)) then return 0 end
@@ -1004,6 +1008,9 @@ return function(mod)
     if not map or (map.id and map.id ~= mapId) then
       if ow.map and ow.map.id == mapId then map = ow.map else return end
     end
+    -- Celadon Living District compatibility: skip Kanto Life spawns in Celadon
+    -- when that mod is active (it has its own ambient NPC system).
+    if celadonLivingDistrictActive() and isCeladonMap(mapId) then return end
 
     local function syncKind(kind, want, spawnOne)
       local have = collectLiveAmbient(ow, kind)

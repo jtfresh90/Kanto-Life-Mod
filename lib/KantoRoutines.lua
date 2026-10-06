@@ -976,7 +976,9 @@ return function(ctx)
       for npc in pairs(agendaStates) do agendaStates[npc] = nil end
     end
     for _, npc in ipairs(world.npcs or {}) do
-      if agendaEligible(npc) then
+      -- pcall: wild mods may add NPCs with unexpected structure.
+      local ok, isElig = pcall(agendaEligible, npc)
+      if ok and isElig then
         local st = agendaStates[npc]
         if not st then
           local participate = (agendaMode == 2 and night) or ((not night) and (agendaMode >= 1) and hash(npc) < 10)
@@ -1041,8 +1043,10 @@ return function(ctx)
     -- engine ticks them; changing wanders only after base Overworld:update
     -- still permits one vanilla step per frame.
     if not enabled or not world or not world.npcs then return end
-    for _, npc in ipairs(world.npcs) do
-      if isKantoSpawn(npc) and not npc.nightlifeSleeping
+    for _, npc in ipairs(world.npcs or {}) do
+      -- pcall: wild mods may add NPCs with unexpected structure.
+      local ok, isSpawn = pcall(isKantoSpawn, npc)
+      if ok and isSpawn and not npc.nightlifeSleeping
          and npc._kantoRoutineTraveling == true then
         npc.wanders = false
       end
