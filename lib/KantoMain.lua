@@ -3244,16 +3244,16 @@ function putToSleep(npc)
         (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
       local hgssDrawn = false
       if isHgss and not (isVoxelPresentation and isVoxelPresentation()) then
-        local okDraw, drew = pcall(function()
+        hgssDrawn = pcall(function()
           local def = self.sprite and self.sprite.def or {}
           local nativePath = def.hgssNativeImage
-          if not nativePath or nativePath == "" then return false end
+          if not nativePath or nativePath == "" then return end
           local img = nil
           if love and love.graphics then
             local ok, result = pcall(love.graphics.newImage, nativePath)
             if ok then img = result end
           end
-          if not img then return false end
+          if not img then return end
           local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
           local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
           local angle = self.kantoLifeSleepAngle or (math.pi / 2)
@@ -3267,9 +3267,7 @@ function putToSleep(npc)
           local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
           love.graphics.draw(img, quad, 0, 0)
           love.graphics.pop()
-          return true
-        end)
-        hgssDrawn = okDraw and drew == true
+        end) and true or false
       end
       if not hgssDrawn then
         baseNpcDraw(self, camX, camY)

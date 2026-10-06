@@ -1419,9 +1419,7 @@ return function(mod)
             if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
             local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
             npc.johtoLifeSleepAngle = sign * (math.pi / 2); npc.johtoLifeSleepSide = sign
-            -- DISABLED: bakeRotatedSleepSprite was producing blank/invisible sprites.
-            -- Using draw-time rotation fallback instead (was working before 1.4.0).
-            -- pcall(bakeRotatedSleepSprite, npc)
+            pcall(bakeRotatedSleepSprite, npc)
             pcall(function() if type(npc.face) == "function" then npc:face(sign > 0 and "LEFT" or "RIGHT") else npc.facing = sign > 0 and "LEFT" or "RIGHT" end end)
           end
         elseif npc.nightlifeSleeping then
@@ -1593,8 +1591,7 @@ return function(mod)
                 local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
                 npc.johtoLifeSleepAngle = sign * (math.pi / 2)
                 npc.johtoLifeSleepSide = sign
-                -- DISABLED: bake was producing blank sprites. Using draw-time fallback.
-                -- pcall(bakeRotatedSleepSprite, npc)
+                pcall(bakeRotatedSleepSprite, npc)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
