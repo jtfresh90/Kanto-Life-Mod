@@ -332,15 +332,16 @@ return function(ctx)
     local kind
 
     if isPoke then
-      -- Pokémon NPCs alternate item/battle on successive fifth interactions.
-      st.fifthIndex = (tonumber(st.fifthIndex) or 0) + 1
-      local scheduled = ((st.fifthIndex % 2) == 1) and "item" or "battle"
-      if scheduled == "item" then
-        if itemReady then kind = "item"
-        elseif battleReady then kind = "battle" end
-      else -- scheduled battle
+      -- Pokémon NPCs: 70% wild encounter (battle), 30% item.
+      -- If the rolled kind is on cooldown, try the other kind.
+      local roll = math.random(100)
+      local scheduled = (roll <= 70) and "battle" or "item"
+      if scheduled == "battle" then
         if battleReady then kind = "battle"
         elseif itemReady then kind = "item" end
+      else -- scheduled item
+        if itemReady then kind = "item"
+        elseif battleReady then kind = "battle" end
       end
       -- If neither is ready, show "come back later".
       if not kind then
