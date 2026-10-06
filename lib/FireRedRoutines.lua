@@ -88,14 +88,13 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
+    -- DEBUG: Boosted for testing — 40% fly, 40% teleport, 10% door, 10% route.
+    -- Revert after confirming the mechanic works.
     local roll = math.random(100)
-    if roll <= 30 then return "door"
-    elseif roll <= 60 then return "route"
-    elseif roll <= 75 then return "fly"
-    elseif roll <= 90 then return "teleport"
-    else
-      return (hash(npc) < 50) and "route" or "door"
-    end
+    if roll <= 40 then return "fly"
+    elseif roll <= 80 then return "teleport"
+    elseif roll <= 90 then return "door"
+    else return "route" end
   end
 
   local function startDepartEffect(npc, method)
