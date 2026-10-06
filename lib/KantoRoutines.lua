@@ -84,6 +84,16 @@ return function(ctx)
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
+  local function startArriveEffect(npc, method)
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    npc._kantoLifeArriveMethod = method
+    npc._kantoLifeArriveUntil = now + 1.2
+    -- Show a cue bubble so the arrival doesn't look like a pop.
+    local cue = method == "fly" and "vv" or method == "teleport" and "**" or "!"
+    npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
+
   local DIRS = {
     {1,0,"right"}, {-1,0,"left"}, {0,1,"down"}, {0,-1,"up"},
   }
@@ -1109,12 +1119,22 @@ return function(ctx)
           local dest = destinationFor(world, npc, nil, "door")
           if not dest then dest = destinationFor(world, npc, nil, "route") end
           if dest then
+            -- Pick a random arrival method for the replacement: door (30%),
+            -- route (30%), fly (20%), teleport (20%). The replacement spawns
+            -- at the door/route, but shows an arrival effect bubble.
+            local arriveRoll = math.random(100)
+            local arriveMethod
+            if arriveRoll <= 30 then arriveMethod = "door"
+            elseif arriveRoll <= 60 then arriveMethod = "route"
+            elseif arriveRoll <= 80 then arriveMethod = "fly"
+            else arriveMethod = "teleport" end
             -- Mark the replacement with the arrival method for effect hooks.
             local ok = spawnReplacement(world, npc, dest, nil)
             if ok then
               for _, q in ipairs(world.npcs or {}) do
                 if q._kantoRoutineArrival then
-                  q._kantoLifeArriveMethod = kind
+                  -- Use the randomly chosen arrival method, not the departure kind.
+                  startArriveEffect(q, arriveMethod)
                   break
                 end
               end
