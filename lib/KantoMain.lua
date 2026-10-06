@@ -3131,17 +3131,31 @@ function putToSleep(npc)
     local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
     local rel = names[style]; if not rel then return nil end
     if sleepAccessoryCache[rel] then return sleepAccessoryCache[rel] end
-    local path = rel
     local ok, img = false, nil
-    -- Prefer the mod asset cache API. This is the engine-supported way to
-    -- resolve bundled art and avoids a generation-specific 2D/voxel path
-    -- mismatch. Keep the old path fallback for older runtimes.
+    -- Try mod.assets.image first (engine-supported)
     if mod.assets and type(mod.assets.image) == "function" then
       ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
     end
+    -- Try multiple path formats for iOS compatibility
+    if (not ok or not img) and mod.assets and type(mod.assets.path) == "function" then
+      for _, p in ipairs({
+        mod.assets:path("assets/" .. rel),
+        mod.assets:path(rel),
+        "assets/" .. rel,
+        rel,
+      }) do
+        if p then
+          ok, img = pcall(love.graphics.newImage, p)
+          if ok and img then break end
+        end
+      end
+    end
+    -- Last resort: try direct paths
     if not ok or not img then
-      if mod.assets and type(mod.assets.path) == "function" then path = mod.assets:path("assets/" .. rel) end
-      ok, img = pcall(love.graphics.newImage, path)
+      for _, p in ipairs({"assets/" .. rel, rel, mod.path .. "/assets/" .. rel}) do
+        ok, img = pcall(love.graphics.newImage, p)
+        if ok and img then break end
+      end
     end
     if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
     return nil
