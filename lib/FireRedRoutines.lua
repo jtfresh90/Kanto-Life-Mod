@@ -675,6 +675,7 @@ return function(ctx)
     st.ambientRoutine = ambient and st.routine
     if st.routine then
       npc._kantoLifeFRTravelKind = pickTravelKind(npc, world)
+      st.travelKind = npc._kantoLifeFRTravelKind
       npc.movement = "STAY"
       npc.range = "DOWN"
       if npc.def then npc.def.movement = "STAY"; npc.def.range = "DOWN" end
@@ -800,7 +801,14 @@ return function(ctx)
     if st.targetX == nil then
       -- Fly/teleport/surf NPCs depart in place with a visual effect instead
       -- of walking to a doorway. Uses the paired exit primitive.
-      local kind = npc._kantoLifeFRTravelKind
+      -- Fall back to picking the kind now if it wasn't set at assignment
+      -- (e.g., state reused across NPC objects).
+      local kind = npc._kantoLifeFRTravelKind or st.travelKind
+      if not kind then
+        kind = pickTravelKind(npc, world)
+        npc._kantoLifeFRTravelKind = kind
+        st.travelKind = kind
+      end
       if kind == "fly" or kind == "teleport" or kind == "surf" then
         if not st.specialDepartStarted then
           st.specialDepartStarted = true

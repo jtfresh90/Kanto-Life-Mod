@@ -12,6 +12,9 @@ return function(ctx)
   end
   local installed = false
   local dialogueSerials = {}
+  -- Forward declarations: holdActor/releaseActor are assigned further below
+  -- but are called by dialogue/trade handlers defined above that point.
+  local holdActor, releaseActor
   local GFX_SPECIES = {
     [109]="SNORLAX", [110]="SPEAROW", [111]="CUBONE", [112]="POLIWRATH",
     [113]="CLEFAIRY", [114]="PIDGEOT", [115]="JIGGLYPUFF", [116]="PIDGEY",
@@ -595,33 +598,88 @@ local function spriteGender(npc, def)
     return nil
   end
 
+  -- Brand-new hand-written FireRed dialogue lines (Kanto-themed).
+  -- Per-NPC recent history prevents repeats; pools reset when exhausted.
+  local FR_TOWN_LINES = {
+    "I'm headed to the\nMART before it closes.",
+    "KANTO feels busy\ntoday!",
+    "Have you challenged\nthe local GYM?",
+    "My team is resting\nat the POKéMON CENTER.",
+    "I'm training for\nthe POKéMON LEAGUE!",
+    "The DEPARTMENT STORE\nhas great deals!",
+    "I love the bustle\nof this city!",
+    "Excuse me, which way\nis the GYM?",
+    "I'm visiting friends\nin the next town.",
+    "Perfect weather for\na walk!",
+    "TEAM ROCKET better\nnot show up here!",
+    "I'm saving up for\na BICYCLE!",
+    "Seen any rare\nPOKéMON around?",
+    "The SAFARI ZONE is\namazing this time of year!",
+    "I just got my\nPOKéDEX upgraded!",
+    "CELADON has the\nbest shopping!",
+    "VERMILION's harbor\nis beautiful!",
+    "LAVENDER TOWN gives\nme the creeps...",
+    "SAFFRON is so\nmodern!",
+    "I heard the ELITE FOUR\nare tough!",
+    "My POKéMON love\nthe fresh air here.",
+    "I'm studying POKéMON\nat the lab!",
+    "The GAME CORNER is\ntempting...",
+    "I need more\nPOKé BALLS!",
+    "CERULEAN CAVE is\noff-limits, right?",
+    "Pewter's museum\nhas cool fossils!",
+    "I'm collecting\nGYM BADGES!",
+    "FUCHSIA's beach\nis relaxing.",
+    "The POWER PLANT\nis humming today.",
+  }
+  local FR_ROUTE_LINES = {
+    "These routes are\ncrawling with TRAINERS!",
+    "I'm traveling\nbetween towns.",
+    "Tall grass hides\nwild POKéMON!",
+    "Don't get lost\non the long road.",
+    "My team needs\nmore training!",
+    "Watch out for\nwild encounters!",
+    "The path to the\nnext town is long.",
+    "I love exploring\nnew routes!",
+    "My POKéMON are\ngetting stronger!",
+    "Have you seen\nthe LEGENDARY birds?",
+    "ROUTE 1 is where\nit all begins!",
+    "The grass is\nrustling...",
+    "I need to heal\nat the next CENTER.",
+    "This route has\nthe best views!",
+    "I'm mapping all\nthe secret paths!",
+  }
+
   local function humanDialogue(st, npc)
-    local ledger = saveGet("fireredDialogueLedgerV2", {})
-    if type(ledger) ~= "table" then ledger = {} end
-    local serial = tonumber(ledger.nextSerial) or 0
-    -- V2 starts a fresh global sequence so old repetitive V1 state cannot leak
-    -- into the new dialogue system.
-    ledger.nextSerial = serial + 1
-    saveSet("fireredDialogueLedgerV2", ledger)
-    local subject, activity, mon, detail, mapName, template = tupleForSerial(serial)
+    -- Per-NPC dialogue history: skip last 5 lines per NPC; resets when all used.
+    -- This replaces the old global-serial combinatorial system that repeated.
+    local rh = st.recentDialogue
+    if type(rh) ~= "table" then rh = {}; st.recentDialogue = rh end
+    -- Pick pool based on whether we're on a route (simple heuristic: check map name)
+    local pool = FR_TOWN_LINES
+    local rk = "town"
+    -- Use route lines if the NPC is a traveler (has travel routine)
+    if npc and npc._kantoLifeFRRoutine then
+      pool = FR_ROUTE_LINES
+      rk = "route"
+    end
+    local hst = rh[rk]
+    if type(hst) ~= "table" then hst = {}; rh[rk] = hst end
+    local avail = {}
+    for i = 1, #pool do
+      local used = false
+      for _, v in ipairs(hst) do if v == i then used = true; break end end
+      if not used then avail[#avail + 1] = i end
+    end
+    if #avail == 0 then
+      hst = {}; rh[rk] = hst
+      for i = 1, #pool do avail[i] = i end
+    end
+    local pi = avail[math.random(1, #avail)]
+    hst[#hst + 1] = pi
+    while #hst > 5 do table.remove(hst, 1) end
+    -- Note: caller saves st via putState; no need to save here.
+    local body = pool[pi]
     local ref = eventReference(st)
-    local body
-    if template == D_TEMPLATES[1] then body=template:format(subject,activity,mon,detail)
-    elseif template == D_TEMPLATES[2] then body=template:format(activity,subject,mon,detail)
-    elseif template == D_TEMPLATES[3] then body=template:format(mapName,subject,activity,detail)
-    elseif template == D_TEMPLATES[4] then body=template:format(subject,activity,detail,mon)
-    elseif template == D_TEMPLATES[5] then body=template:format(subject,activity,mon,detail)
-    elseif template == D_TEMPLATES[6] then body=template:format(subject,activity,detail)
-    elseif template == D_TEMPLATES[7] then body=template:format(mon,subject,detail)
-    elseif template == D_TEMPLATES[8] then body=template:format(subject,activity,detail)
-    elseif template == D_TEMPLATES[9] then body=template:format(subject,activity,mon,detail)
-    elseif template == D_TEMPLATES[10] then body=template:format(activity,mapName,detail,mon)
-    elseif template == D_TEMPLATES[11] then body=template:format(subject,activity,detail)
-    elseif template == D_TEMPLATES[12] then body=template:format(activity,subject,mon,detail)
-    elseif template == D_TEMPLATES[13] then body=template:format(subject,activity,detail,mon)
-    elseif template == D_TEMPLATES[14] then body=template:format(subject,activity,mapName,detail)
-    elseif template == D_TEMPLATES[15] then body=template:format(subject,mapName,activity,detail)
-    else body=template:format(activity,subject,detail) end
     if ref then body = body .. " " .. ref end
     return body
   end
@@ -635,13 +693,13 @@ local function spriteGender(npc, def)
     return 0
   end
 
-  local function holdActor(npc, seconds)
+  holdActor = function(npc, seconds)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = realNow() + (tonumber(seconds) or 30)
     npc._kantoLifeFRTalkPaused = true
   end
 
-  local function releaseActor(npc)
+  releaseActor = function(npc)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = nil
     npc._kantoLifeFRTalkPaused = nil

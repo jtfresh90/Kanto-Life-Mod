@@ -568,7 +568,7 @@ return function(mod)
     return n
   end
 
-  local function wildSpawnModActive() if not mod then return false end; local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", } if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); for _, known in ipairs(knownIds) do if string.find(id, known, 1, true) then return true end end end end end return false end -- Pokemon ambient NPCs use their OWN count; human EXTRA NPC COUNT never drives them.
+  local function wildSpawnModActive() if not mod then return false end; local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_tohoj", "untamed_advance", "wild_followers", } if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); for _, known in ipairs(knownIds) do if string.find(id, known, 1, true) then return true end end end end end return false end -- Pokemon ambient NPCs use their OWN count; human EXTRA NPC COUNT never drives them.
   local function pokeTargetCount(mapId, map)
     if not opt("poke_npcs") then return 0 end
     if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map)) then return 0 end

@@ -490,7 +490,7 @@ return function(mod)
   -- Detect wild-spawn mods to reduce NPC-list pressure when they are active.
   local function wildSpawnModActive()
     if not mod then return false end
-    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_advance", "wild_followers", }
+    local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_tohoj", "untamed_advance", "wild_followers", }
     if mod.list and type(mod.list) == "function" then
       local ok, list = pcall(mod.list)
       if ok and type(list) == "table" then
