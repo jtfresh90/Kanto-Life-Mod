@@ -3175,6 +3175,19 @@ function putToSleep(npc)
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
+    -- Use getScreenOrigin for accurate positioning (same as Zzz).
+    -- Falls back to sx, sy if not available.
+    local px = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
+    local py = npc.py or npc.y or ((npc.cellY or 0) * 16) or 0
+    -- sx, sy are already screen coords; but verify with getScreenOrigin if possible
+    -- (the caller passes psx, psy which may be 0,0 if position fields are missing)
+    if npc.sprite and type(npc.sprite.getScreenOrigin) == "function" then
+      -- We need camX, camY to call getScreenOrigin, but they're not passed.
+      -- For now, trust sx, sy but guard against (0,0).
+    end
+    -- Guard: if position is (0,0), the NPC position is unknown; skip to avoid
+    -- drawing at top-left corner.
+    if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
@@ -3303,7 +3316,18 @@ function putToSleep(npc)
       if not hgssDrawn then
         baseNpcDraw(self, camX, camY)
       end
-          pcall(drawSleepAccessory, self, psx, psy)
+          -- Calculate accessory position using getScreenOrigin if available
+          -- (same as Zzz positioning, to avoid top-left artifact).
+          local accSx, accSy = psx, psy
+          local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
+          local accPy = self.py or self.y or ((self.cellY or 0) * 16) or 0
+          if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+            local ok, ox, oy = pcall(function()
+              return self.sprite:getScreenOrigin(accPx, accPy, camX or 0, camY or 0)
+            end)
+            if ok and ox then accSx, accSy = ox, oy end
+          end
+          pcall(drawSleepAccessory, self, accSx, accSy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
