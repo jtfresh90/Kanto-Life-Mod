@@ -241,7 +241,7 @@ return function(ctx)
           s.party[slot] = received
           st.event, st.eventDetail = "trade", rare
           st.pendingTrade, st.retryAt = nil, nil
-          st.lastFifthAt = realNow()
+          st.lastItemAt = realNow()
           putState(key, st, all)
           message("Trade complete!\nYou got " .. speciesName(rid) .. "!", function() releaseActor(npc) end)
         end,
@@ -318,50 +318,61 @@ return function(ctx)
   end
 
   local function fifthEvent(game, npc, st, key, all, isPoke, display, species)
-    -- One-hour real-time cooldown between 5th-interaction rewards.
-    -- After a reward is given, the next 5th interaction (5 talks later)
-    -- shows a "come back later" message until the hour has passed.
-    local lastFifth = tonumber(st.lastFifthAt)
-    if lastFifth and (realNow() - lastFifth < 3600) then
-      local waitMsg
-      if isPoke then
-        waitMsg = display .. " looks at you expectantly...\n(Check back in a bit!)"
-      else
-        -- Reference the earlier trade/item per the spec.
-        if st.lastKind == "trade" then
+    -- Cooldowns: item/trade share a 1-hour cooldown (the "reward" cooldown).
+    -- Battle has its own 1-hour cooldown. For Pokémon NPCs, we alternate
+    -- item/battle; if the scheduled kind is on cooldown, we try the other.
+    local now = realNow()
+    local itemReady = (tonumber(st.lastItemAt) == nil) or (now - tonumber(st.lastItemAt) >= 3600)
+    local battleReady = (tonumber(st.lastBattleAt) == nil) or (now - tonumber(st.lastBattleAt) >= 3600)
+    -- For trainers, trade shares the item cooldown.
+    local rewardReady = itemReady -- trade uses item cooldown
+
+    local kindPool = isPoke and { "item", "battle" } or { "item", "trade", "battle" }
+    local last = st.lastKind
+    local kind
+
+    if isPoke then
+      -- Pokémon NPCs alternate item/battle on successive fifth interactions.
+      st.fifthIndex = (tonumber(st.fifthIndex) or 0) + 1
+      local scheduled = ((st.fifthIndex % 2) == 1) and "item" or "battle"
+      if scheduled == "item" then
+        if itemReady then kind = "item"
+        elseif battleReady then kind = "battle" end
+      else -- scheduled battle
+        if battleReady then kind = "battle"
+        elseif itemReady then kind = "item" end
+      end
+      -- If neither is ready, show "come back later".
+      if not kind then
+        local waitMsg = display .. " looks at you expectantly...\n(Check back in a bit!)"
+        return cryMessage(display, species, function() message(waitMsg, function() releaseActor(npc) end) end)
+      end
+    else
+      -- Trainers: pick from item/trade/battle, avoiding the last kind.
+      -- Item and trade share the 1-hour reward cooldown.
+      local pool = {}
+      for _, k in ipairs(kindPool) do
+        local ready = (k == "battle" and battleReady) or ((k == "item" or k == "trade") and rewardReady)
+        if k ~= last and ready then pool[#pool+1] = k end
+      end
+      if #pool == 0 then
+        for _, k in ipairs(kindPool) do
+          local ready = (k == "battle" and battleReady) or ((k == "item" or k == "trade") and rewardReady)
+          if ready then pool[#pool+1] = k end
+        end
+      end
+      if #pool == 0 then
+        -- Nothing ready: show "come back later" referencing the last reward.
+        local waitMsg
+        if last == "trade" then
           waitMsg = display .. ":\nEnjoy that trade! Let's do\nanother in a little while."
-        elseif st.lastKind == "item" then
+        elseif last == "item" then
           waitMsg = display .. ":\nI already gave you something.\nCome back later!"
         else
           waitMsg = display .. ":\nThat was fun! Give me some\ntime before our next match."
         end
+        return message(waitMsg, function() releaseActor(npc) end)
       end
-      if isPoke then
-        return cryMessage(display, species, function() message(waitMsg, function() releaseActor(npc) end) end)
-      end
-      return message(waitMsg, function() releaseActor(npc) end)
-    end
-
-    local kindPool = isPoke and { "item", "battle" } or { "item", "trade", "battle" }
-    local last = st.lastKind
-    local battleReady = (tonumber(st.lastBattleAt) == nil) or (realNow() - tonumber(st.lastBattleAt) >= 3600)
-    local kind
-    if isPoke then
-      -- Pokémon NPCs alternate item/battle on successive fifth interactions
-      -- instead of repeatedly rolling the same item result. A battle is only
-      -- suppressed when its real-time one-hour cooldown is active.
-      st.fifthIndex = (tonumber(st.fifthIndex) or 0) + 1
-      kind = ((st.fifthIndex % 2) == 1) and "item" or "battle"
-      if kind == "battle" and not battleReady then kind = "item" end
-    else
-      local pool = {}
-      for _, k in ipairs(kindPool) do
-        if k ~= last and (k ~= "battle" or battleReady) then pool[#pool+1] = k end
-      end
-      if #pool == 0 then
-        for _, k in ipairs(kindPool) do if k ~= "battle" or battleReady then pool[#pool+1] = k end end
-      end
-      if #pool == 0 then pool = { "item" } end
       kind = pool[math.random(1, #pool)]
     end
     st.lastKind = kind
@@ -371,7 +382,7 @@ return function(ctx)
       local given, id = giftItem(s)
       st.event, st.eventDetail = "item", id
       st.pendingTrade, st.retryAt = nil, nil
-      st.lastFifthAt = realNow()
+      st.lastItemAt = realNow()
       putState(key, st, all)
       local nice = itemName(id)
       if isPoke then
@@ -399,7 +410,6 @@ return function(ctx)
     local foeSpecies = speciesName(foeId)
     st.event, st.eventDetail = "battle", foeSpecies
     st.pendingTrade = nil
-    st.lastFifthAt = realNow()
     putState(key, st, all)
 
     if isPoke then
