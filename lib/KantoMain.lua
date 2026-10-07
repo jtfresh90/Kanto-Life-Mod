@@ -2877,7 +2877,7 @@ local nm = storyDisplayName(talker)
       love.graphics.clear(0, 0, 0, 0)
       love.graphics.setBlendMode("alpha")
       love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray for sleeping
-      love.graphics.push()
+      love.graphics.push("all")
       love.graphics.translate(fw / 2, fh / 2)
       love.graphics.rotate(angle)
       love.graphics.translate(-fw / 2, -fh / 2)
