@@ -3271,67 +3271,7 @@ function putToSleep(npc)
           if self.sprite and not self.sprite._kantoSleepBaked then
             pcall(bakeSleepSprite, self)
           end
-          -- HGSS fix: baseNpcDraw doesn't render sleeping HGSS NPCs.
-          -- Draw the native image directly with 90° rotation.
-          local isHgss = self._kantoSleepIsHgss == true or
-            (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
-          local hgssDrawn = false
-          if isHgss then
-            local okDraw, drew = pcall(function()
-              local def = self.sprite and self.sprite.def or {}
-              local nativePath = def.hgssNativeImage
-              if not nativePath or nativePath == "" then return false end
-              local img = nil
-              if love and love.graphics then
-                local ok, result = pcall(love.graphics.newImage, nativePath)
-                if ok then img = result end
-              end
-              if not img then return false end
-              local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
-              local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
-              local sx, sy = px - (camX or 0), py - (camY or 0)
-              if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
-                local ok2, ox, oy = pcall(function()
-                  return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
-                end)
-                if ok2 and ox then sx, sy = ox, oy end
-              end
-              local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
-              local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
-              local angle = self.kantoLifeSleepAngle or (math.pi / 2)
-              love.graphics.push("all")
-              love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray out
-              love.graphics.translate(sx + 8, sy + 8)
-              love.graphics.rotate(angle)
-              love.graphics.translate(-fw/2, -fh/2)
-              local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
-              love.graphics.draw(img, quad, 0, 0)
-              love.graphics.pop()
-              return true
-            end)
-            hgssDrawn = okDraw and drew == true
-          end
-          if not hgssDrawn then
-            -- Live rotation+gray (no canvas bake - more reliable on iOS)
-            local okLive = pcall(function()
-              local G = love.graphics
-              local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
-              local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
-              local sx, sy = px - (camX or 0), py - (camY or 0)
-              local angle = self.kantoLifeSleepAngle or (math.pi / 2)
-              G.push()
-              G.translate(sx + 8, sy + 8)
-              G.rotate(angle)
-              G.translate(-8, -8)
-              G.setColor(0.55, 0.55, 0.60, 1)  -- Gray
-              baseNpcDraw(self, camX, camY)
-              G.setColor(1, 1, 1, 1)
-              G.pop()
-            end)
-            if not okLive then
-              baseNpcDraw(self, camX, camY)
-            end
-          end
+          baseNpcDraw(self, camX, camY)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
