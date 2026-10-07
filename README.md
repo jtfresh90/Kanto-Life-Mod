@@ -46,7 +46,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 
 ### Gen 1 — Kanto / Yellow (v1.4.36)
 
-**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. HGSS sprite support. No bed/tent/bag accessories (disabled 1.4.31).
+**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. HGSS sprite support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
 **Travel:** 25% fly / 25% teleport / 25% door / 25% route.
 **Wild mods:** Compatible with Wilds of Kanto, Wilds of Kanto Revival, Untamed Tohjo via pcall protections.
 
@@ -72,7 +72,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 
 ### Gen 2 — Gold / Johto (v1.4.36)
 
-**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. 2D and voxel support. No bed/tent/bag accessories (disabled 1.4.31).
+**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. 2D and voxel support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
 **Travel:** 25% fly / 25% teleport / 25% door / 25% route.
 
 - Extra human NPCs for towns, routes, and interiors.
