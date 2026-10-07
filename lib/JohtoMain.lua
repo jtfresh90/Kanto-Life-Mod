@@ -2698,8 +2698,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           if not okRot then
             baseDraw(self, ox, oy, scale)
           end
+          pcall(drawSleepAccessory, self, ox, oy, scale)
         else
           baseDraw(self, ox, oy, scale)
+          pcall(drawSleepAccessory, self, ox, oy, scale)
         end
 
         if not voxel then
