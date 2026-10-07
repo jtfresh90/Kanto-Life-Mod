@@ -1,16 +1,34 @@
 # Kanto Life — Experimental Fork
 
 > **This is the experimental fork** (`experimental/lifelike-features`) of [Kanto Life](https://github.com/jtfresh90/Kanto-Life-Mod).
-> It contains all main-mod features **plus 23+ experimental lifelike NPC behaviors** that are being tested before (or instead of) merging to main.
->
-> **Key differences from main:**
-> - **Lifelike NPC behaviors:** Proximity greetings, mood-colored bubbles, group conversations, contagious yawning, idle-player curiosity, welcome-back greetings, sneezes with bless-yous, time-of-day comments, Pokémon adoration, NPC walking-companion bonds, NPC-to-NPC chatter with real dialogue exchanges, traveler arrival greetings, and more.
-> - **Sleep:** Retains bed/tent/sleeping-bag accessories and the experimental random sleep style option (main disabled accessories in 1.4.31 due to visual regressions).
-> - **Travel:** 25% fly / 25% teleport / 25% door / 25% route (synced with main).
-> - **Wild mod compatibility:** pcall protections against Wilds of Kanto, Wilds of Kanto Revival, Untamed mods (synced with main).
-> - **Celadon Living District:** Compatible via NPC flag isolation; both mods can coexist in Celadon City.
->
-> **Warning:** Experimental features may be unstable. For the stable release, use the [main mod](https://github.com/jtfresh90/Kanto-Life-Mod).
+> For the stable release, use the [main mod](https://github.com/jtfresh90/Kanto-Life-Mod).
+
+## 🧪 Fork vs Main: Feature Differences
+
+This fork contains **all main-mod features plus 23+ experimental lifelike NPC behaviors**. All main bug fixes are ported here.
+
+### Exclusive to this fork (experimental)
+- **Proximity greetings** (3 tiles, 30s cooldown, all 3 gens)
+- **Mood-colored** proximity greeting bubbles
+- **Group conversations** between NPCs
+- **Contagious yawning**
+- **Idle-player curiosity** `?` bubbles
+- **Welcome-back greetings**
+- **Sneezes** with bless-you responses
+- **Time-of-day transition comments**
+- **Pokémon adoration** (Gen 1/2)
+- **NPC walking-companion bonds**
+- **NPC-to-NPC chatter** with real dialogue exchanges
+- **Traveler arrival greetings**
+
+### Synced with main (all bug fixes ported)
+- **Sleep:** 1.0.0-based (no accessories), HGSS support, grayscale lying-down — same as main 1.4.36
+- **Travel:** 25% fly / 25% teleport / 25% door / 25% route — same as main
+- **Wild mod compatibility:** pcall protections for Wilds of Kanto, Revival, Untamed — same as main
+- **Sleep exclusions:** Story NPCs, boat boarders, Nurse Joy, shop clerks never sleep — same as main
+- **Celadon Living District:** Compatible via NPC flag isolation
+
+> **Warning:** Experimental features may be unstable.
 
 **Kanto Life** adds a living, moving population to the overworlds of **Gen 1, Gen 2, and Gen 3** while keeping the original games and their maps at the center of the experience.
 
