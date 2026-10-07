@@ -3207,6 +3207,8 @@ function putToSleep(npc)
   end
   local function drawSleepAccessory(npc, sx, sy)
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
+    -- Only draw for sleeping NPCs
+    if not npc.nightlifeSleeping then return end
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.

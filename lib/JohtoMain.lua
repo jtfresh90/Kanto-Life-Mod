@@ -2564,6 +2564,8 @@ function isVoxelPresentation()
     return cached
   end
     local function drawSleepAccessory(self, ox, oy, scale)
+      -- Only draw for sleeping NPCs
+      if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
