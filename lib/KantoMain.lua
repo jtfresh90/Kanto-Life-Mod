@@ -159,6 +159,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -1726,6 +1727,16 @@ return function(mod)
           end,
         },
         {
+          label = "SLEEP STYLE",
+          stepper = true,
+          kind = "number",
+          min = 0, max = 4, step = 1, stepFast = 1,
+          current = math.floor(tonumber(opt("sleep_style")) or 0),
+          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(v) or 0)] or "Default" end,
+          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
+          apply = function(v) setOpt("sleep_style", math.max(0, math.min(4, math.floor(tonumber(v) or 0)))) end,
+        },
+        {
           label = "NPC TALK BUBBLES",
           stepper = true, kind = "toggle",
           current = opt("npc_collision_bubbles") ~= false,
@@ -3165,14 +3176,18 @@ function putToSleep(npc)
   end
   -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
-    -- Accessories disabled (1.4.31): always Default (0)
-    return 0
+    -- Accessories re-enabled (1.4.45)
+    local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style ~= 4 then return style end
+    local cached = npc.kantoLifeRandomSleepStyle
+    if cached == nil then
+      cached = math.random(0, 3)
+      npc.kantoLifeRandomSleepStyle = cached
+    end
+    return cached
   end
   local function drawSleepAccessory(npc, sx, sy)
-    -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
-    -- Bed/tent/sleeping bag caused worse visuals; reverting to pre-accessory behavior.
-    return
-    --[[ Disabled accessory code below
+    -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     local style = resolveSleepStyle(npc)
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
@@ -3200,7 +3215,7 @@ function putToSleep(npc)
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
-    -- End disabled accessory code ]]
+    -- End accessory code
   end
   local function drawSleepTentOverlay(npc, sx, sy) return end
 
@@ -5047,7 +5062,7 @@ local function nightlifeTick(world, dt)
           Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
         )
 
-        local propStyle = 0 -- Accessories disabled (1.4.31)
+        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0) -- Accessories re-enabled (1.4.45)
         if propStyle == 4 then
           propStyle = npc.kantoLifeRandomSleepStyle
           if propStyle == nil then
@@ -5055,10 +5070,8 @@ local function nightlifeTick(world, dt)
             npc.kantoLifeRandomSleepStyle = propStyle
           end
         end
-        -- FALLBACK (1.4.31): Accessories disabled. Draw body only (default).
-        -- Bed/tent/sleeping bag caused worse visuals.
+        -- Accessories re-enabled (1.4.45)
         Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
-        --[[ Disabled prop drawing
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.

@@ -200,6 +200,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -920,6 +921,9 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
+        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
+          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
+          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_collision_bubbles", not (opt("npc_collision_bubbles") ~= false)) end },
         { label = "NPC ROUTINES", right = opt("npc_routines") and "ON" or "OFF", stepper = true,
@@ -2549,8 +2553,15 @@ function isVoxelPresentation()
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
       -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
-    -- Accessories disabled (1.4.31): always Default (0)
-    return 0
+    -- Accessories re-enabled (1.4.45)
+    local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style ~= 4 then return style end
+    local cached = npc.kantoLifeRandomSleepStyle
+    if cached == nil then
+      cached = math.random(0, 3)
+      npc.kantoLifeRandomSleepStyle = cached
+    end
+    return cached
   end
     local function drawSleepAccessory(self, ox, oy, scale)
       local style = resolveSleepStyle(self)
@@ -2953,10 +2964,18 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
               if scale < 0.35 then scale = 0.35 end; if scale > 8.0 then scale = 8.0 end
               -- Determine prop style first (tent replaces, others go on top).
-              -- Accessories disabled (1.4.31): propStyle always 0
-              local propStyle = 0
-              -- FALLBACK (1.4.31): Always draw default sprite. Accessories disabled.
-              if true then
+              -- Accessories re-enabled (1.4.45)
+              local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+              if propStyle == 4 then
+                propStyle = npc.kantoLifeRandomSleepStyle
+                if propStyle == nil then
+                  propStyle = math.random(0, 3)
+                  npc.kantoLifeRandomSleepStyle = propStyle
+                end
+              end
+              -- Tent (style 1) REPLACES the default sprite; skip it.
+              -- Bed/bag (2,3) and default (0) draw the sprite.
+              if propStyle ~= 1 then
                 local pang = math.pi/2
                 Gfx.push()
                 local tx = x - BATTLE_ANCHOR_X * scale
@@ -2968,10 +2987,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
               -- Draw the prop (tent/bag/bed). Tent replaces the sprite (already skipped above);
               -- bed/bag are drawn on top of the sprite.
-              -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
-              -- Bed/tent/sleeping bag caused worse visuals.
-              local prop = nil
-              --[[ Disabled prop drawing
+              -- Accessories re-enabled (1.4.45)
               local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
                 local pw, ph = prop:getDimensions()
