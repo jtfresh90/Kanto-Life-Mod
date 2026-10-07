@@ -2880,6 +2880,12 @@ local nm = storyDisplayName(talker)
         local ok2, r = pcall(function() return sprite:resolveImage() end)
         if ok2 then img = r end
       end
+      -- HGSS: load native image directly if sprite.image/resolveImage failed
+      if not img and sprite.def and type(sprite.def.hgssNativeImage) == "string"
+        and sprite.def.hgssNativeImage ~= "" then
+        local ok3, r3 = pcall(love.graphics.newImage, sprite.def.hgssNativeImage)
+        if ok3 then img = r3 end
+      end
       if not img then return nil end
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
       local c = love.graphics.newCanvas(fw, fh)
