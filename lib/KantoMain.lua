@@ -3254,7 +3254,7 @@ function putToSleep(npc)
     love.graphics.pop()
   end
 
-  local function drawCollisionBubble(npc, sx, sy)
+  local function drawCollisionBubble(npc, sx, sy, scale)
     if opt("npc_collision_bubbles") == false then return end
     local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
@@ -3262,6 +3262,8 @@ function putToSleep(npc)
     local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
     local G = love.graphics
     G.push("all")
+    scale = tonumber(scale) or 1
+    if scale ~= 1 then G.scale(scale, scale) sx, sy = sx / scale, sy / scale end
     local font = G.getFont and G.getFont() or nil
     local tw = font and font:getWidth(text) or (#text * 6)
     local w, h = math.max(18, tw + 8), 12
@@ -3442,7 +3444,9 @@ function putToSleep(npc)
               end
               local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
               if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
-                drawCollisionBubble(npc, x * sxRatio, y * syRatio)
+                -- Pass average scale so bubble isn't tiny in voxel mode
+                local vscale = ((sxRatio or 1) + (syRatio or 1)) / 2
+                drawCollisionBubble(npc, x * sxRatio, y * syRatio, vscale)
               end
             end
           end
@@ -4677,7 +4681,10 @@ local function nightlifeTick(world, dt)
         end
         if not src then return nil end
         local iw, ih = src:getDimensions()
-        local sourceFW, sourceFH, sourceY = 16, 16, 0
+        -- Use actual sprite frame dimensions (Pokémon may differ from 16x16 humans)
+        local actualFW = tonumber(sprite.frameWidth) or 16
+        local actualFH = tonumber(sprite.frameHeight) or 16
+        local sourceFW, sourceFH, sourceY = actualFW, actualFH, 0
         if srcIsHgss then
           sourceFW = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
           sourceFH = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or sourceFW
@@ -4692,8 +4699,9 @@ local function nightlifeTick(world, dt)
         local out = {}
         -- IMPORTANT: keep the exact proven 0.8.77 16x32 path for ordinary
         -- Gen-1 sprites. Only HGSS gets the larger native 32px voxel card.
-        local bodyW = srcIsHgss and 32 or 16
-        local bodyH = srcIsHgss and 32 or 16
+        -- Use actual frame dimensions for Pokémon (may differ from 16x16).
+        local bodyW = srcIsHgss and 32 or sourceFW
+        local bodyH = srcIsHgss and 32 or sourceFH
         local zBand = 16
         local cardW = bodyW
         local cardH = bodyH + zBand

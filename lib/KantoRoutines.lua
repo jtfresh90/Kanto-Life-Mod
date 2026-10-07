@@ -869,7 +869,15 @@ return function(ctx)
   local function refresh(world, force)
     -- pcall: wild mods may modify map structure, breaking destination building.
     local ok, dests = pcall(buildDestinations, world)
-    destinations = ok and dests or {}
+    if not ok then
+      -- Log the error so we can diagnose Wilds incompatibility
+      if mod and mod.log then
+        pcall(function() mod.log:warn("Kanto Life routines: buildDestinations failed: %s", tostring(dests)) end)
+      end
+      destinations = {}
+    else
+      destinations = dests
+    end
     lastWorld = world
     local pct = optionPct()
     local candidates = {}
