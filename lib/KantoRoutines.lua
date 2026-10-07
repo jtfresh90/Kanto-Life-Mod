@@ -380,7 +380,20 @@ return function(ctx)
     local map = world and world.map
     if not map then return {} end
     local id = tostring(map.id or "")
-    if isIndoor(id, map) then return doorTiles(map) end
+    if isIndoor(id, map) then
+      local out, seen = {}, {}
+      for _, w in ipairs((map.def and map.def.warps) or {}) do
+        if w.x ~= nil and w.y ~= nil then
+          local k = tostring(w.x)..":"..tostring(w.y)
+          if not seen[k] then
+            seen[k] = true
+            out[#out + 1] = { tonumber(w.x), tonumber(w.y), "door", tostring(w.destMap or ""), tonumber(w.destX), tonumber(w.destY), "warp", w }
+          end
+        end
+      end
+      if #out > 0 then return out end
+      return doorTiles(map)
+    end
     return outdoorExits(world)
   end
 
