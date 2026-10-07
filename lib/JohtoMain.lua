@@ -920,8 +920,6 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
-          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
-          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_collision_bubbles", not (opt("npc_collision_bubbles") ~= false)) end },
         { label = "NPC ROUTINES", right = opt("npc_routines") and "ON" or "OFF", stepper = true,
@@ -2551,14 +2549,8 @@ function isVoxelPresentation()
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
       -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
-    local style = math.floor(tonumber(opt("sleep_style")) or 0)
-    if style ~= 4 then return style end
-    local cached = npc.kantoLifeRandomSleepStyle
-    if cached == nil then
-      cached = math.random(0, 3)
-      npc.kantoLifeRandomSleepStyle = cached
-    end
-    return cached
+    -- Accessories disabled (1.4.31): always Default (0)
+    return 0
   end
     local function drawSleepAccessory(self, ox, oy, scale)
       local style = resolveSleepStyle(self)
@@ -2961,14 +2953,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
               if scale < 0.35 then scale = 0.35 end; if scale > 8.0 then scale = 8.0 end
               -- Determine prop style first (tent replaces, others go on top).
-              local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
-              if propStyle == 4 then
-                propStyle = npc.kantoLifeRandomSleepStyle
-                if propStyle == nil then
-                  propStyle = math.random(0, 3)
-                  npc.kantoLifeRandomSleepStyle = propStyle
-                end
-              end
+              -- Accessories disabled (1.4.31): propStyle always 0
+              local propStyle = 0
               -- FALLBACK (1.4.31): Always draw default sprite. Accessories disabled.
               if true then
                 local pang = math.pi/2
