@@ -3333,6 +3333,21 @@ function putToSleep(npc)
           drawSleepZzz(sx, sy, sleepZzzSeed(self))
           return
         end
+        -- Draw collision bubble for awake NPCs in 2D
+        local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
+        local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        if cbUntil > cbNow then
+          local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
+          local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+          local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
+          if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+            local ok, ox, oy = pcall(function()
+              return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
+            end)
+            if ok and ox then sx, sy = ox + 8, oy - 4 end
+          end
+          pcall(drawCollisionBubble, self, sx, sy, 1)
+        end
         return baseNpcDraw(self, camX, camY)
       end
       NPC = NPCMod

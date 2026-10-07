@@ -2709,6 +2709,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         if not voxel then
           drawZzzForNpc(self, ox, oy, scale)
         end
+        -- Draw collision bubble for awake NPCs
+        local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
+        local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        if cbUntil > cbNow then
+          pcall(drawCollisionBubble, self, ox, oy, scale)
+        end
       end
       NPC._johtoLifeZzzWrapped = true
     end)
