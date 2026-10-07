@@ -2588,6 +2588,19 @@ function isVoxelPresentation()
       love.graphics.draw(img,0,0)
       love.graphics.pop()
     end
+    -- 3-layer system for Gold
+    local function drawSleepAccessoryBase(self, ox, oy, scale)
+      if not self.nightlifeSleeping then return end
+      local style = resolveSleepStyle(self)
+      if style == 0 or style == 1 then return end
+      pcall(drawSleepAccessory, self, ox, oy, scale)
+    end
+    local function drawSleepAccessoryOverlay(self, ox, oy, scale)
+      if not self.nightlifeSleeping then return end
+      local style = resolveSleepStyle(self)
+      if style == 0 then return end
+      pcall(drawSleepAccessory, self, ox, oy, scale)
+    end
 local function drawSleepTentOverlay(self, ox, oy, scale) return end
     local function drawCollisionBubble(self, ox, oy, scale)
       if opt("npc_collision_bubbles") == false then return end
@@ -2670,9 +2683,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local baked = self.sprite and self.sprite._johtoSleepBaked
 
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
+        -- 3-layer system: base -> NPC -> overlay
         if sleeping and baked then
+          pcall(drawSleepAccessoryBase, self, ox, oy, scale)
           local r = baseDraw(self, ox, oy, scale)
-          pcall(drawSleepAccessory, self, ox, oy, scale)
+          pcall(drawSleepAccessoryOverlay, self, ox, oy, scale)
           if not voxel then
             drawZzzForNpc(self, ox, oy, scale)
           end

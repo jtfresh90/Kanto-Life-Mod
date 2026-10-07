@@ -3247,6 +3247,25 @@ function putToSleep(npc)
     love.graphics.pop()
     -- End accessory code
   end
+  -- 3-layer system: base (under NPC) and overlay (over NPC)
+  local function drawSleepAccessoryBase(npc, sx, sy)
+    -- Only for bed (3) and sleeping bag (2): draw opaque base under NPC
+    -- Tent (1) replaces NPC completely, so no base needed
+    if not npc.nightlifeSleeping then return end
+    local style = resolveSleepStyle(npc)
+    if style == 0 or style == 1 then return end  -- Skip Default and Tent
+    -- Draw the accessory image as the base layer
+    drawSleepAccessory(npc, sx, sy)
+  end
+  local function drawSleepAccessoryOverlay(npc, sx, sy)
+    -- Draw the accessory overlay on top of NPC (transparent part shows head)
+    if not npc.nightlifeSleeping then return end
+    local style = resolveSleepStyle(npc)
+    if style == 0 then return end
+    -- For tent: draw normally (replaces NPC visually)
+    -- For bed/bag: draw overlay (head shows through transparent part)
+    drawSleepAccessory(npc, sx, sy)
+  end
   local function drawSleepTentOverlay(npc, sx, sy) return end
 
   local function drawSleepZzz(sx, sy, seed)
@@ -3318,8 +3337,8 @@ function putToSleep(npc)
           if self.sprite and not self.sprite._kantoSleepBaked then
             pcall(bakeSleepSprite, self)
           end
-          baseNpcDraw(self, camX, camY)
-          -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
+          -- 3-layer system: bed base (bottom) -> NPC (middle) -> bed overlay (top)
+          -- Draw accessory base BEFORE the NPC
           local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local accPy = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local accSx, accSy = accPx - (camX or 0), accPy - (camY or 0)
@@ -3329,7 +3348,10 @@ function putToSleep(npc)
             end)
             if ok and ox then accSx, accSy = ox, oy end
           end
-          pcall(drawSleepAccessory, self, accSx, accSy)
+          pcall(drawSleepAccessoryBase, self, accSx, accSy)
+          baseNpcDraw(self, camX, camY)
+          -- Draw accessory overlay AFTER the NPC (transparent part shows head)
+          pcall(drawSleepAccessoryOverlay, self, accSx, accSy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
