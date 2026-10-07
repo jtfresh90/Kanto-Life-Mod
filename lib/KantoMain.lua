@@ -2871,6 +2871,15 @@ local nm = storyDisplayName(talker)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
     if sprite._kantoSleepBaked then return true end
+    -- For HGSS: don't bake the native image (complex, error-prone).
+    -- Mark as baked and let the draw hook handle rotation/tint via the proxy.
+    local isHgssSprite = sprite.def and type(sprite.def.hgssNativeImage) == "string"
+      and sprite.def.hgssNativeImage ~= ""
+    if isHgssSprite then
+      sprite._kantoSleepBaked = true
+      sprite._kantoSleepIsHgss = true
+      return true
+    end
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
