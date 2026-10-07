@@ -3164,14 +3164,8 @@ function putToSleep(npc)
   end
   -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
-    local style = math.floor(tonumber(opt("sleep_style")) or 0)
-    if style ~= 4 then return style end
-    local cached = npc.kantoLifeRandomSleepStyle
-    if cached == nil then
-      cached = math.random(0, 3)
-      npc.kantoLifeRandomSleepStyle = cached
-    end
-    return cached
+    -- Accessories disabled (1.4.31): always Default (0)
+    return 0
   end
   local function drawSleepAccessory(npc, sx, sy)
     -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
@@ -5094,7 +5088,7 @@ local function nightlifeTick(world, dt)
           Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
         )
 
-        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+        local propStyle = 0 -- Accessories disabled (1.4.31)
         if propStyle == 4 then
           propStyle = npc.kantoLifeRandomSleepStyle
           if propStyle == nil then
