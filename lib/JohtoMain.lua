@@ -2670,6 +2670,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
         if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)
+          pcall(drawSleepAccessory, self, ox, oy, scale)
           if not voxel then
             drawZzzForNpc(self, ox, oy, scale)
           end

@@ -3293,6 +3293,17 @@ function putToSleep(npc)
             pcall(bakeSleepSprite, self)
           end
           baseNpcDraw(self, camX, camY)
+          -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
+          local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
+          local accPy = self.py or self.y or ((self.cellY or 0) * 16) or 0
+          local accSx, accSy = accPx - (camX or 0), accPy - (camY or 0)
+          if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+            local ok, ox, oy = pcall(function()
+              return self.sprite:getScreenOrigin(accPx, accPy, camX or 0, camY or 0)
+            end)
+            if ok and ox then accSx, accSy = ox, oy end
+          end
+          pcall(drawSleepAccessory, self, accSx, accSy)
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
