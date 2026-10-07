@@ -1726,7 +1726,6 @@ return function(mod)
           end,
         },
         {
-        {
           label = "NPC TALK BUBBLES",
           stepper = true, kind = "toggle",
           current = opt("npc_collision_bubbles") ~= false,
