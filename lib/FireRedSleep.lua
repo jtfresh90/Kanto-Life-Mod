@@ -290,8 +290,18 @@ return function(ctx)
       ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
     end
     if not ok or not img then
-      if mod.assets and type(mod.assets.path) == "function" then path = mod.assets:path("assets/" .. rel) end
+      if mod.assets and type(mod.assets.path) == "function" then
+        path = mod.assets:path("assets/" .. rel)
+      else
+        -- Fallback: try relative to mod directory
+        local modPath = (mod and mod.path) or ""
+        if modPath ~= "" then path = modPath .. "/assets/" .. rel end
+      end
       ok, img = pcall(love.graphics.newImage, path)
+    end
+    -- Last resort: try just the asset name (love filesystem)
+    if (not ok or not img) and path ~= rel then
+      ok, img = pcall(love.graphics.newImage, "assets/" .. rel)
     end
     if ok and img then img:setFilter("nearest","nearest"); accessoryCache[rel]=img; return img end
     mod.log:warn("Kanto Life: could not load FireRed sleep prop %s", tostring(rel))
