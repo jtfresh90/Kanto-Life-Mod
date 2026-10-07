@@ -1592,7 +1592,12 @@ return function(mod)
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
       if d.johtoLifeAmbient and not d.johtoLifePokemon then
-        if chosen[npc] then
+        -- Never sleep story-critical NPCs (safety check, 1.4.26)
+        local spr = tostring(d.sprite or ""):upper()
+        local nm = tostring(d.name or ""):upper()
+        local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
+          or spr:find("CLERK", 1, true) or spr:find("SAILOR", 1, true)
+        if chosen[npc] and not isExcluded then
           if not npc.nightlifeSleeping then
             npc.frozen = true; npc.nightlifeSleeping = true
             if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
@@ -3294,6 +3299,9 @@ function isVoxelPresentation()
 
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
     local function drawSleepAccessory(self, ox, oy, scale)
+      -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
+      -- Bed/tent/sleeping bag caused worse visuals; reverting to pre-accessory behavior.
+      do return end
       -- Voxel mode: the bed/tent/bag prop is drawn by drawGoldSleep (voxel
       -- overlay via Voxel3D.project). The 2D transform below uses camera
       -- offsets that are meaningless in voxel space, producing a tiny
@@ -3405,7 +3413,7 @@ function isVoxelPresentation()
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
         if sleeping and baked then
           local r = baseDraw(self, ox, oy, scale)
-          drawSleepAccessory(self, ox, oy, scale)
+          -- FALLBACK (1.4.31): Accessories disabled.
           if not voxel then
             drawZzzForNpc(self, ox, oy, scale)
           end
@@ -3432,10 +3440,10 @@ function isVoxelPresentation()
           if not okRot then
             baseDraw(self, ox, oy, scale)
           end
-          if sleeping then drawSleepAccessory(self, ox, oy, scale) end
+          -- FALLBACK (1.4.31): Accessories disabled.
         else
           baseDraw(self, ox, oy, scale)
-          if sleeping then drawSleepAccessory(self, ox, oy, scale) end
+          -- FALLBACK (1.4.31): Accessories disabled.
         end
         drawCollisionBubble(self, ox, oy, scale)
 
@@ -3714,6 +3722,8 @@ function isVoxelPresentation()
 
               -- Non-default tent/bag/bed props are presentation-only additions.
               -- The default Gold sleep sprite above is never replaced.
+              -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
+              --[[ Disabled prop drawing
               local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
               local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
               if prop and groundX and groundY then
@@ -3730,6 +3740,7 @@ function isVoxelPresentation()
                 Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
                 Gfx.pop()
               end
+              -- End disabled prop drawing ]]
             end
           end
         end
