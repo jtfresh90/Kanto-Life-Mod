@@ -3312,7 +3312,25 @@ function putToSleep(npc)
             hgssDrawn = okDraw and drew == true
           end
           if not hgssDrawn then
-            baseNpcDraw(self, camX, camY)
+            -- Live rotation+gray (no canvas bake - more reliable on iOS)
+            local okLive = pcall(function()
+              local G = love.graphics
+              local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
+              local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+              local sx, sy = px - (camX or 0), py - (camY or 0)
+              local angle = self.kantoLifeSleepAngle or (math.pi / 2)
+              G.push()
+              G.translate(sx + 8, sy + 8)
+              G.rotate(angle)
+              G.translate(-8, -8)
+              G.setColor(0.55, 0.55, 0.60, 1)  -- Gray
+              baseNpcDraw(self, camX, camY)
+              G.setColor(1, 1, 1, 1)
+              G.pop()
+            end)
+            if not okLive then
+              baseNpcDraw(self, camX, camY)
+            end
           end
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
