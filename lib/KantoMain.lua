@@ -2884,6 +2884,7 @@ local nm = storyDisplayName(talker)
       if quad then love.graphics.draw(img, quad, 0, 0)
       else love.graphics.draw(img, 0, 0) end
       love.graphics.pop()
+      love.graphics.setColor(1, 1, 1, 1)  -- Reset color (push() doesn't save it)
       love.graphics.setCanvas(prev)
       return c
     end)
