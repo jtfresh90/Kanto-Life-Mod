@@ -3503,7 +3503,8 @@ function putToSleep(npc)
                   gh = h
                 end
               end
-              local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
+              -- Project above the NPC's head (gh + 32) for bubble placement
+              local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 32, py + 8)
               if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
                 -- Pass average scale so bubble isn't tiny in voxel mode
                 local vscale = ((sxRatio or 1) + (syRatio or 1)) / 2
@@ -5157,7 +5158,10 @@ local function nightlifeTick(world, dt)
           end
         end
         -- Accessories re-enabled (1.4.45)
-        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        -- Tent (style 1) replaces NPC completely; don't draw body
+        if propStyle ~= 1 then
+          Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        end
         local pm = sleepPropMesh(propStyle)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
