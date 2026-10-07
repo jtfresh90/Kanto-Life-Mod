@@ -200,7 +200,6 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -921,7 +920,6 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
-        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
           step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
           onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
@@ -2688,7 +2686,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             G.translate(cx, cy)
             G.rotate(angle)
             G.translate(-cx, -cy)
+            G.setColor(0.55, 0.55, 0.60, 1)  -- Gray for sleeping
             self.sprite:draw(px, py + yOff - 4, 0, 0, "down", 0, false, false, false, nil)
+            G.setColor(1, 1, 1, 1)  -- Reset
             G.pop()
           end)
           if not okRot then

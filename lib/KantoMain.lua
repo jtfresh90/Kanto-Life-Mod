@@ -159,7 +159,6 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -1727,15 +1726,6 @@ return function(mod)
           end,
         },
         {
-          label = "SLEEP STYLE",
-          stepper = true,
-          kind = "number",
-          min = 0, max = 4, step = 1, stepFast = 1,
-          current = math.floor(tonumber(opt("sleep_style")) or 0),
-          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(v) or 0)] or "Default" end,
-          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
-          apply = function(v) setOpt("sleep_style", math.max(0, math.min(4, math.floor(tonumber(v) or 0)))) end,
-        },
         {
           label = "NPC TALK BUBBLES",
           stepper = true, kind = "toggle",
@@ -2887,7 +2877,7 @@ local nm = storyDisplayName(talker)
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
       love.graphics.setBlendMode("alpha")
-      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray for sleeping
       love.graphics.push()
       love.graphics.translate(fw / 2, fh / 2)
       love.graphics.rotate(angle)
