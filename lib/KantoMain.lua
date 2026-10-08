@@ -3396,8 +3396,8 @@ function putToSleep(npc)
     -- CORRECTED: use angle (not hardcoded PI/2) to match overlay orientation.
     -- (User: overlay was correct, base was flipped 180)
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
-    -- FLIP 180°: base was backwards relative to overlay (user feedback)
-    angle = angle + math.pi
+    -- RESEARCH FIX: Base and overlay share the SAME rotation (no +PI).
+    -- They are authored with identical layout, so identical transforms align them.
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
@@ -3475,9 +3475,9 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- ALIGNED with base, but shifted DOWN 2px so head hole reveals full face
-    -- (user: only eyes visible, hole needs to go down)
-    love.graphics.translate(cx, cy + 2)
+    -- RESEARCH FIX: Same center as base (cx, cy). Head hole moved down 4px
+    -- in the asset itself, not via draw offset.
+    love.graphics.translate(cx, cy)
     if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
@@ -5458,8 +5458,8 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
-        -- RESEARCH FIX: default anchor for 3-layer alignment
-        local mesh = SpriteBillboards.mesh(def, 0)
+        -- RESEARCH FIX: centered anchor (h/2) so rotation pivots at mesh center
+        local mesh = SpriteBillboards.mesh(def, 0, h / 2)
         imageCache[imagePath] = old or image
         if mesh then meshCache[key] = mesh end
         return mesh
@@ -5494,7 +5494,7 @@ local function nightlifeTick(world, dt)
         -- RESEARCH FIX: Use default anchor for 3-layer alignment.
         -- Tent (1) is upright: bottom-anchor (ph) so it sits on the ground.
         -- Bed/bag (2,3) lie flat: default anchor (nil) for consistency with body.
-        local anchorY = nil
+        local anchorY = ph / 2
         if style == 1 then anchorY = ph end
         local mesh = SpriteBillboards.mesh(def, 0, anchorY)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
@@ -5514,8 +5514,8 @@ local function nightlifeTick(world, dt)
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_BASE_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
         -- Use same anchor as body (ph/2) for 3-layer alignment
-        -- RESEARCH FIX: Use default anchor for 3-layer alignment.
-        local mesh = SpriteBillboards.mesh(def, 0)
+        -- RESEARCH FIX: centered anchor (ph/2) for 3-layer alignment
+        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
         if mesh then propBaseMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propBaseMeshCache[style]
       end
@@ -5617,14 +5617,11 @@ local function nightlifeTick(world, dt)
         local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
-        -- Shared center: tile center (px+8, py+8). For rotateX(-PI/2) with centered
-        -- anchor, card extends north from origin, so cz = py+8+fh/2.
-        -- Use body dimensions for centering (body is the reference).
-        local bcx = px + 8 - w / 2
-        local bcz = py + 8 + h / 2
+        -- RESEARCH FIX: Rotate about mesh center (8,0,0), translate to tile center.
+        -- T(-8,0,0) before rotation ensures the card spins in place for any yaw.
         local bodyModel = Mat4.mul(
-          Mat4.translate(bcx, gh + 0.25, bcz),
-          bodyRot
+          Mat4.translate(px + 8, gh + 0.25, py + 8),
+          Mat4.mul(bodyRot, Mat4.translate(-8, 0, 0))
         )
 
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0) -- Accessories re-enabled (1.4.45)
@@ -5660,10 +5657,10 @@ local function nightlifeTick(world, dt)
             -- X: body center bcx is tile center. Prop width pw, center at bcx.
             -- Mesh X spans (8-pw/2) to (8+pw/2) in local (anchorX=pw/2, visual center at 8).
             -- After rotateY, X stays X. To center at bcx: origin X = bcx - 8.
-            -- (Simplification: use bcx directly, small X offset acceptable)
+            -- RESEARCH FIX: Tile center + offsets, pivot at mesh center
             local baseModel = Mat4.mul(
-              Mat4.translate(bcx + bedDx, gh + 0.03, bcz + ph/2 + bedDz),
-              flatRot
+              Mat4.translate(px + 8 + bedDx, gh + 0.03, py + 8 + bedDz),
+              Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
             )
             local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
             if not okD then fileLog("VOXEL base draw FAILED: " .. tostring(errD)) end
@@ -5690,11 +5687,9 @@ local function nightlifeTick(world, dt)
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
             -- Bed/bag: center on BODY's center (bcx, bcz).
-            -- Mesh extends ph north from origin. Origin = bcz + ph/2.
-            local ph2 = 24
-            if pm then ph2 = pm.h or 24 end
-            propCx = bcx + bedDx
-            propCz = bcz + ph2/2 + bedDz
+            -- RESEARCH FIX: Tile center + offsets (bcx/bcz removed)
+            propCx = px + 8 + bedDx
+            propCz = py + 8 + bedDz
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
@@ -5709,9 +5704,10 @@ local function nightlifeTick(world, dt)
             local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, tentModel, 0.2, tentModel)
             if not okD then fileLog("VOXEL tent draw FAILED: " .. tostring(errD)) end
           else
+            -- RESEARCH FIX: Pivot at mesh center
             local propModel = Mat4.mul(
               Mat4.translate(propCx, propY, propCz),
-              propRotation
+              Mat4.mul(propRotation, Mat4.translate(-8, 0, 0))
             )
             -- pull=0.2 biases overlay toward camera in depth vs body
             local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
@@ -5948,9 +5944,10 @@ local function nightlifeTick(world, dt)
           G.push("all")
           G.translate(sx + 8, sy + 8)
           G.rotate(angle)
-          -- CENTERED: translate by -8,-8 so 16x16 sprite center aligns with (sx+8, sy+8)
-          -- (Fixes NPC raised/misaligned between base and overlay)
-          G.translate(-8, -8)
+          -- RESEARCH FIX: translate by -8,-4. Engine's spr:draw blits at
+          -- getScreenOrigin=(0,-4), so visual center is (8,4), not (8,8).
+          -- This centers the NPC at (sx+8, sy+8) matching base/overlay.
+          G.translate(-8, -4)
           G.setColor(0.55, 0.55, 0.60, 1)
           -- Draw stand-down frame at local origin
           local ok = pcall(function()
