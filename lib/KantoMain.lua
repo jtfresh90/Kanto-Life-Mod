@@ -3263,7 +3263,9 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    local shiftX = (-math.sin(angle) * 6.5)
+    -- Shift bed toward feet so the head hole aligns with the head.
+    -- Feet are at +X for sign=+1, -X for sign=-1.
+    local shiftX = (math.sin(angle) * 10)
     love.graphics.translate(cx + shiftX, cy)
     love.graphics.rotate(angle)
     love.graphics.translate(-iw/2, -ih/2)
@@ -3319,7 +3321,8 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
+    -- Shift toward feet so the head hole aligns with the head (not covering it)
+    local shiftX = style == 1 and 0 or (math.sin(angle) * 10)
     love.graphics.translate(cx + shiftX, cy)
     if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
