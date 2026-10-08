@@ -3692,12 +3692,20 @@ function putToSleep(npc)
                   gh = h
                 end
               end
-              -- Battle Art verified: project() returns s = perspective scale.
-              -- Size = s * sxRatio converts to out-canvas pixels correctly.
-              local okP, x, y, s = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
-              if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
-                s = tonumber(s) or 1
-                drawCollisionBubble(npc, x * sxRatio, y * syRatio, s * sxRatio)
+              -- Measure true pixel scale by projecting two points 12 world
+              -- units apart vertically. The raw perspective scale `s` from
+              -- project() is relative, not pixels — using it directly made
+              -- bubbles pin-sized. Bubble base height is 12px at scale=1;
+              -- scale so 12px = 12 world units (matches NPC scale).
+              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
+              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 28, py + 8)
+              if okP1 and okP2 and type(x1) == "number" and type(y1) == "number"
+                 and type(y2) == "number" and math.abs(x1) < 10000 and math.abs(y1) < 10000 then
+                local pxPer12 = math.abs(y2 - y1)
+                local scale = pxPer12 / 12
+                if scale < 0.5 then scale = 0.5 end  -- sanity floor
+                if scale > 8 then scale = 8 end      -- sanity ceiling
+                drawCollisionBubble(npc, x1 * sxRatio, y1 * syRatio, scale * sxRatio)
               end
             end
           end
