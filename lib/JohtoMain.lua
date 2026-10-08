@@ -79,6 +79,27 @@ return function(mod)
     return nil
   end
 
+  -- Base (opaque) image for 3-layer rendering: drawn UNDER the NPC
+  local function sleepPropBaseImage(style)
+    style = math.floor(tonumber(style) or 0)
+    if style <= 0 or style == 1 then return nil end  -- No base for Default or Tent
+    local names = {[2]="sleeping_bag_base.png", [3]="sleep_bed_base.png"}
+    local rel = names[style]
+    if not rel then return nil end
+    if sleepPropCache[rel] then return sleepPropCache[rel] end
+    local ok, img = false, nil
+    if mod.assets and type(mod.assets.image) == "function" then
+      ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
+    end
+    if not ok or not img then
+      local path = rel
+      if mod.assets and type(mod.assets.path) == "function" then path = mod.assets:path("assets/" .. rel) end
+      ok, img = pcall(love.graphics.newImage, path)
+    end
+    if ok and img then img:setFilter("nearest", "nearest"); sleepPropCache[rel] = img; return img end
+    return nil
+  end
+
   -- Build a new 1-frame sprite from the NPC's current rendered standing frame,
   -- rotated ±90°, so both the flat and voxel renderers consume the same pixels.
   local function bakeRotatedSleepSprite(npc)
@@ -1603,6 +1624,9 @@ return function(mod)
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
                 npc.frozen = true
                 npc.nightlifeSleeping = true
+                -- Sleeping NPCs should not block doorways/movement
+                npc.johtoLifeOrigSolid = npc.solid
+                npc.solid = false
                 if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
                 local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
                 npc.johtoLifeSleepAngle = sign * (math.pi / 2)
@@ -1615,6 +1639,13 @@ return function(mod)
             elseif npc.nightlifeSleeping then
               npc.frozen = false
               npc.nightlifeSleeping = nil
+              -- Restore solidity
+              if npc.johtoLifeOrigSolid ~= nil then
+                npc.solid = npc.johtoLifeOrigSolid
+                npc.johtoLifeOrigSolid = nil
+              else
+                npc.solid = true
+              end
               npc.johtoLifeSleepAngle = nil
               pcall(restoreRotatedSleepSprite, npc)
               if npc.johtoLifeSleepFacing ~= nil then
@@ -2563,6 +2594,27 @@ function isVoxelPresentation()
     end
     return cached
   end
+    -- Draw the opaque base layer UNDER the NPC (3-layer system)
+    local function drawSleepAccessoryBase(self, ox, oy, scale)
+      if not self.nightlifeSleeping then return end
+      local style = resolveSleepStyle(self)
+      if style == 0 or style == 1 then return end
+      local img = sleepPropBaseImage(style); if not img then return end
+      local iw, ih = img:getDimensions()
+      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
+      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
+      local angle = self.johtoLifeSleepAngle or (math.pi/2)
+      local s = scale or 1
+      love.graphics.push("all")
+      love.graphics.translate(ox or 0, oy or 0)
+      love.graphics.scale(s, s)
+      local shiftX = (-math.sin(angle) * 6.5)
+      love.graphics.translate(px + 8 + shiftX, py + 8)
+      love.graphics.rotate(angle)
+      love.graphics.translate(-iw/2, -ih/2)
+      love.graphics.draw(img, 0, 0)
+      love.graphics.pop()
+    end
     local function drawSleepAccessory(self, ox, oy, scale)
       -- Only draw for sleeping NPCs
       if not self.nightlifeSleeping then return end
@@ -2672,7 +2724,16 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
         if sleeping and baked then
-          local r = baseDraw(self, ox, oy, scale)
+          -- Tent (style 1) replaces NPC: don't draw the NPC sprite
+          local style = resolveSleepStyle(self)
+          local r = nil
+          -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
+          if style ~= 1 and style ~= 0 then
+            pcall(drawSleepAccessoryBase, self, ox, oy, scale)
+          end
+          if style ~= 1 then
+            r = baseDraw(self, ox, oy, scale)
+          end
           pcall(drawSleepAccessory, self, ox, oy, scale)
           if not voxel then
             drawZzzForNpc(self, ox, oy, scale)

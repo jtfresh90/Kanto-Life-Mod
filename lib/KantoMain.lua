@@ -2983,6 +2983,9 @@ function putToSleep(npc)
     if npc.nightlifeSleeping then return end
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
+    -- Sleeping NPCs should not block doorways/movement
+    npc.kantoLifeOrigSolid = npc.solid
+    npc.solid = false
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3028,6 +3031,13 @@ function putToSleep(npc)
     if not npc or not npc.nightlifeSleeping then return end
     npc.nightlifeSleeping = nil
     npc.frozen = false
+    -- Restore solidity
+    if npc.kantoLifeOrigSolid ~= nil then
+      npc.solid = npc.kantoLifeOrigSolid
+      npc.kantoLifeOrigSolid = nil
+    else
+      npc.solid = true
+    end
     npc.sleepPose = nil
     npc.kantoLifeSleepAngle = nil
     restoreSleepSprite(npc)
@@ -3202,6 +3212,31 @@ function putToSleep(npc)
     if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
     return nil
   end
+  -- Base (opaque) image for 3-layer rendering: drawn UNDER the NPC
+  local function sleepAccessoryBaseImage(style)
+    style = math.floor(tonumber(style) or 0)
+    if style == 0 or style == 1 then return nil end  -- No base for Default or Tent
+    local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
+    local rel = names[style]; if not rel then return nil end
+    if sleepAccessoryCache[rel] then return sleepAccessoryCache[rel] end
+    local ok, img = false, nil
+    if mod.assets and type(mod.assets.image) == "function" then
+      ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
+    end
+    if (not ok or not img) and mod.assets and type(mod.assets.path) == "function" then
+      for _, p in ipairs({mod.assets:path("assets/" .. rel), mod.assets:path(rel)}) do
+        if p then ok, img = pcall(love.graphics.newImage, p); if ok and img then break end end
+      end
+    end
+    if not ok or not img then
+      for _, p in ipairs({"assets/" .. rel, rel}) do
+        ok, img = pcall(love.graphics.newImage, p)
+        if ok and img then break end
+      end
+    end
+    if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
+    return nil
+  end
   -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
     -- Accessories re-enabled (1.4.45)
@@ -3213,6 +3248,26 @@ function putToSleep(npc)
       npc.kantoLifeRandomSleepStyle = cached
     end
     return cached
+  end
+  -- Draw the opaque base layer UNDER the NPC (3-layer system)
+  local function drawSleepAccessoryBase(npc, sx, sy)
+    if not npc.nightlifeSleeping then return end
+    local style = resolveSleepStyle(npc)
+    if style == 0 or style == 1 then return end  -- No base for Default or Tent
+    local img = sleepAccessoryBaseImage(style)
+    if not img then return end
+    if sx == 0 and sy == 0 then return end
+    local iw, ih = img:getDimensions()
+    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+    local cx, cy = sx + 8, sy + 8
+    love.graphics.push("all")
+    love.graphics.setColor(1,1,1,1)
+    local shiftX = (-math.sin(angle) * 6.5)
+    love.graphics.translate(cx + shiftX, cy)
+    love.graphics.rotate(angle)
+    love.graphics.translate(-iw/2, -ih/2)
+    love.graphics.draw(img, 0, 0)
+    love.graphics.pop()
   end
   local function drawSleepAccessory(npc, sx, sy)
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
@@ -3318,7 +3373,25 @@ function putToSleep(npc)
           if self.sprite and not self.sprite._kantoSleepBaked then
             pcall(bakeSleepSprite, self)
           end
-          baseNpcDraw(self, camX, camY)
+          -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
+          local style = resolveSleepStyle(self)
+          local tentStyle = style == 1
+          if not tentStyle and style ~= 0 then
+            -- Draw base layer before NPC
+            local basePx = self.px or self.x or ((self.cellX or 0) * 16) or 0
+            local basePy = self.py or self.y or ((self.cellY or 0) * 16) or 0
+            local baseSx, baseSy = basePx - (camX or 0), basePy - (camY or 0)
+            if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+              local ok, ox, oy = pcall(function()
+                return self.sprite:getScreenOrigin(basePx, basePy, camX or 0, camY or 0)
+              end)
+              if ok and ox then baseSx, baseSy = ox, oy end
+            end
+            pcall(drawSleepAccessoryBase, self, baseSx, baseSy)
+          end
+          if not tentStyle then
+            baseNpcDraw(self, camX, camY)
+          end
           -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
           local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local accPy = self.py or self.y or ((self.cellY or 0) * 16) or 0
