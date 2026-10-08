@@ -3179,19 +3179,19 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
-  -- Debug log: try mod folder first (user-visible in Files app under the
-  -- mod), then love.filesystem (Documents/, same as lua-error.log).
+  -- Debug log: writes to lib/kanto_debug.log in the installed mod folder
+  -- (visible in iPhone Files app). Created dynamically when debug runs.
   local function fileLog(msg)
     pcall(function()
       local line = os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n"
-      -- Try mod folder first (user requested: visible in Files app)
+      -- Write to lib/ folder of the installed mod (user-visible in Files app)
       if mod and mod.path then
         pcall(function()
-          local f = io.open(mod.path .. "/kanto_debug.log", "a")
+          local f = io.open(mod.path .. "/lib/kanto_debug.log", "a")
           if f then f:write(line) f:close() return end
         end)
       end
-      -- Try LÖVE filesystem (iOS Documents/)
+      -- Fallback: LÖVE filesystem (iOS Documents/)
       if love and love.filesystem then
         pcall(function()
           local f = love.filesystem.newFile("kanto_debug.log")
@@ -4992,7 +4992,8 @@ local function nightlifeTick(world, dt)
       -- Each animation state is a separate cached image. The sprite itself
       -- remains a normal single-frame SpriteRenderer from the engine's point
       -- of view; voxel simply receives the currently selected texture.
-      local baseRel = string.format("kanto_life_sleep/%s",
+      -- v2: cache-busting version to avoid stale mod_compat sprites
+      local baseRel = string.format("kanto_life_sleep_v2/%s",
         tostring(npc.id or "x"):gsub("[^%w%-_]", "_"))
       local rels = {}
       for i = 1, 3 do
@@ -5314,8 +5315,8 @@ local function nightlifeTick(world, dt)
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc"):gsub("[^%w%-_]", "_")
-        local bodyPath = "kanto_life_sleep_3d/" .. sourceKey .. "_body_" .. idx .. ".png"
-        local zPath = "kanto_life_sleep_3d/" .. sourceKey .. "_z_" .. idx .. ".png"
+        local bodyPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_body_" .. idx .. ".png"
+        local zPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_z_" .. idx .. ".png"
         -- The normal sleep asset hook already exists for the generated cards.
         -- Publish these two derived images through that same hook so
         -- SpriteBillboards.mesh can resolve them without touching Assets.
