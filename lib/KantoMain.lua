@@ -5244,7 +5244,10 @@ local function nightlifeTick(world, dt)
       local function drawSleep3D(ctx)
         local npc = ctx and ctx.actor
         if not npc or not npc.nightlifeSleeping then return false end
-        if isPokemonFollower(npc) or isPokemonLike(npc) then return false end
+        -- Followers never sleep; non-ambient Pokémon-like excluded.
+        -- Ambient Pokémon (isPokeAmbient) use the same 3-layer voxel renderer.
+        if isPokemonFollower(npc) then return false end
+        if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
         if isViridianSleepyOldMan(npc) then return false end
         if not npc._kantoSleepVoxelFrames then
           pcall(bakeGrayLie, npc)
