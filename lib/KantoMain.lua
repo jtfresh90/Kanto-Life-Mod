@@ -3392,13 +3392,15 @@ function putToSleep(npc)
     if not img then return end
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
-    -- Draw centered on NPC, rotated 90deg to match lying-down sprite
-    -- ALIGNED: same center and rotation as overlay and NPC (no offset)
+    -- Draw centered on NPC, rotated to match lying-down sprite
+    -- CORRECTED: use angle (not hardcoded PI/2) to match overlay orientation.
+    -- (User: overlay was correct, base was flipped 180)
+    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
     love.graphics.translate(cx, cy)
-    love.graphics.rotate(math.pi / 2)
+    love.graphics.rotate(angle)
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
@@ -3467,13 +3469,13 @@ function putToSleep(npc)
     -- drawing at top-left corner.
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
+    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- ALIGNED: exact same transform as base (center, PI/2 rotation, no shift).
-    -- Fixes 180° flip and vertical misalignment.
+    -- ALIGNED: exact same transform as base (center, angle rotation, no shift).
     love.graphics.translate(cx, cy)
-    if style ~= 1 then love.graphics.rotate(math.pi / 2) end
+    if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
