@@ -2983,14 +2983,6 @@ function putToSleep(npc)
     if npc.nightlifeSleeping then return end
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
-    -- Sleeping NPCs should not block doorways/movement
-    -- Try multiple properties that might control collision
-    npc.kantoLifeOrigSolid = npc.solid
-    npc.solid = false
-    npc.kantoLifeOrigCollidable = npc.collidable
-    npc.collidable = false
-    npc.kantoLifeOrigBlocks = npc.blocksMovement
-    npc.blocksMovement = false
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3036,19 +3028,6 @@ function putToSleep(npc)
     if not npc or not npc.nightlifeSleeping then return end
     npc.nightlifeSleeping = nil
     npc.frozen = false
-    -- Restore solidity
-    if npc.kantoLifeOrigSolid ~= nil then
-      npc.solid = npc.kantoLifeOrigSolid
-      npc.kantoLifeOrigSolid = nil
-    end
-    if npc.kantoLifeOrigCollidable ~= nil then
-      npc.collidable = npc.kantoLifeOrigCollidable
-      npc.kantoLifeOrigCollidable = nil
-    end
-    if npc.kantoLifeOrigBlocks ~= nil then
-      npc.blocksMovement = npc.kantoLifeOrigBlocks
-      npc.kantoLifeOrigBlocks = nil
-    end
     npc.sleepPose = nil
     npc.kantoLifeSleepAngle = nil
     restoreSleepSprite(npc)
@@ -4548,9 +4527,7 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       end
       display = speciesDisplayName(species)
     else
-      local ok, stable = pcall(stableNameFor, npc)
-      if not ok then stable = "TRAINER" end
-      display = d.kantoLifeDisplayName or stable or "TRAINER"
+      display = d.kantoLifeDisplayName or stableNameFor(npc) or "TRAINER"
     end
 
     if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
@@ -4592,15 +4569,10 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     local asleep = opt("sleeping_npcs") and shouldSleepNow(npc, isNight)
 
     if isPokeAmbient(npc) and not asleep then
-      local ok, result = pcall(progressiveAmbientTalk, g, world, npc, true)
-      if ok then return result end
-      return false
+      return progressiveAmbientTalk(g, world, npc, true)
     end
     if isAmbientNpc(npc) and not asleep and not isPokeAmbient(npc) then
-      local ok, result = pcall(progressiveAmbientTalk, g, world, npc, false)
-      if ok then return result end
-      -- If progressiveAmbientTalk fails, fall through to base behavior
-      return false
+      return progressiveAmbientTalk(g, world, npc, false)
     end
     if not asleep then return false end
     if isSpecialCharacter(npc) then return false end
