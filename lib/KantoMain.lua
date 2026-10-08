@@ -3188,6 +3188,17 @@ function putToSleep(npc)
   end
 
   local sleepAccessoryCache = {}
+  -- File-based logging for iOS (no console access)
+  local function fileLog(msg)
+    pcall(function()
+      local path = (mod.path or ".") .. "/kanto_debug.log"
+      local f = io.open(path, "a")
+      if f then
+        f:write(os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n")
+        f:close()
+      end
+    end)
+  end
   local function sleepAccessoryImage(style)
     style = math.floor(tonumber(style) or 0)
     if style == 0 then return nil end
@@ -3281,6 +3292,7 @@ function putToSleep(npc)
     love.graphics.pop()
   end
   local function drawSleepAccessory(npc, sx, sy)
+    fileLog("drawSleepAccessory called, sleeping=" .. tostring(npc.nightlifeSleeping))
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     -- Only draw for sleeping NPCs
     if not npc.nightlifeSleeping then
@@ -3404,6 +3416,7 @@ function putToSleep(npc)
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
         if self.nightlifeSleeping then
+          fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
           if self.sprite and not self.sprite._kantoSleepBaked then
             pcall(bakeSleepSprite, self)
           end
