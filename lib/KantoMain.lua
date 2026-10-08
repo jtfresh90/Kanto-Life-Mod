@@ -2195,7 +2195,9 @@ local nm = storyDisplayName(talker)
     local name = tostring(d.name or ""):upper()
     local text = tostring(d.text or ""):upper()
     if sprite:find("NURSE", 1, true) or name:find("NURSE", 1, true) then return true end
-    if sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true) then return true end
+    -- FIX: Only exclude STATIONARY clerks (behind counters). Wandering
+    -- clerk-sprite NPCs (ambient glasses guys) can sleep.
+    if (sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true)) and not npc.wanders then return true end
     if sprite:find("OAK", 1, true) or name:find("OAK", 1, true) then return true end
     if sprite:find("ELM", 1, true) or name:find("ELM", 1, true) then return true end
     if sprite:find("BILL", 1, true) or name:find("BILL", 1, true) then return true end
@@ -2211,8 +2213,10 @@ local nm = storyDisplayName(talker)
       end
     end
     if npc.pikachuFollower then return true end
-    if sprite:find("PIKACHU", 1, true) or sprite:find("POKEMON", 1, true)
-       or sprite:find("BALL", 1, true) or sprite:find("FOSSIL", 1, true) then
+    -- FIX: Allow ambient Pikachu to sleep. Follower already excluded above.
+    if (sprite:find("PIKACHU", 1, true) or sprite:find("POKEMON", 1, true)
+       or sprite:find("BALL", 1, true) or sprite:find("FOSSIL", 1, true))
+       and not isPokeAmbient(npc) then
       return true
     end
     if d.item or d.pokemon then return true end
@@ -5027,7 +5031,9 @@ local function nightlifeTick(world, dt)
               local fx, fy = self.player:facingCell()
               if fx and type(self.npcAtCell) == "function" then
                 local npc = self:npcAtCell(fx, fy)
-                if npc and npc.moving and (isAmbientNpc(npc) or isPokeAmbient(npc)) then
+                -- NEW APPROACH: Handle ANY moving NPC, not just ambient.
+                -- User: "press A next to any sprites whether they walk or not"
+                if npc and npc.moving then
                   -- RESEARCH FIX: Keep NPC at facing cell (don't move to targetX).
                   -- Moving forward puts it out of npcAtCell reach. Clear stale
                   -- targets so routine resumes cleanly after talk.
@@ -5422,7 +5428,10 @@ local function nightlifeTick(world, dt)
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc")
-        local key = sourceKey .. "#" .. tostring(frameIndex)
+        -- FIX: Include sign in cache key. The bake pre-rotates 90° by sign;
+        -- without it, NPCs with different signs share the wrong rotation (180° bug).
+        local bakeSign = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+        local key = sourceKey .. "#" .. tostring(frameIndex) .. "#s" .. tostring(bakeSign)
         if imageCache[key .. ":body"] and imageCache[key .. ":z"] then
           return imageCache[key .. ":body"], imageCache[key .. ":z"], bodyW, bodyH
         end
@@ -5612,8 +5621,11 @@ local function nightlifeTick(world, dt)
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc"):gsub("[^%w%-_]", "_")
-        local bodyPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_body_" .. idx .. ".png"
-        local zPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_z_" .. idx .. ".png"
+        -- FIX: Include sign in path (matches bake cache key fix).
+        local pathSign = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+        local signSuffix = "_s" .. tostring(pathSign)
+        local bodyPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_body_" .. idx .. signSuffix .. ".png"
+        local zPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_z_" .. idx .. signSuffix .. ".png"
         -- The normal sleep asset hook already exists for the generated cards.
         -- Publish these two derived images through that same hook so
         -- SpriteBillboards.mesh can resolve them without touching Assets.
