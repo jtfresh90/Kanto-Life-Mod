@@ -2952,22 +2952,65 @@ local nm = storyDisplayName(talker)
     end)
     -- HGSS: bake normally (early return broke 2D - sprite never baked).
     -- The bake code below handles HGSS native images.
-    -- SIMPLIFIED: No rotation, no quad. Just gray tint of full image.
-    -- (Diagnostic for glasses/Pikachu wrong sprite issue)
+    -- Find the sprite image via all known methods.
+    -- Log which sprite this is (for glasses/Pikachu identification).
     local ok, canvas = pcall(function()
       local img = sprite.image
+      local srcMethod = "sprite.image"
       if not img and type(sprite.resolveImage) == "function" then
         local ok2, r = pcall(function() return sprite:resolveImage() end)
-        if ok2 then img = r end
+        if ok2 and r then img = r; srcMethod = "resolveImage" end
       end
+      -- HGSS native image path
+      local isHgss = sprite.def and type(sprite.def.hgssNativeImage) == "string"
+        and sprite.def.hgssNativeImage ~= ""
+      if not img and isHgss then
+        local ok3, r3 = pcall(love.graphics.newImage, sprite.def.hgssNativeImage)
+        if ok3 and r3 then img = r3; srcMethod = "hgssNativeImage" end
+      end
+      -- Standard def.image via Assets
+      if not img and sprite.def and sprite.def.image and type(Assets) == "table"
+        and type(Assets.imageData) == "function" then
+        local ok4, r4 = pcall(function()
+          local d = Assets.imageData(sprite.def.image)
+          return d and love.graphics.newImage(d) or nil
+        end)
+        if ok4 and r4 then img = r4; srcMethod = "def.image" end
+      end
+      -- Log sprite identity for diagnosis
+      pcall(function()
+        local defName = "?"
+        if sprite.def then
+          defName = tostring(sprite.def.name or sprite.def.id or sprite.def.image or "?")
+        end
+        fileLog(string.format("2D BAKE ID npc=%s def=%s method=%s",
+          tostring(npc.name or "?"), defName, srcMethod))
+      end)
       if not img then return nil end
-      local iw, ih = img:getDimensions()
-      local c = love.graphics.newCanvas(iw, ih)
+      -- Use the NPC's current frame quad if available (not just frame 0)
+      local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
+      local fw = tonumber(sprite.frameWidth) or 16
+      local fh = tonumber(sprite.frameHeight) or 16
+      local useFw, useFh = fw, fh
+      if isHgss then
+        useFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
+        useFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or useFw
+        quad = nil
+      end
+      local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
       love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray
-      love.graphics.draw(img, 0, 0)
+      -- Rotate 90 degrees (lying down)
+      local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+      love.graphics.push("all")
+      love.graphics.translate(useFw / 2, useFh / 2)
+      love.graphics.rotate(angle)
+      love.graphics.translate(-useFw / 2, -useFh / 2)
+      if quad then love.graphics.draw(img, quad, 0, 0)
+      else love.graphics.draw(img, 0, 0) end
+      love.graphics.pop()
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.setCanvas(prev)
       return c
