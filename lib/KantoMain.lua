@@ -2952,45 +2952,23 @@ local nm = storyDisplayName(talker)
     end)
     -- HGSS: bake normally (early return broke 2D - sprite never baked).
     -- The bake code below handles HGSS native images.
-    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
-    local fw = tonumber(sprite.frameWidth) or 16
-    local fh = tonumber(sprite.frameHeight) or 16
+    -- SIMPLIFIED: No rotation, no quad. Just gray tint of full image.
+    -- (Diagnostic for glasses/Pikachu wrong sprite issue)
     local ok, canvas = pcall(function()
       local img = sprite.image
       if not img and type(sprite.resolveImage) == "function" then
         local ok2, r = pcall(function() return sprite:resolveImage() end)
         if ok2 then img = r end
       end
-      -- HGSS: load native image directly if sprite.image/resolveImage failed
-      local isHgss = sprite.def and type(sprite.def.hgssNativeImage) == "string"
-        and sprite.def.hgssNativeImage ~= ""
-      if not img and isHgss then
-        local ok3, r3 = pcall(love.graphics.newImage, sprite.def.hgssNativeImage)
-        if ok3 then img = r3 end
-      end
       if not img then return nil end
-      local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
-      -- For HGSS, don't use the proxy quad; use native frame dimensions
-      local useFw, useFh = fw, fh
-      if isHgss then
-        useFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
-        useFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or useFw
-        quad = nil  -- Don't use proxy quad for native image
-      end
-      local c = love.graphics.newCanvas(useFw, useFh)
+      local iw, ih = img:getDimensions()
+      local c = love.graphics.newCanvas(iw, ih)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
-      love.graphics.setBlendMode("alpha")
-      love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray for sleeping
-      love.graphics.push("all")
-      love.graphics.translate(useFw / 2, useFh / 2)
-      love.graphics.rotate(angle)
-      love.graphics.translate(-useFw / 2, -useFh / 2)
-      if quad then love.graphics.draw(img, quad, 0, 0)
-      else love.graphics.draw(img, 0, 0) end
-      love.graphics.pop()
-      love.graphics.setColor(1, 1, 1, 1)  -- Reset color (push() doesn't save it)
+      love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray
+      love.graphics.draw(img, 0, 0)
+      love.graphics.setColor(1, 1, 1, 1)
       love.graphics.setCanvas(prev)
       return c
     end)
@@ -3000,15 +2978,12 @@ local nm = storyDisplayName(talker)
     sprite._kantoOrigFrameCount = sprite.frameCount
     sprite._kantoOrigDef = sprite.def
     sprite.image = canvas
-    local qok, q = pcall(love.graphics.newQuad, 0, 0, useFw, useFh, useFw, useFh)
+    -- Use canvas dimensions for quad (simplified)
+    local cw, ch = canvas:getDimensions()
+    local qok, q = pcall(love.graphics.newQuad, 0, 0, cw, ch, cw, ch)
     if qok then
       sprite.frames = { [0] = q }
       sprite.frameCount = 1
-    end
-    -- Update frame dimensions for HGSS
-    if isHgss then
-      sprite.frameWidth = useFw
-      sprite.frameHeight = useFh
     end
     local newDef = {}
     if type(sprite.def) == "table" then
