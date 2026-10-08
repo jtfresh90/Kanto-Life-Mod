@@ -4944,6 +4944,7 @@ local function nightlifeTick(world, dt)
     local function bakeGrayLie(npc)
       if npc and isViridianSleepyOldMan(npc) then
         return false
+      end
       -- Log sprite info for diagnosis (crowd NPC issue)
       pcall(function()
         local spr = npc and npc.sprite
@@ -4953,7 +4954,6 @@ local function nightlifeTick(world, dt)
           fileLog(string.format("BAKE fw=%d fh=%d", fw, fh))
         end
       end)
-      end
       if not npc or not npc.sprite or npc._kantoSleepSpriteActive then
         return npc and npc._kantoSleepSpriteActive
       end
