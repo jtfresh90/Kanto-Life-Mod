@@ -3583,9 +3583,10 @@ function putToSleep(npc)
               end
               local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
               if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
-                -- Pass average scale so bubble isn't tiny in voxel mode
-                local vscale = ((sxRatio or 1) + (syRatio or 1)) / 2
-                drawCollisionBubble(npc, x * sxRatio, y * syRatio, vscale)
+                -- Position converts render-canvas -> screen via sxRatio/syRatio,
+                -- but SIZE must stay 1: sxRatio is 1/(AA*renderScale), so using
+                -- it as a size multiplier shrinks bubbles (e.g. half-size at 2x AA).
+                drawCollisionBubble(npc, x * sxRatio, y * syRatio, 1)
               end
             end
           end
@@ -5167,7 +5168,9 @@ local function nightlifeTick(world, dt)
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
-        local mesh = SpriteBillboards.mesh(def, pw/2, ph/2)
+        -- SpriteBillboards.mesh(def, frameIndex): frame 0 is the full image.
+        -- (pw/2, ph/2) was wrong; it only worked by accident via a fallback.
+        local mesh = SpriteBillboards.mesh(def, 0)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propMeshCache[style]
       end
@@ -5278,7 +5281,9 @@ local function nightlifeTick(world, dt)
           Mat4.rotateY(zyaw)
         )
         if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
-        Voxel3D.draw(zMesh, z, zModel, 0, zModel)
+        -- Small pull (camera-ward bias) so the Z doesn't z-fight the upright
+        -- tent billboard (both sit at z=py+8). Pull has zero screen drift.
+        Voxel3D.draw(zMesh, z, zModel, 0.5, zModel)
         return true
       end
 

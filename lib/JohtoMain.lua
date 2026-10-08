@@ -3020,7 +3020,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               if perspective > 3.0 then perspective = 3.0 end
               x, y = x * sxRatio, y * syRatio
 
-              local scale = (tonumber(ctx.scale) or 1) * perspective * sxRatio
+              -- Size must NOT include sxRatio (1/(AA*renderScale)): it would
+              -- shrink bubbles at 2x AA. Position conversion uses sxRatio/syRatio.
+              local scale = (tonumber(ctx.scale) or 1) * perspective
               -- The free camera uses a much wider world view than the
               -- diorama. The battle-authored 160x144 object therefore needs
               -- a larger presentation scale to match the 2D sleep effect.
