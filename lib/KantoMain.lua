@@ -3388,7 +3388,7 @@ function putToSleep(npc)
     local style = 0
     pcall(function() style = resolveSleepStyle(npc) end)
     if style == 0 or style == 1 then return end  -- No base for Default/Tent
-    local img = sleepAccessoryImage(style)
+    local img = sleepAccessoryBaseImage(style)
     if not img then return end
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
@@ -5619,7 +5619,9 @@ local function nightlifeTick(world, dt)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
         -- Bed/bag: rotated 90deg from body (yaw + PI/2), SAME center.
         -- (Joshua: "rotated 90 degrees on the sprite they are tied to without changing the center")
-        local bedYaw = yaw + math.pi / 2
+        -- RESEARCH FIX: bedYaw = yaw (not yaw + PI/2). The bed head-hole must align
+    -- with the body head for all facings. The +PI/2 was a misunderstanding.
+    local bedYaw = yaw
         local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
