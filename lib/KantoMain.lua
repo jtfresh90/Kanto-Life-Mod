@@ -3606,12 +3606,12 @@ function putToSleep(npc)
                   gh = h
                 end
               end
-              local okP, x, y = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
+              -- Battle Art verified: project() returns s = perspective scale.
+              -- Size = s * sxRatio converts to out-canvas pixels correctly.
+              local okP, x, y, s = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
               if okP and type(x) == "number" and type(y) == "number" and math.abs(x) < 10000 and math.abs(y) < 10000 then
-                -- Position converts render-canvas -> screen via sxRatio/syRatio,
-                -- but SIZE must stay 1: sxRatio is 1/(AA*renderScale), so using
-                -- it as a size multiplier shrinks bubbles (e.g. half-size at 2x AA).
-                drawCollisionBubble(npc, x * sxRatio, y * syRatio, 1)
+                s = tonumber(s) or 1
+                drawCollisionBubble(npc, x * sxRatio, y * syRatio, s * sxRatio)
               end
             end
           end
