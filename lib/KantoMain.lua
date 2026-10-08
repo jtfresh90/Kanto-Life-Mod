@@ -5493,9 +5493,9 @@ local function nightlifeTick(world, dt)
         local px = tonumber(ctx.px) or tonumber(npc.px) or 0
         local py = tonumber(ctx.py) or tonumber(npc.py) or 0
         local gh = tonumber(ctx.groundHeight) or 0
-        -- Research-based: fixed rotation (not sign-dependent), shared transform.
-        -- Yaw controls orientation deterministically; sign randomization removed.
-        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+        -- Voxel: fixed yaw for all sleeping NPCs (addresses E-W vs N-S mismatch).
+        -- Per-NPC facing caused beds/sprites to be perpendicular.
+        local yaw = 0
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
         -- Beds/bags use SAME yaw as body (reverted 90deg: it broke alignment).
         local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
@@ -5549,8 +5549,8 @@ local function nightlifeTick(world, dt)
         -- Overlay on top (or tent upright)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
-          -- Tent uses pure facing yaw (no sleep tilt offset).
-          local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+          -- Fixed yaw for consistent orientation (matches body/bed).
+          local tentYaw = 0
           local propRotation = Mat4.rotateY(tentYaw)
           local propY = gh + 0.05
           -- Tent (upright, bottom-anchored): center on tile (px+8, py+8).
