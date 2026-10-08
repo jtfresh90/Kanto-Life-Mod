@@ -5451,8 +5451,8 @@ local function nightlifeTick(world, dt)
         -- Yaw controls orientation deterministically; sign randomization removed.
         local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
-        -- Beds/bags rotated 90deg (PI/2) to align vertically with sleeping sprites.
-        local flatRot = Mat4.mul(Mat4.rotateY(yaw + math.pi / 2), Mat4.rotateX(-math.pi / 2))
+        -- Beds/bags use SAME yaw as body (reverted 90deg: it broke alignment).
+        local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
         -- Shared center: tile center (px+8, py+8). For rotateX(-PI/2) with centered
