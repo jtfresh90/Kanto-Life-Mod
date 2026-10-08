@@ -5084,7 +5084,7 @@ local function nightlifeTick(world, dt)
       Assets._kantoSleepHook = true
     end
 
-    local function bakeGrayLie(npc)
+    local function bakeGrayLie(npc, voxelOnly)
       if npc and isViridianSleepyOldMan(npc) then
         return false
       end
@@ -5252,6 +5252,15 @@ local function nightlifeTick(world, dt)
         sleepImgCache[rel] = variants[i].image
       end
       ensureAssetHook()
+
+      -- VOXEL-ONLY MODE: For Pokemon and 3-frame sprites. Creates voxel
+      -- frames without replacing the 2D sprite (avoids 2D corruption).
+      if voxelOnly then
+        npc._kantoSleepVoxelFrames = variants
+        npc._kantoSleepVoxelPaths = rels
+        npc._kantoSleepVoxelFrame = 1
+        return true
+      end
 
       local okR, SR = pcall(require, "src.render.SpriteRenderer")
       if not (okR and SR and SR.new) then return false end
@@ -5553,10 +5562,15 @@ local function nightlifeTick(world, dt)
         -- (On-screen voxel debug removed: mirrored by camera transform)
         -- CONSISTENT SKIP: Pokemon-like and 3-frame skip the bake everywhere
         -- (matches the other three call sites from 1.4.131).
-        if not npc._kantoSleepVoxelFrames and not isPokemonLike(npc) then
+        -- VOXEL-ONLY BAKE for Pokemon/3-frame: creates voxel frames without
+        -- touching the 2D sprite. (1.4.134 skipped entirely, breaking voxel
+        -- Pokemon; this restores voxel while keeping the 2D corruption fix.)
+        if not npc._kantoSleepVoxelFrames then
           local srcSpr = npc._kantoOrigSprite or npc.sprite
           local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
-          if fc ~= 3 then
+          if isPokemonLike(npc) or fc == 3 then
+            pcall(bakeGrayLie, npc, true)  -- voxelOnly=true
+          else
             pcall(bakeGrayLie, npc)
           end
         end
@@ -5568,11 +5582,15 @@ local function nightlifeTick(world, dt)
         local idx = (math.floor(now * 2.2) % 3) + 1
         if npc._kantoSleepVoxelFrame ~= idx then
           npc._kantoSleepVoxelFrame = idx
-          local frames = npc._kantoSleepVoxelFrames
-          local sleepSprite = npc._kantoSleepIsHgss and npc._kantoSleepProxySprite or npc.sprite
-          if frames and frames[idx] and sleepSprite then
-            sleepSprite.image = frames[idx].image
-            sleepSprite._kantoSleepVoxelIndex = idx
+          -- Only mutate sprite image for full bakes (proxy). Voxel-only bakes
+          -- keep the original intact; voxel body comes from bodyAndZ directly.
+          if npc._kantoSleepSpriteActive then
+            local frames = npc._kantoSleepVoxelFrames
+            local sleepSprite = npc._kantoSleepIsHgss and npc._kantoSleepProxySprite or npc.sprite
+            if frames and frames[idx] and sleepSprite then
+              sleepSprite.image = frames[idx].image
+              sleepSprite._kantoSleepVoxelIndex = idx
+            end
           end
         end
         local body, z, w, h = bodyAndZ(npc, idx)
