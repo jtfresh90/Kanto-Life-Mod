@@ -3727,6 +3727,11 @@ function putToSleep(npc)
         if not out then
           return out
         end
+        -- DISABLED: 2D projection bubbles replaced by 3D billboard renderer
+        -- (KANTO_LIFE_BUBBLE_3D). The projection approach failed (wrong canvas,
+        -- pitch distortion, offscreen at edges). 3D billboards like the Zzz
+        -- work reliably. Keeping this would draw duplicates.
+        do return out end
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -4845,7 +4850,8 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     end
     npc.frozen = true
     -- RESEARCH FIX: Unfreeze when text closes (prevents permanent frozen state)
-    pushText(g, world, string.format("%s is fast\nasleep.", tostring(d.name or "This person"):gsub("_", " ")), function() npc.frozen = false end)
+    local sleepName = npc.kantoLifeStoryName or stableNameFor(npc) or tostring(d.name or "This person"):gsub("_", " ")
+  pushText(g, world, string.format("%s is fast\nasleep.", sleepName), function() npc.frozen = false end)
     return true
   end
 
@@ -5833,6 +5839,183 @@ local function nightlifeTick(world, dt)
 
     installPublicVoxelSleepRenderer()
 
+    ----------------------------------------------------------------
+    -- 3D Billboard Speech Bubbles (voxel mode)
+    --
+    -- Previous 2D-projection bubbles failed (wrong canvas target, camera
+    -- pitch distortion, offscreen at scene edges). This draws bubbles as
+    -- 3D billboard quads like the Zzz -- positioned in world space above
+    -- the NPC's head, facing the camera. No projection needed; the bubble
+    -- moves with the camera automatically and can't go offscreen due to
+    -- canvas/projection issues.
+    --
+    -- Registered via the same CharacterRenderers API as the sleep renderer.
+    -- Returns false (does not claim the actor) so normal NPC rendering
+    -- continues; we only ADD the bubble quad.
+    ----------------------------------------------------------------
+    local bubbleCanvasCache = {}  -- text -> {canvas, w, h}
+    local bubbleUnitMesh = nil    -- 1x1 centered quad, scaled via model matrix
+
+    local function getBubbleTexture(text)
+      text = tostring(text or ":)")
+      local cached = bubbleCanvasCache[text]
+      if cached then return cached end
+      local G = love.graphics
+      local font = nil
+      pcall(function() font = G.getFont() end)
+      local tw = 12
+      local th = 8
+      pcall(function()
+        if font then
+          tw = font:getWidth(text)
+          th = font:getHeight()
+        else
+          tw = #text * 6
+        end
+      end)
+      local w = math.max(24, math.ceil(tw + 10))
+      local h = 16
+      local okC, canvas = pcall(G.newCanvas, w, h)
+      if not okC or not canvas then return nil end
+      pcall(function()
+        G.push("all")
+        G.setCanvas(canvas)
+        G.clear(0, 0, 0, 0)
+        -- White rounded background
+        G.setColor(1, 1, 1, 1)
+        G.rectangle("fill", 0, 0, w, h, 3, 3)
+        -- Dark border
+        G.setColor(0.1, 0.1, 0.1, 1)
+        G.setLineWidth(1)
+        G.rectangle("line", 0.5, 0.5, w - 1, h - 1, 3, 3)
+        -- Tail triangle pointing down
+        G.polygon("fill", w/2 - 3, h - 1, w/2 + 3, h - 1, w/2, h + 4)
+        -- Centered dark text
+        if font then pcall(G.setFont, font) end
+        G.setColor(0.1, 0.1, 0.1, 1)
+        G.print(text, (w - tw) / 2, (h - th) / 2 - 1)
+        G.setCanvas()
+        G.pop()
+      end)
+      local entry = {canvas = canvas, w = w, h = h}
+      bubbleCanvasCache[text] = entry
+      -- Cap cache to avoid unbounded growth (texts are few, but be safe)
+      local count = 0
+      for _ in pairs(bubbleCanvasCache) do
+        count = count + 1
+        if count > 60 then break end
+      end
+      if count > 60 then bubbleCanvasCache = {[text] = entry} end
+      return entry
+    end
+
+    local function installPublicVoxelBubbleRenderer()
+      if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
+      local okFind, battle = pcall(function()
+        return mod.find("BATTLE_ART_VOXEL_FORK")
+      end)
+      if not okFind or not battle then
+        okFind, battle = pcall(function()
+          return mod.find("BATTLE_ART_VOXEL")
+        end)
+      end
+      local api = okFind and battle and battle.exports
+        and battle.exports.characterRenderers or nil
+      if not api or type(api.register) ~= "function" then return end
+      local lib = battle.exports.lib
+      if not lib or type(lib.require) ~= "function" then return end
+      local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+      local okM, Mat4 = pcall(lib.require, "Mat4")
+      if not (okV and okM and Voxel3D and type(Voxel3D.draw) == "function"
+              and Mat4 and type(Mat4.mul) == "function"
+              and type(Mat4.translate) == "function"
+              and type(Mat4.rotateY) == "function"
+              and type(Mat4.scale) == "function") then
+        return
+      end
+
+      -- Unit quad mesh (1x1, centered at origin, XY plane, full UVs).
+      -- Scaled per-bubble via the model matrix; texture is the text canvas.
+      if not bubbleUnitMesh then
+        local okMesh, mesh = pcall(function()
+          -- LÖVE mesh vertex format: {x, y, z, u, v}
+          -- Note: v=1 at bottom because canvas Y points down.
+          local verts = {
+            {-0.5, -0.5, 0, 0, 1},
+            { 0.5, -0.5, 0, 1, 1},
+            { 0.5,  0.5, 0, 1, 0},
+            {-0.5,  0.5, 0, 0, 0},
+          }
+          local m = love.graphics.newMesh(verts, "triangles", "static")
+          m:setVertexMap(1, 2, 3, 1, 3, 4)
+          return m
+        end)
+        if okMesh and mesh then bubbleUnitMesh = mesh end
+      end
+      if not bubbleUnitMesh then return end
+
+      local function drawBubble3D(ctx)
+        local npc = ctx and (ctx.actor or ctx.entity)
+        if not npc then return false end
+        if opt("npc_collision_bubbles") == false then return false end
+        if npc.visible == false or npc.hidden then return false end
+        -- Skip in first-person mode (matches 2D bubble behavior).
+        local state = ctx and ctx.state
+        if state and state.firstPerson and state.firstPerson.active then
+          return false
+        end
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+        if untilAt <= now then return false end
+        local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+
+        local tex = getBubbleTexture(text)
+        if not tex or not tex.canvas then return false end
+
+        local px = tonumber(ctx.px) or tonumber(npc.px)
+          or tonumber((npc.cellX or 0) * 16) or 0
+        local py = tonumber(ctx.py) or tonumber(npc.py)
+          or tonumber((npc.cellY or 0) * 16) or 0
+        local gh = tonumber(ctx.groundHeight) or 0
+
+        -- Billboard yaw: face the camera (same approach as the Zzz).
+        local zyaw = 0
+        local host = ctx.host or {}
+        local fp = host.FirstPerson
+        if fp and type(fp.cardYaw) == "function" then
+          local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
+          if okYaw and tonumber(v) then zyaw = v end
+        end
+
+        -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
+        -- overlap (gh+26). World-space position: no projection needed.
+        local model = Mat4.mul(
+          Mat4.translate(px + 8, gh + 26, py + 8),
+          Mat4.mul(
+            Mat4.rotateY(zyaw),
+            Mat4.scale(tex.w, tex.h, 1)
+          )
+        )
+        -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
+        pcall(Voxel3D.draw, bubbleUnitMesh, tex.canvas, model, 0.5, model)
+        -- Return false: do NOT claim the actor; normal NPC rendering continues.
+        return false
+      end
+
+      local handle = api.register({
+        apiVersion = 1,
+        id = "KANTO_LIFE_BUBBLE_3D",
+        name = "Kanto Life Speech Bubbles",
+        priority = 5000,
+        drawEntity = drawBubble3D,
+      })
+      if handle and NPCMod then
+        NPCMod._kantoLifePublicBubbleRenderer = handle
+      end
+    end
+
+    installPublicVoxelBubbleRenderer()
+
     -- IMPORTANT: voxel/Battle Art consumes NPC:pose(), not NPC:draw().
     -- Keep the working 2D draw path untouched; only make pose expose the
     -- already-baked sleeping sprite to alternate render pipelines.
@@ -5867,8 +6050,11 @@ local function nightlifeTick(world, dt)
             local idx = (math.floor(t * 2.2) % 3) + 1
             if self._kantoSleepVoxelFrame ~= idx then
               self._kantoSleepVoxelFrame = idx
-              spr.image = frames[idx].image
-              spr._kantoSleepVoxelIndex = idx
+              -- GUARD: Only mutate for full bakes. Voxel-only (Pokemon) keeps original intact.
+              if self._kantoSleepSpriteActive then
+                spr.image = frames[idx].image
+                spr._kantoSleepVoxelIndex = idx
+              end
             end
           end
           -- FIX: Sleeping pose for ALL sprites (not just HGSS).
