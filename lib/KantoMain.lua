@@ -5174,6 +5174,23 @@ local function nightlifeTick(world, dt)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propMeshCache[style]
       end
+      -- Base mesh for 3-layer voxel beds: opaque version under the NPC.
+      local propBaseMeshCache = {}
+      local function sleepPropBaseMesh(style)
+        style = math.floor(tonumber(style) or 0)
+        if style <= 1 then return nil end  -- No base for Default(0) or Tent(1)
+        if propBaseMeshCache[style] then return propBaseMeshCache[style] end
+        local prop = sleepAccessoryBaseImage(style)
+        if not prop then return nil end
+        local pw, ph = prop:getDimensions()
+        local path = "kanto_life_sleep_prop_base_" .. tostring(style) .. ".png"
+        sleepImgCache[path] = prop
+        ensureAssetHook()
+        local def = { id="KANTO_LIFE_SLEEP_PROP_BASE_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
+        local mesh = SpriteBillboards.mesh(def, 0)
+        if mesh then propBaseMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
+        return propBaseMeshCache[style]
+      end
 
       local function drawSleep3D(ctx)
         local npc = ctx and ctx.actor
@@ -5237,19 +5254,37 @@ local function nightlifeTick(world, dt)
             npc.kantoLifeRandomSleepStyle = propStyle
           end
         end
+        -- 3-layer voxel beds: opaque base UNDER body, overlay (with head
+        -- hole) ABOVE body. Tent (1) stays a single upright billboard.
         -- Accessories re-enabled (1.4.45)
-        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
         local pm = sleepPropMesh(propStyle)
+        local flatRotation = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+        -- Base first (opaque, under the body)
+        if propStyle == 2 or propStyle == 3 then
+          local pbm = sleepPropBaseMesh(propStyle)
+          if pbm and pbm.mesh then
+            local baseModel = Mat4.mul(
+              Mat4.translate(px, gh + 0.03, py + 8),
+              flatRotation
+            )
+            Voxel3D.draw(pbm.mesh, pbm.image, baseModel, 0, baseModel)
+          end
+        end
+        -- Body (existing)
+        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        -- Overlay on top (or tent upright)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
           -- Tent uses pure facing yaw (no sleep tilt offset).
           local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
           local propRotation = Mat4.rotateY(tentYaw)
+          local propY = gh + 0.05
           if propStyle ~= 1 then
-            propRotation = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+            propRotation = flatRotation
+            propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
           local propModel = Mat4.mul(
-            Mat4.translate(px, gh + 0.05, py + 8),
+            Mat4.translate(px, propY, py + 8),
             propRotation
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
