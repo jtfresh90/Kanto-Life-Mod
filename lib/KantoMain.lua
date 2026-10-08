@@ -5139,7 +5139,9 @@ local function nightlifeTick(world, dt)
           pcall(function()
             if type(sprite.resolveImage) == "function" then img = sprite:resolveImage() end
           end)
-          if not img then img = sprite.image end
+          -- RESEARCH FIX: Do NOT fall back to sprite.image (raw DMG sheet, opaque white bg).
+          -- If resolveImage fails, img stays nil and bake fails (NPC hidden, no blob).
+          -- if not img then img = sprite.image end
           if img and type(img.getData) == "function" then
             pcall(function() src = img:getData() end)
           end
@@ -5474,7 +5476,8 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
-        local mesh = SpriteBillboards.mesh(def, 0, h / 2)
+        -- RESEARCH FIX: default anchor for 3-layer alignment
+        local mesh = SpriteBillboards.mesh(def, 0)
         imageCache[imagePath] = old or image
         if mesh then meshCache[key] = mesh end
         return mesh
@@ -5506,9 +5509,10 @@ local function nightlifeTick(world, dt)
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
+        -- RESEARCH FIX: Use default anchor for 3-layer alignment.
         -- Tent (1) is upright: bottom-anchor (ph) so it sits on the ground.
-        -- Bed/bag (2,3) lie flat: center-anchor (ph/2) for 3-layer alignment.
-        local anchorY = ph / 2
+        -- Bed/bag (2,3) lie flat: default anchor (nil) for consistency with body.
+        local anchorY = nil
         if style == 1 then anchorY = ph end
         local mesh = SpriteBillboards.mesh(def, 0, anchorY)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
@@ -5528,7 +5532,8 @@ local function nightlifeTick(world, dt)
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_BASE_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
         -- Use same anchor as body (ph/2) for 3-layer alignment
-        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
+        -- RESEARCH FIX: Use default anchor for 3-layer alignment.
+        local mesh = SpriteBillboards.mesh(def, 0)
         if mesh then propBaseMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propBaseMeshCache[style]
       end
