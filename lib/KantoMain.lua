@@ -1448,7 +1448,17 @@ return function(mod)
       elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
         -- true wilds only
       elseif shouldSleepNow(npc, isNight) then
-        pcall(putToSleep, npc)
+        -- Don't fall asleep in doorways/warps (blocks player)
+        local cx, cy = npc.cellX, npc.cellY
+        local blocking = false
+        if type(cx) == "number" and type(cy) == "number" and ow and ow.map then
+          pcall(function()
+            blocking = nearWarp(ow.map, math.floor(cx), math.floor(cy))
+          end)
+        end
+        if not blocking then
+          pcall(putToSleep, npc)
+        end
       end
     end
   end
@@ -4704,7 +4714,17 @@ local function nightlifeTick(world, dt)
         elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
           if npc.nightlifeSleeping then wakeNpc(npc) end
         elseif shouldSleepNow(npc, isNight) then
-          putToSleep(npc)
+          -- Don't fall asleep in doorways/warps (blocks player)
+          local cx, cy = npc.cellX, npc.cellY
+          local blocking = false
+          if type(cx) == "number" and type(cy) == "number" and world and world.map then
+            pcall(function()
+              blocking = nearWarp(world.map, math.floor(cx), math.floor(cy))
+            end)
+          end
+          if not blocking then
+            putToSleep(npc)
+          end
         elseif npc.nightlifeSleeping then
           wakeNpc(npc)
         end
