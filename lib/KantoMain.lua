@@ -3538,7 +3538,21 @@ function putToSleep(npc)
             end
             pcall(drawSleepAccessoryBase, self, baseSx, baseSy)
           end
-          if not tentStyle then
+          local accImgOk = true
+          if tentStyle then
+            -- For tent: verify image loads BEFORE hiding NPC
+            local tStyle = 0
+            pcall(function() tStyle = resolveSleepStyle(self) end)
+            local tImg = nil
+            pcall(function() tImg = sleepAccessoryImage(tStyle) end)
+            if tImg then
+              -- Tent image OK: hide NPC, draw tent
+            else
+              -- Tent image FAILED: draw NPC anyway (don't leave invisible)
+              baseNpcDraw(self, camX, camY)
+              accImgOk = false
+            end
+          else
             baseNpcDraw(self, camX, camY)
           end
           -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
@@ -3551,7 +3565,9 @@ function putToSleep(npc)
             end)
             if ok and ox then accSx, accSy = ox, oy end
           end
-          pcall(drawSleepAccessory, self, accSx, accSy)
+          if accImgOk then
+            pcall(drawSleepAccessory, self, accSx, accSy)
+          end
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
