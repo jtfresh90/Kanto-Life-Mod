@@ -5939,19 +5939,22 @@ local function nightlifeTick(world, dt)
 
       -- Unit quad mesh (1x1, centered at origin, XY plane, full UVs).
       -- Scaled per-bubble via the model matrix; texture is the text canvas.
+      -- MUST use Voxel3D.newMesh with 6-component vertices (x,y,z,u,v,shade).
+      -- The voxel shader reads VertexShade for brightness; a 5-component
+      -- mesh leaves shade undefined = renders invisible.
       if not bubbleUnitMesh then
         local okMesh, mesh = pcall(function()
-          -- LÖVE mesh vertex format: {x, y, z, u, v}
+          -- 6 components: x, y, z, u, v, shade(1.0 = full bright).
           -- Note: v=1 at bottom because canvas Y points down.
           local verts = {
-            {-0.5, -0.5, 0, 0, 1},
-            { 0.5, -0.5, 0, 1, 1},
-            { 0.5,  0.5, 0, 1, 0},
-            {-0.5,  0.5, 0, 0, 0},
+            {-0.5, -0.5, 0, 0, 1, 1},
+            { 0.5, -0.5, 0, 1, 1, 1},
+            { 0.5,  0.5, 0, 1, 0, 1},
+            {-0.5,  0.5, 0, 0, 0, 1},
           }
-          local m = love.graphics.newMesh(verts, "triangles", "static")
-          m:setVertexMap(1, 2, 3, 1, 3, 4)
-          return m
+          local indices = {}
+          Voxel3D.pushQuad(indices, 0)
+          return Voxel3D.newMesh(verts, indices)
         end)
         if okMesh and mesh then bubbleUnitMesh = mesh end
       end
