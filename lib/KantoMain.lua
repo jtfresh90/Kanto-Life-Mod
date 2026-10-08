@@ -5095,7 +5095,19 @@ local function nightlifeTick(world, dt)
             pcall(function() src = img:getData() end)
           end
         end
-        if not src then return nil end
+        if not src then
+          pcall(function()
+            local defName = "?"
+            if sprite.def then
+              defName = tostring(sprite.def.name or sprite.def.id or sprite.def.image or "?")
+            end
+            local hasImage = sprite.image ~= nil
+            local hasResolve = type(sprite.resolveImage) == "function"
+            fileLog(string.format("VOXEL BAKE FAIL npc=%s def=%s hasImage=%s hasResolve=%s",
+              tostring(npc.name or "?"), defName, tostring(hasImage), tostring(hasResolve)))
+          end)
+          return nil
+        end
         local iw, ih = src:getDimensions()
         -- Use actual sprite frame dimensions (Pokémon may differ from 16x16 humans)
         local actualFW = tonumber(sprite.frameWidth) or 16
