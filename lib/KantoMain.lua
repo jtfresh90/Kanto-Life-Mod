@@ -2197,7 +2197,14 @@ local nm = storyDisplayName(talker)
     if sprite:find("NURSE", 1, true) or name:find("NURSE", 1, true) then return true end
     -- FIX: Only exclude STATIONARY clerks (behind counters). Wandering
     -- clerk-sprite NPCs (ambient glasses guys) can sleep.
-    if (sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true)) and not npc.wanders then return true end
+    -- (npc.wanders is unreliable: engine sets it for turn-in-place NPCs,
+    -- mod never sets it true, and putToSleep mutates it to false.)
+    if sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true) then
+      local d2 = npc.def or {}
+      local isAmbient = d2.kantoLifeAmbient or npc.kantoLifeAmbient
+      local isWalker = npc.steps == true
+      if not isAmbient and not isWalker then return true end
+    end
     if sprite:find("OAK", 1, true) or name:find("OAK", 1, true) then return true end
     if sprite:find("ELM", 1, true) or name:find("ELM", 1, true) then return true end
     if sprite:find("BILL", 1, true) or name:find("BILL", 1, true) then return true end
@@ -5861,12 +5868,16 @@ local function nightlifeTick(world, dt)
     -- Returns false (does not claim the actor) so normal NPC rendering
     -- continues; we only ADD the bubble quad.
     ----------------------------------------------------------------
-    local bubbleCanvasCache = {}  -- text -> {canvas, w, h}
-    local bubbleUnitMesh = nil    -- 1x1 centered quad, scaled via model matrix
+    -- BRAND NEW APPROACH (v2): Use the 100% proven Zzz pipeline.
+    -- The hand-rolled mesh + Canvas texture failed. This uses:
+    --   Canvas -> Image (via newImageData) -> sleepImgCache + ensureAssetHook
+    --   -> SpriteBillboards.mesh (same as Zzz) -> Voxel3D.draw (no scale)
+    -- Every component is proven by the working Zzz.
+    local bubbleImageCache = {}  -- text -> {path, image, w, h}
 
-    local function getBubbleTexture(text)
+    local function getBubbleImage(text)
       text = tostring(text or ":)")
-      local cached = bubbleCanvasCache[text]
+      local cached = bubbleImageCache[text]
       if cached then return cached end
       local G = love.graphics
       local font = nil
@@ -5883,9 +5894,10 @@ local function nightlifeTick(world, dt)
       end)
       local w = math.max(24, math.ceil(tw + 10))
       local h = 16
+      -- Render to canvas (2D, safe)
       local okC, canvas = pcall(G.newCanvas, w, h)
       if not okC or not canvas then return nil end
-      pcall(function()
+      local okDraw = pcall(function()
         G.push("all")
         G.setCanvas(canvas)
         G.clear(0, 0, 0, 0)
@@ -5905,15 +5917,21 @@ local function nightlifeTick(world, dt)
         G.setCanvas()
         G.pop()
       end)
-      local entry = {canvas = canvas, w = w, h = h}
-      bubbleCanvasCache[text] = entry
-      -- Cap cache to avoid unbounded growth (texts are few, but be safe)
-      local count = 0
-      for _ in pairs(bubbleCanvasCache) do
-        count = count + 1
-        if count > 60 then break end
-      end
-      if count > 60 then bubbleCanvasCache = {[text] = entry} end
+      if not okDraw then return nil end
+      -- Convert Canvas -> Image (proven: Zzz uses Image, not Canvas)
+      local okImg, img = pcall(function()
+        local data = canvas:newImageData()
+        local image = G.newImage(data)
+        image:setFilter("nearest", "nearest")
+        return image
+      end)
+      if not okImg or not img then return nil end
+      -- Register via asset hook (proven: Zzz uses sleepImgCache + ensureAssetHook)
+      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_") .. ".png"
+      sleepImgCache[path] = img
+      ensureAssetHook()
+      local entry = {path = path, image = img, w = w, h = h}
+      bubbleImageCache[text] = entry
       return entry
     end
 
@@ -5934,36 +5952,16 @@ local function nightlifeTick(world, dt)
       if not lib or type(lib.require) ~= "function" then return end
       local okV, Voxel3D = pcall(lib.require, "Voxel3D")
       local okM, Mat4 = pcall(lib.require, "Mat4")
-      if not (okV and okM and Voxel3D and type(Voxel3D.draw) == "function"
+      local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
+      if not (okV and okM and okB and Voxel3D and type(Voxel3D.draw) == "function"
               and Mat4 and type(Mat4.mul) == "function"
               and type(Mat4.translate) == "function"
               and type(Mat4.rotateY) == "function"
-              and type(Mat4.scale) == "function") then
+              and SpriteBillboards and type(SpriteBillboards.mesh) == "function") then
         return
       end
-
-      -- Unit quad mesh (1x1, centered at origin, XY plane, full UVs).
-      -- Scaled per-bubble via the model matrix; texture is the text canvas.
-      -- MUST use Voxel3D.newMesh with 6-component vertices (x,y,z,u,v,shade).
-      -- The voxel shader reads VertexShade for brightness; a 5-component
-      -- mesh leaves shade undefined = renders invisible.
-      if not bubbleUnitMesh then
-        local okMesh, mesh = pcall(function()
-          -- 6 components: x, y, z, u, v, shade(1.0 = full bright).
-          -- Note: v=1 at bottom because canvas Y points down.
-          local verts = {
-            {-0.5, -0.5, 0, 0, 1, 1},
-            { 0.5, -0.5, 0, 1, 1, 1},
-            { 0.5,  0.5, 0, 1, 0, 1},
-            {-0.5,  0.5, 0, 0, 0, 1},
-          }
-          local indices = {}
-          Voxel3D.pushQuad(indices, 0)
-          return Voxel3D.newMesh(verts, indices)
-        end)
-        if okMesh and mesh then bubbleUnitMesh = mesh end
-      end
-      if not bubbleUnitMesh then return end
+      -- NOTE: Mesh is now built per-bubble via SpriteBillboards.mesh (proven
+      -- Zzz pipeline). No hand-rolled mesh, no scale in model matrix.
 
       local function drawBubble3D(ctx)
         local npc = ctx and (ctx.actor or ctx.entity)
@@ -5980,8 +5978,20 @@ local function nightlifeTick(world, dt)
         if untilAt <= now then return false end
         local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
 
-        local tex = getBubbleTexture(text)
-        if not tex or not tex.canvas then return false end
+        -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
+        local entry = getBubbleImage(text)
+        if not entry or not entry.image then return false end
+        local def = {
+          id = "KANTO_LIFE_BUBBLE",
+          image = entry.path,
+          frames = 1,
+          frameWidth = entry.w,
+          frameHeight = entry.h,
+          trueColor = true,
+          walker = false,
+        }
+        local mesh = SpriteBillboards.mesh(def, 0)
+        if not mesh then return false end
 
         local px = tonumber(ctx.px) or tonumber(npc.px)
           or tonumber((npc.cellX or 0) * 16) or 0
@@ -6000,15 +6010,14 @@ local function nightlifeTick(world, dt)
 
         -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
         -- overlap (gh+26). World-space position: no projection needed.
+        -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
+        -- (same as Zzz). This was a key difference from the failed approach.
         local model = Mat4.mul(
           Mat4.translate(px + 8, gh + 26, py + 8),
-          Mat4.mul(
-            Mat4.rotateY(zyaw),
-            Mat4.scale(tex.w, tex.h, 1)
-          )
+          Mat4.rotateY(zyaw)
         )
         -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
-        pcall(Voxel3D.draw, bubbleUnitMesh, tex.canvas, model, 0.5, model)
+        pcall(Voxel3D.draw, mesh, entry.image, model, 0.5, model)
         -- Return false: do NOT claim the actor; normal NPC rendering continues.
         return false
       end
