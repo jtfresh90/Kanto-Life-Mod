@@ -5055,7 +5055,12 @@ local function nightlifeTick(world, dt)
         if spr then
           local fw = tonumber(spr.frameWidth) or -1
           local fh = tonumber(spr.frameHeight) or -1
-          fileLog(string.format("BAKE fw=%d fh=%d", fw, fh))
+          local defName = "?"
+          if spr.def then
+            defName = tostring(spr.def.name or spr.def.id or spr.def.image or "?")
+          end
+          fileLog(string.format("BAKE npc=%s def=%s fw=%d fh=%d",
+            tostring(npc.name or "?"), defName, fw, fh))
         end
       end)
       if not npc or not npc.sprite or npc._kantoSleepSpriteActive then
