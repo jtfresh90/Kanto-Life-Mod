@@ -5785,8 +5785,14 @@ local function nightlifeTick(world, dt)
           if isViridianSleepyOldMan(self) then
             return basePose(self, ...)
           end
-          if not self._kantoSleepSpriteActive then
-            pcall(bakeGrayLie, self)
+          -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
+          -- everywhere, not just in Hook 2. Prevents split-brain sprite state.
+          if not self._kantoSleepSpriteActive and not isPokemonLike(self) then
+            local srcSpr = self._kantoOrigSprite or self.sprite
+            local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+            if fc ~= 3 then
+              pcall(bakeGrayLie, self)
+            end
           end
           local frames = self._kantoSleepVoxelFrames
           local paths = self._kantoSleepVoxelPaths
@@ -5858,8 +5864,14 @@ local function nightlifeTick(world, dt)
               pcall(putToSleep, self)
             end
             hardFreeze(self)
-            if not self._kantoSleepSpriteActive then
-              pcall(bakeGrayLie, self)
+            -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
+            -- everywhere. Prevents split-brain sprite state.
+            if not self._kantoSleepSpriteActive and not isPokemonLike(self) then
+              local srcSpr = self._kantoOrigSprite or self.sprite
+              local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+              if fc ~= 3 then
+                pcall(bakeGrayLie, self)
+              end
             end
             -- Drive the voxel ZZZ animation from NPC.update(), which is
             -- guaranteed to run even when the voxel scene reuses poses.
@@ -5897,7 +5909,9 @@ local function nightlifeTick(world, dt)
         -- RESEARCH FIX: Skip bake for 3-frame sprites (clerk). The bake's proxy
         -- corrupts them. They use the original sprite directly via getPoseGeometry,
         -- same code path as Pokemon NPCs.
-        local frameCount = self.sprite and tonumber(self.sprite.frameCount) or 6
+        -- Use ORIGINAL sprite's frame count (proxy has frameCount=1)
+        local srcSpr = self._kantoOrigSprite or self.sprite
+        local frameCount = srcSpr and tonumber(srcSpr.frameCount) or 6
         local isThreeFrame = (frameCount == 3)
         if not self._kantoSleepSpriteActive and not isPokemonLike(self) and not isViridianSleepyOldMan(self) and not isThreeFrame then
           pcall(bakeGrayLie, self)
