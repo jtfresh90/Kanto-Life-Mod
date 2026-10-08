@@ -3410,10 +3410,10 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- Shift bed toward feet so the head hole aligns with the head.
-    -- Feet are at +X for sign=+1, -X for sign=-1.
-    local shiftX = (math.sin(angle) * 10)
-    love.graphics.translate(cx + shiftX, cy)
+    -- Center on NPC (no X shift). Head opening on same side as NPC head,
+    -- shifted slightly up (Joshua: "a little higher up on the NPC").
+    local shiftY = -4
+    love.graphics.translate(cx, cy + shiftY)
     love.graphics.rotate(angle)
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
@@ -3630,8 +3630,9 @@ function putToSleep(npc)
               local sx, sy = px - (camX or 0), py - (camY or 0)
               love.graphics.draw(canvas, sx - 8, sy - 8)
             else
-              -- Fallback: draw normally (better than invisible)
-              baseNpcDraw(self, camX, camY)
+              -- Capture failed (e.g., glasses/ambient Pikachu): HIDE the NPC.
+              -- (Scratch the bake for these - bed + Zzz still show, no blob.)
+              -- Do not draw anything.
             end
           end
           if tentStyle then
