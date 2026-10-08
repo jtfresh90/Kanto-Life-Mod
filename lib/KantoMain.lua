@@ -3393,6 +3393,7 @@ function putToSleep(npc)
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
     -- Draw centered on NPC, rotated 90deg to match lying-down sprite
+    -- ALIGNED: same center and rotation as overlay and NPC (no offset)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
@@ -3466,15 +3467,13 @@ function putToSleep(npc)
     -- drawing at top-left corner.
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
-    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- FRESH 3-layer: same transform as base for perfect alignment.
-    -- Base (under) and overlay (over) share center; NPC sandwiched between.
-    local shiftY = -4  -- Match base offset
-    love.graphics.translate(cx, cy + shiftY)
-    if style ~= 1 then love.graphics.rotate(angle) end
+    -- ALIGNED: exact same transform as base (center, PI/2 rotation, no shift).
+    -- Fixes 180° flip and vertical misalignment.
+    love.graphics.translate(cx, cy)
+    if style ~= 1 then love.graphics.rotate(math.pi / 2) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
@@ -3803,11 +3802,10 @@ function putToSleep(npc)
                   ghOk = true
                 end
               end
-              -- FRESH: Skip bubbles if ground height unreliable (indoors).
-              -- Indoors, groundAt returns 0, causing misaligned bubbles.
-              if not ghOk then
-                -- Skip this NPC's bubble (don't draw misaligned)
-              else
+              -- FIX: Always draw bubbles. gh=0 is correct for flat maps
+              -- (outdoors and indoors). Skipping broke all flat-map bubbles.
+              -- (Research: groundAt==0 does NOT mean indoors.)
+              if true then
               -- Measure true pixel scale by projecting two points 12 world
               -- units apart vertically. The raw perspective scale `s` from
               -- project() is relative, not pixels — using it directly made
@@ -5065,6 +5063,12 @@ local function nightlifeTick(world, dt)
       if npc and isViridianSleepyOldMan(npc) then
         return false
       end
+      -- FIX: Restore original sprite image if previously mutated (clear contamination).
+      -- Prevents corrupted sprites (glasses/Pikachu) from using mutated image.
+      local spr0 = npc and npc.sprite
+      if spr0 and spr0._kantoOrigImage ~= nil then
+        spr0.image = spr0._kantoOrigImage
+      end
       -- Log sprite info for diagnosis (crowd NPC issue)
       pcall(function()
         local spr = npc and npc.sprite
@@ -5642,8 +5646,13 @@ local function nightlifeTick(world, dt)
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
+            -- FIX: Use prop's own dimensions for centering (not body's).
+            -- Prop is 20x24, body may differ. Center prop at tile center.
+            local pw, ph = pbm.w or 20, pbm.h or 24
+            local pcx = px + 8 - pw / 2
+            local pcz = py + 8 + ph / 2
             local baseModel = Mat4.mul(
-              Mat4.translate(bcx + bedDx, gh + 0.03, bcz + bedDz),
+              Mat4.translate(pcx + bedDx, gh + 0.03, pcz + bedDz),
               flatRot
             )
             local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
@@ -5670,9 +5679,12 @@ local function nightlifeTick(world, dt)
           -- Mesh local center x=8, so translate by px to place at px+8.
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
-            -- Bed/bag: use SHARED (bcx,bcz) plus offset for alignment.
-            -- Offset matches base: left a little, towards feet.
-            propCx, propCz = bcx + bedDx, bcz + bedDz
+            -- Bed/bag: use prop's own dimensions for centering (not body's).
+            -- FIX: Prop is 20x24, body differs. Center at tile center.
+            local pw2, ph2 = 20, 24
+            if pm then pw2, ph2 = pm.w or 20, pm.h or 24 end
+            propCx = px + 8 - pw2 / 2 + bedDx
+            propCz = py + 8 + ph2 / 2 + bedDz
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
@@ -5899,6 +5911,23 @@ local function nightlifeTick(world, dt)
         pcall(function() accStyle = resolveSleepStyle(self) end)
         if accStyle == 2 or accStyle == 3 then
           pcall(drawSleepAccessoryBase, self, sx, sy)
+        elseif accStyle == 1 then
+          -- Tent: hide NPC, draw tent instead (replacement, not overlay)
+          local tentImg = sleepAccessoryImage(1)
+          if tentImg then
+            local tiw, tih = tentImg:getDimensions()
+            love.graphics.push("all")
+            love.graphics.setColor(1,1,1,1)
+            -- Tent is upright (not rotated), centered on NPC, bottom at feet
+            love.graphics.draw(tentImg, sx + 8 - tiw/2, sy + 16 - tih)
+            love.graphics.pop()
+          end
+          -- Draw Zzz and return (skip NPC drawing)
+          if type(drawSleepZzz) == "function" and opt("sleep_bubbles") ~= false then
+            drawSleepZzz(sx + 8, sy - 6,
+              type(sleepZzzSeed) == "function" and sleepZzzSeed(self) or 0)
+          end
+          return
         end
         -- 2D: geometric ±90° + gray on the ORIGINAL sprite (readable characters)
         -- Use orig sprite for this path so we don't draw a failed black bake
@@ -5909,6 +5938,9 @@ local function nightlifeTick(world, dt)
           G.push("all")
           G.translate(sx + 8, sy + 8)
           G.rotate(angle)
+          -- CENTERED: translate by -8,-8 so 16x16 sprite center aligns with (sx+8, sy+8)
+          -- (Fixes NPC raised/misaligned between base and overlay)
+          G.translate(-8, -8)
           G.setColor(0.55, 0.55, 0.60, 1)
           -- Draw stand-down frame at local origin
           local ok = pcall(function()
