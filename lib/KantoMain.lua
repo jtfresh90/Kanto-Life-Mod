@@ -5445,7 +5445,35 @@ local function nightlifeTick(world, dt)
           end
         end
         local body, z, w, h = bodyAndZ(npc, idx)
-        if not body then return false end
+        if not body then
+          -- Bake failed (e.g., Pikachu follower): draw simple gray billboard
+          -- instead of invisible. Better than nothing.
+          pcall(function()
+            fileLog("VOXEL bake failed for npc=" .. tostring(npc.name or "?") .. ", using fallback")
+          end)
+          -- Fallback: use original sprite as billboard (not baked, but visible)
+          local fbSprite = npc._kantoOrigSprite or npc.sprite
+          if fbSprite and fbSprite.image then
+            local fbDef = { image = fbSprite.image, w = 16, h = 16 }
+            local fbMesh = nil
+            pcall(function()
+              if type(SpriteBillboards.mesh) == "function" then
+                fbMesh = SpriteBillboards.mesh(fbDef, 0)
+              end
+            end)
+            if fbMesh then
+              local fbModel = Mat4.mul(
+                Mat4.translate(px + 8, gh + 8, py + 8),
+                Mat4.rotateY(yaw)
+              )
+              pcall(function()
+                Voxel3D.draw(fbMesh, fbSprite.image, fbModel, 0.1, fbModel)
+              end)
+              return true  -- Drew fallback, not invisible
+            end
+          end
+          return false
+        end
 
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
