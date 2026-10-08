@@ -3750,19 +3750,18 @@ function putToSleep(npc)
               -- project() is relative, not pixels — using it directly made
               -- bubbles pin-sized. Bubble base height is 12px at scale=1;
               -- scale so 12px = 12 world units (matches NPC scale).
-              -- Project feet, offset bubble UP in screen space (reliable vs world Y guess)
-              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh, py + 8)
-              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 12, py + 8)
+              -- FRESH: project head position (gh+20), draw bubble at projected XY.
+              -- No screen-space offset; let projection handle placement.
+              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh + 20, py + 8)
+              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 32, py + 8)
               if okP1 and okP2 and type(x1) == "number" and type(y1) == "number"
                  and type(y2) == "number" and math.abs(x1) < 10000 and math.abs(y1) < 10000 then
                 local pxPer12 = math.abs(y2 - y1)
                 local scale = pxPer12 / 12
-                if scale < 0.5 then scale = 0.5 end  -- sanity floor
-                if scale > 8 then scale = 8 end      -- sanity ceiling
-                -- 30px above feet in screen space
-                local bx = x1 * sxRatio
-                local by = (y1 * syRatio) - (30 * scale * syRatio)
-                drawCollisionBubble(npc, bx, by, scale * sxRatio)
+                if scale < 0.5 then scale = 0.5 end
+                if scale > 8 then scale = 8 end
+                -- Draw at projected head position (no offset)
+                drawCollisionBubble(npc, x1 * sxRatio, y1 * syRatio, scale * sxRatio)
               end
             end
           end
@@ -5537,42 +5536,22 @@ local function nightlifeTick(world, dt)
           -- Mesh local center x=8, so translate by px to place at px+8.
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
-            -- Bed/bag: use bed-specific center (not body-based bcx,bcz).
-            -- Each mesh has different dimensions; must center individually.
-            propCx, propCz = px + 8 - (pm.w or 20) / 2, py + 8 + (pm.h or 24) / 2
+            -- Bed/bag: use SHARED (bcx,bcz) for alignment (reverted 1.4.94 change).
+            -- Beds were aligned before; bed-specific center broke it.
+            propCx, propCz = bcx, bcz
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
-          -- Tent (style 1): PROPER 3D pyramid (square base + apex).
+          -- Tent (style 1): 2D billboard, single, all face same way (reverted pyramid).
           -- Bed/bag: single flat draw.
           if propStyle == 1 then
-            -- Build pyramid mesh: 20x20 base, 24 tall, UV-mapped with tent texture
-            local okPyr, pyrMesh = pcall(function()
-              local hw, hh = 10, 24
-              local verts = {
-                -- Front (-Z)
-                {-hw, 0, -hw,  0, 1}, { hw, 0, -hw,  1, 1}, {  0, hh,  0,  0.5, 0},
-                -- Right (+X)
-                { hw, 0, -hw,  0, 1}, { hw, 0,  hw,  1, 1}, {  0, hh,  0,  0.5, 0},
-                -- Back (+Z)
-                { hw, 0,  hw,  0, 1}, {-hw, 0,  hw,  1, 1}, {  0, hh,  0,  0.5, 0},
-                -- Left (-X)
-                {-hw, 0,  hw,  0, 1}, {-hw, 0, -hw,  1, 1}, {  0, hh,  0,  0.5, 0},
-              }
-              local m = love.graphics.newMesh(verts, "triangles")
-              m:setTexture(pm.image)
-              return m
-            end)
-            if okPyr and pyrMesh then
-              local pyrModel = Mat4.mul(
-                Mat4.translate(propCx, propY, propCz),
-                Mat4.rotateY(tentYaw)
-              )
-              local okD, errD = pcall(Voxel3D.draw, pyrMesh, pm.image, pyrModel, 0.2, pyrModel)
-              if not okD then fileLog("VOXEL pyramid tent draw FAILED: " .. tostring(errD)) end
-            else
-              fileLog("VOXEL pyramid mesh build FAILED")
-            end
+            -- Single billboard, upright, facing yaw (not 4-sided, not pyramid).
+            local tentModel = Mat4.mul(
+              Mat4.translate(propCx, propY, propCz),
+              Mat4.rotateY(tentYaw)
+            )
+            local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, tentModel, 0.2, tentModel)
+            if not okD then fileLog("VOXEL tent draw FAILED: " .. tostring(errD)) end
           else
             local propModel = Mat4.mul(
               Mat4.translate(propCx, propY, propCz),
