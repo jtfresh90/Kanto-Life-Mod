@@ -1625,15 +1625,8 @@ return function(mod)
                 npc.frozen = true
                 npc.nightlifeSleeping = true
                 if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
-                local facing = npc.facing or npc.direction or ""
-                local facingStr = tostring(facing):upper()
-                local isVertical = facingStr:find("UP") or facingStr:find("DOWN")
                 local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-                if isVertical then
-                  npc.johtoLifeSleepAngle = 0
-                else
-                  npc.johtoLifeSleepAngle = sign * (math.pi / 2)
-                end
+                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
                 npc.johtoLifeSleepSide = sign
                 -- 1.0.0: bake the rotated gray sprite (works)
                 pcall(bakeRotatedSleepSprite, npc)

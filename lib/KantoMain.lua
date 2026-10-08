@@ -2985,17 +2985,8 @@ function putToSleep(npc)
     npc.nightlifeSleeping = true
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
-    -- Bed orientation matches NPC facing direction
-    -- If facing UP/DOWN, bed is vertical (angle 0); if LEFT/RIGHT, bed is horizontal (pi/2)
-    local facing = npc.facing or npc.direction or ""
-    local facingStr = tostring(facing):upper()
-    local isVertical = facingStr:find("UP") or facingStr:find("DOWN") or facingStr == "0" or facingStr == "2"
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-    if isVertical then
-      npc.kantoLifeSleepAngle = 0
-    else
-      npc.kantoLifeSleepAngle = sign * (math.pi / 2)
-    end
+    npc.kantoLifeSleepAngle = sign * (math.pi / 2)
     npc.kantoLifeSleepSide = sign
     -- Hard stop (see NPC:update — frozen blocks NEW wanders; moving must be cleared)
     npc.frozen = true
