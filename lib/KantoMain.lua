@@ -3168,40 +3168,32 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
-  -- Debug log: try mod_storage/yellow first (user-visible in iOS Files app
-  -- under On My iPhone > gen1recomp++ > mod_storage > yellow), fall back to
-  -- <mod>/debug/.
-  local debugPath = nil
+  -- Debug log: use love.filesystem (writes to Documents/ on iOS, same place
+  -- as lua-error.log which the user can already find). Falls back to io.open.
   local function fileLog(msg)
     pcall(function()
-      if not debugPath then
-        local base = mod.path or "."
-        -- Try mod_storage/yellow (sibling of mods/ directory)
-        local candidates = {
-          base .. "/../mod_storage/yellow/kanto_debug.log",
-          base .. "/debug/kanto_debug.log",
-          "kanto_debug.log",
-        }
-        for _, p in ipairs(candidates) do
-          -- Try to create parent dir
-          local dir = p:match("^(.*)/[^/]+$")
-          if dir then pcall(function() os.execute('mkdir -p "' .. dir .. '"') end) end
-          local f = io.open(p, "a")
+      local line = os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n"
+      -- Try LÖVE filesystem first (iOS Documents/)
+      if love and love.filesystem then
+        pcall(function()
+          local f = love.filesystem.newFile("kanto_debug.log")
           if f then
-            f:write(os.date("%H:%M:%S") .. " Kanto Life debug log at: " .. p .. "\n")
-            f:close()
-            debugPath = p
-            break
+            local ok = pcall(function() f:open("a") end)
+            if ok then
+              pcall(function() f:write(line) end)
+              pcall(function() f:close() end)
+              return
+            end
           end
-        end
+        end)
+        -- Also try append mode directly
+        pcall(function() love.filesystem.append("kanto_debug.log", line) end)
       end
-      if debugPath then
-        local f = io.open(debugPath, "a")
-        if f then
-          f:write(os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n")
-          f:close()
-        end
-      end
+      -- Fallback: io.open in current directory
+      pcall(function()
+        local f = io.open("kanto_debug.log", "a")
+        if f then f:write(line) f:close() end
+      end)
     end)
   end
   local function sleepAccessoryImage(style)
@@ -5306,8 +5298,11 @@ local function nightlifeTick(world, dt)
             Voxel3D.draw(pbm.mesh, pbm.image, baseModel, 0, baseModel)
           end
         end
-        -- Body (existing)
-        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        -- Body: hidden for tent (style 1 replaces NPC), visible for bed/bag
+        -- sandwiched between base and overlay.
+        if propStyle ~= 1 then
+          Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+        end
         -- Overlay on top (or tent upright)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
