@@ -2914,12 +2914,36 @@ local nm = storyDisplayName(talker)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
-    if sprite._kantoSleepBaked then
-      -- Log if already baked (possible shared sprite issue)
+    -- Fix shared sprite: each NPC gets its OWN sprite clone.
+    -- (Guys with glasses / Pokemon were sharing baked sprites.)
+    if sprite._kantoSleepBaked and sprite._kantoBakedFor ~= npc then
+      -- Sprite is shared and baked for someone else: clone it for this NPC
       pcall(function()
-        fileLog(string.format("2D BAKE SKIP (already baked) npc=%s", tostring(npc.name or "?")))
+        fileLog(string.format("2D BAKE CLONE (shared, was for %s, now %s)",
+          tostring(sprite._kantoBakedForName or "?"), tostring(npc.name or "?")))
       end)
-      return true
+      -- Restore the shared sprite to original (for the other NPC)
+      if sprite._kantoOrigImage ~= nil then
+        sprite.image = sprite._kantoOrigImage
+        sprite.frames = sprite._kantoOrigFrames
+        sprite.frameCount = sprite._kantoOrigFrameCount
+        sprite.def = sprite._kantoOrigDef
+      end
+      sprite._kantoSleepBaked = nil
+      sprite._kantoBakedFor = nil
+      -- Clone sprite for this NPC
+      local cloneOk, clone = pcall(function()
+        local c = {}
+        for k, v in pairs(sprite) do c[k] = v end
+        return c
+      end)
+      if cloneOk and clone then
+        npc.sprite = clone
+        sprite = clone
+        -- Mark clone as owned by this NPC (will be baked below)
+      end
+    elseif sprite._kantoSleepBaked then
+      return true  -- Already baked for this NPC
     end
     -- Log bake attempt
     pcall(function()
@@ -3002,6 +3026,8 @@ local nm = storyDisplayName(talker)
     newDef.walker = false
     sprite.def = newDef
     sprite._kantoSleepBaked = true
+    sprite._kantoBakedFor = npc
+    sprite._kantoBakedForName = npc and npc.name or "?"
     return true
   end
 
