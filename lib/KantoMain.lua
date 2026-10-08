@@ -3381,8 +3381,29 @@ function putToSleep(npc)
     end
     return cached
   end
-  -- Draw the opaque base layer UNDER the NPC (3-layer system)
+  -- FRESH 2D accessory: single image drawn under NPC (simple, reliable).
+  -- (Old 3-layer base/overlay never worked in 2D; scratched.)
   local function drawSleepAccessoryBase(npc, sx, sy)
+    if not npc.nightlifeSleeping then return end
+    local style = 0
+    pcall(function() style = resolveSleepStyle(npc) end)
+    if style == 0 or style == 1 then return end  -- No base for Default/Tent
+    local img = sleepAccessoryImage(style)
+    if not img then return end
+    if sx == 0 and sy == 0 then return end
+    local iw, ih = img:getDimensions()
+    -- Draw centered on NPC, rotated 90deg to match lying-down sprite
+    local cx, cy = sx + 8, sy + 8
+    love.graphics.push("all")
+    love.graphics.setColor(1,1,1,1)
+    love.graphics.translate(cx, cy)
+    love.graphics.rotate(math.pi / 2)
+    love.graphics.translate(-iw/2, -ih/2)
+    love.graphics.draw(img, 0, 0)
+    love.graphics.pop()
+  end
+  -- Legacy 3-layer base (kept for reference, not used)
+  local function drawSleepAccessoryBase_OLD(npc, sx, sy)
     if not npc.nightlifeSleeping then return end
     -- Debug: show base coordinates
     pcall(function()
@@ -5632,9 +5653,13 @@ local function nightlifeTick(world, dt)
         -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
         -- (On-screen 3-layer debug removed: mirrored by camera transform)
         -- Base first (opaque, under the body)
-        -- Offset: left a little, then towards feet (feet covered, head out).
-        -- (Joshua: "move to the left a little... then move down... towards their feet")
-        local bedDx, bedDz = -2, 3
+        -- Beds (3): offset left a little, towards feet (feet covered, head out).
+        -- Sleeping bags (2): centered (no offset).
+        -- (Joshua: bags were off-center in voxel)
+        local bedDx, bedDz = 0, 0
+        if propStyle == 3 then
+          bedDx, bedDz = -2, 3
+        end
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
