@@ -5956,33 +5956,20 @@ local function nightlifeTick(world, dt)
             spr:draw(0, 0, 0, 0, "down", 0, false, nil, nil, nil)
           end)
           if not ok then
-            -- sprite:draw wants world coords — use transform around baseDraw with orig
+            -- FIX: Do NOT call baseDraw (Hook 1 canvas capture produces noise for
+            -- clerk/Pikachu). Hide NPC instead (bed + Zzz still show).
+            -- (Research: baseDraw = Hook 1 = getSleepingCanvas noise source)
             G.pop()
             G.push("all")
-            G.translate(sx + 8, sy + 8)
-            G.rotate(angle)
-            G.translate(-(sx + 8), -(sy + 8))
-            G.setColor(0.55, 0.55, 0.60, 1)
-            local save = self.sprite
-            if self._kantoOrigSprite then self.sprite = self._kantoOrigSprite end
-            baseDraw(self, camX, camY)
-            self.sprite = save
+            -- No draw (hidden)
           end
           G.setColor(1, 1, 1, 1)
           G.pop()
           drawn = true
         end)
         if not drawn then
-          pcall(function()
-            G.push("all")
-            G.translate(sx + 8, sy + 8)
-            G.rotate(angle)
-            G.translate(-(sx + 8), -(sy + 8))
-            G.setColor(0.55, 0.55, 0.60, 1)
-            baseDraw(self, camX, camY)
-            G.setColor(1, 1, 1, 1)
-            G.pop()
-          end)
+          -- FIX: Do NOT call baseDraw (Hook 1 noise). Hide NPC instead.
+          -- (Bed + Zzz still show; consistent with 1.4.115 hide-on-fail)
         end
         -- 2D accessories: draw overlay (transparent with head hole) OVER the NPC
         if accStyle == 2 or accStyle == 3 then
