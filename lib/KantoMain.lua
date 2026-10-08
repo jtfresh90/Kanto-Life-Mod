@@ -3320,6 +3320,15 @@ function putToSleep(npc)
   -- Draw the opaque base layer UNDER the NPC (3-layer system)
   local function drawSleepAccessoryBase(npc, sx, sy)
     if not npc.nightlifeSleeping then return end
+    -- Debug: show base coordinates
+    pcall(function()
+      if love and love.graphics then
+        love.graphics.push("all")
+        love.graphics.setColor(1, 1, 0, 1)
+        love.graphics.print(string.format("B:%.0f,%.0f", sx or 0, sy or 0), (sx or 0), (sy or 0) - 20)
+        love.graphics.pop()
+      end
+    end)
     local style = resolveSleepStyle(npc)
     if style == 0 or style == 1 then
       fileLog("BASE skip: style=" .. tostring(style))
@@ -3347,6 +3356,15 @@ function putToSleep(npc)
     love.graphics.pop()
   end
   local function drawSleepAccessory(npc, sx, sy)
+    -- Debug: show overlay coordinates
+    pcall(function()
+      if love and love.graphics then
+        love.graphics.push("all")
+        love.graphics.setColor(0, 1, 1, 1)
+        love.graphics.print(string.format("O:%.0f,%.0f", sx or 0, sy or 0), (sx or 0), (sy or 0) - 35)
+        love.graphics.pop()
+      end
+    end)
     fileLog("drawSleepAccessory called, sleeping=" .. tostring(npc.nightlifeSleeping))
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     -- Only draw for sleeping NPCs
@@ -5322,16 +5340,7 @@ local function nightlifeTick(world, dt)
         if isPokemonFollower(npc) then return false end
         if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
         if isViridianSleepyOldMan(npc) then return false end
-        -- On-screen debug (always show for voxel sleepers)
-        pcall(function()
-          if love and love.graphics then
-            love.graphics.push("all")
-            love.graphics.setColor(1, 1, 0, 1)
-            local hasFrames = npc._kantoSleepVoxelFrames ~= nil
-            love.graphics.print("VOXEL SLEEP: frames=" .. tostring(hasFrames), 10, 10)
-            love.graphics.pop()
-          end
-        end)
+        -- (On-screen voxel debug removed: mirrored by camera transform)
         if not npc._kantoSleepVoxelFrames then
           pcall(bakeGrayLie, npc)
         end
@@ -5399,18 +5408,7 @@ local function nightlifeTick(world, dt)
         -- Accessories re-enabled (1.4.45)
         local pm = sleepPropMesh(propStyle)
         -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
-        -- On-screen debug: show mesh status (temporary)
-        pcall(function()
-          if love and love.graphics then
-            love.graphics.push("all")
-            love.graphics.setColor(1, 1, 1, 1)
-            local dbg = string.format("3L: bodyMesh=%s bodyImg=%s pm=%s",
-              tostring(bodyMesh ~= nil), tostring(body ~= nil),
-              tostring(pm ~= nil and pm.mesh ~= nil))
-            love.graphics.print(dbg, 10, 10)
-            love.graphics.pop()
-          end
-        end)
+        -- (On-screen 3-layer debug removed: mirrored by camera transform)
         -- Base first (opaque, under the body)
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
