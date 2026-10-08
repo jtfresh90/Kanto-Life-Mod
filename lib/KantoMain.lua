@@ -5597,20 +5597,21 @@ local function nightlifeTick(world, dt)
     if NPCMod and type(NPCMod.update) == "function" then
       local baseUpdate = NPCMod.update
       function NPCMod:update(map, entities)
-        -- DEBUG LOG polling: if user turned on View Log, show it once
+        -- DEBUG LOG polling: show once per toggle-ON with 10s cooldown.
+        -- Uses setOpt (not mod.options:set) so opt() sees the reset.
         pcall(function()
-          if opt("debug_log") == true and not _kantoDebugLogShown then
-            _kantoDebugLogShown = true
+          local nowT = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          if opt("debug_log") == true and (nowT - (_kantoDebugLogLast or 0)) > 10 then
+            _kantoDebugLogLast = nowT
             local text = table.concat(debugLogBuffer, "\n")
             if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
             local lines = {}
             for line in text:gmatch("[^\n]+") do
               table.insert(lines, line)
-              if #lines >= 12 then break end
+              if #lines >= 10 then break end
             end
             local shortText = table.concat(lines, "\n")
-            if #lines == 12 then shortText = shortText .. "\n...(see full log via screenshot)" end
-            -- Show via pushText if available
+            -- Show via pushText if available (modal, press A to dismiss)
             if type(pushText) == "function" then
               local ow = mod.world and mod.world:overworld()
               if ow then
@@ -5619,12 +5620,8 @@ local function nightlifeTick(world, dt)
                 if g then pushText(g, ow, shortText, nil) end
               end
             end
-            -- Reset the toggle
-            if mod.options and mod.options.set then
-              pcall(function() mod.options:set("debug_log", false) end)
-            end
-            -- Allow re-triggering after reset
-            _kantoDebugLogShown = false
+            -- Reset toggle via setOpt so opt() sees it immediately
+            pcall(function() setOpt("debug_log", false) end)
           end
         end)
         -- Enforce sleep every frame (source of truth)
