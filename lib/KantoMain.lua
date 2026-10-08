@@ -5001,9 +5001,10 @@ local function nightlifeTick(world, dt)
       return false
     end
 
-    -- Allow talking to MOVING Kanto Life NPCs. The engine's OverworldState:interact
-    -- skips NPCs with npc.moving=true, but Kanto Life NPCs wander. If the player
-    -- presses A facing a moving ambient NPC, stop it briefly so the talk proceeds.
+    -- Allow talking to NPCs that are mid-step. The engine's OverworldState:interact
+    -- only calls world.talk when `not npc.moving` (mid-step flag, not wander behavior).
+    -- If the player presses A facing a mid-step ambient NPC, stop it briefly so the
+    -- talk proceeds. (Corrected: engine gates on mid-step, not on wandering.)
     pcall(function()
       local OWS = safeRequire("src.world.OverworldController")
       -- OverworldController returns the OverworldState class
@@ -5953,7 +5954,15 @@ local function nightlifeTick(world, dt)
           G.setColor(0.55, 0.55, 0.60, 1)
           -- Draw stand-down frame at local origin
           local ok = pcall(function()
-            spr:draw(0, 0, 0, 0, "down", 0, false, nil, nil, nil)
+            -- RESEARCH FIX: Use getPoseGeometry + resolveImage directly.
+            -- Bypasses spr:draw's palette/cell branches that throw for
+            -- clerk (3-frame) and Pikachu. Same frame the engine would pick.
+            local geo = spr:getPoseGeometry("down", 0, false)
+            if not (geo and geo.quad) then error("no quad") end
+            local img = spr:resolveImage()
+            if not img then error("no image") end
+            local fw, fh = geo.width, geo.height
+            G.draw(img, geo.quad, -fw/2, -fh/2)
           end)
           if not ok then
             -- FIX: Do NOT call baseDraw (Hook 1 canvas capture produces noise for
