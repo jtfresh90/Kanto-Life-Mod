@@ -3168,28 +3168,39 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
-  -- Debug log goes to <mod>/debug/kanto_debug.log so it's visible in the
-  -- iOS Files app under gen1recomp/mods/Kanto-Life-Mod/debug/.
-  local debugDirReady = false
+  -- Debug log: try mod_storage/yellow first (user-visible in iOS Files app
+  -- under On My iPhone > gen1recomp++ > mod_storage > yellow), fall back to
+  -- <mod>/debug/.
+  local debugPath = nil
   local function fileLog(msg)
     pcall(function()
-      local base = mod.path or "."
-      -- Create debug/ once (io.open can't make directories; use os.execute).
-      if not debugDirReady then
-        pcall(function() os.execute('mkdir -p "' .. base .. '/debug"') end)
-        debugDirReady = true
-        -- Record the absolute path on first write so the user knows where to look.
-        local pf = io.open(base .. "/debug/kanto_debug.log", "a")
-        if pf then
-          pf:write(os.date("%H:%M:%S") .. " Kanto Life debug log at: " .. base .. "/debug/kanto_debug.log\n")
-          pf:close()
+      if not debugPath then
+        local base = mod.path or "."
+        -- Try mod_storage/yellow (sibling of mods/ directory)
+        local candidates = {
+          base .. "/../mod_storage/yellow/kanto_debug.log",
+          base .. "/debug/kanto_debug.log",
+          "kanto_debug.log",
+        }
+        for _, p in ipairs(candidates) do
+          -- Try to create parent dir
+          local dir = p:match("^(.*)/[^/]+$")
+          if dir then pcall(function() os.execute('mkdir -p "' .. dir .. '"') end) end
+          local f = io.open(p, "a")
+          if f then
+            f:write(os.date("%H:%M:%S") .. " Kanto Life debug log at: " .. p .. "\n")
+            f:close()
+            debugPath = p
+            break
+          end
         end
       end
-      local path = base .. "/debug/kanto_debug.log"
-      local f = io.open(path, "a")
-      if f then
-        f:write(os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n")
-        f:close()
+      if debugPath then
+        local f = io.open(debugPath, "a")
+        if f then
+          f:write(os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n")
+          f:close()
+        end
       end
     end)
   end
