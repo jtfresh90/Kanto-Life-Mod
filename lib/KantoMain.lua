@@ -3441,16 +3441,6 @@ function putToSleep(npc)
     love.graphics.pop()
   end
   local function drawSleepAccessory(npc, sx, sy)
-    fileLog("drawSleepAccessory called, sleeping=" .. tostring(npc.nightlifeSleeping) .. " sx=" .. tostring(sx) .. " sy=" .. tostring(sy))
-    -- Debug: large visible text showing function was called
-    pcall(function()
-      if love and love.graphics then
-        love.graphics.push("all")
-        love.graphics.setColor(0, 1, 1, 1)
-        love.graphics.print("ACC", (sx or 0), (sy or 0) - 40, 0, 2, 2)
-        love.graphics.pop()
-      end
-    end)
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     -- Only draw for sleeping NPCs
     if not npc.nightlifeSleeping then
@@ -3459,27 +3449,9 @@ function putToSleep(npc)
     end
     local style = 0
     pcall(function() style = resolveSleepStyle(npc) end)
-    if style == 0 then
-      -- On-screen debug: red dot indicates style=0 (no accessory configured)
-      pcall(function()
-        love.graphics.push("all")
-        love.graphics.setColor(1, 0, 0, 1)
-        love.graphics.circle("fill", sx + 8, sy - 10, 3)
-        love.graphics.pop()
-      end)
-      return
-    end
+    if style == 0 then return end
     local img = sleepAccessoryImage(style)
-    if not img then
-      -- On-screen debug: blue dot indicates image failed to load
-      pcall(function()
-        love.graphics.push("all")
-        love.graphics.setColor(0, 0, 1, 1)
-        love.graphics.circle("fill", sx + 8, sy - 10, 3)
-        love.graphics.pop()
-      end)
-      return
-    end
+    if not img then return end
     -- Use getScreenOrigin for accurate positioning (same as Zzz).
     -- Falls back to sx, sy if not available.
     local px = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
@@ -5921,6 +5893,13 @@ local function nightlifeTick(world, dt)
           end
           if okAuthored then return end
         end
+        -- 2D accessories: draw base (opaque) UNDER the NPC
+        -- (Research: Hook 1 had this but was overwritten by Hook 2)
+        local accStyle = 0
+        pcall(function() accStyle = resolveSleepStyle(self) end)
+        if accStyle == 2 or accStyle == 3 then
+          pcall(drawSleepAccessoryBase, self, sx, sy)
+        end
         -- 2D: geometric ±90° + gray on the ORIGINAL sprite (readable characters)
         -- Use orig sprite for this path so we don't draw a failed black bake
         local drawn = false
@@ -5963,6 +5942,10 @@ local function nightlifeTick(world, dt)
             G.setColor(1, 1, 1, 1)
             G.pop()
           end)
+        end
+        -- 2D accessories: draw overlay (transparent with head hole) OVER the NPC
+        if accStyle == 2 or accStyle == 3 then
+          pcall(drawSleepAccessory, self, sx, sy)
         end
         if type(drawSleepZzz) == "function" and opt("sleep_bubbles") ~= false then
           drawSleepZzz(sx + 8, sy - 6,
