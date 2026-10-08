@@ -3372,16 +3372,16 @@ function putToSleep(npc)
     love.graphics.pop()
   end
   local function drawSleepAccessory(npc, sx, sy)
-    -- Debug: show overlay coordinates
+    fileLog("drawSleepAccessory called, sleeping=" .. tostring(npc.nightlifeSleeping) .. " sx=" .. tostring(sx) .. " sy=" .. tostring(sy))
+    -- Debug: large visible text showing function was called
     pcall(function()
       if love and love.graphics then
         love.graphics.push("all")
         love.graphics.setColor(0, 1, 1, 1)
-        love.graphics.print(string.format("O:%.0f,%.0f", sx or 0, sy or 0), (sx or 0), (sy or 0) - 35)
+        love.graphics.print("ACC", (sx or 0), (sy or 0) - 40, 0, 2, 2)
         love.graphics.pop()
       end
     end)
-    fileLog("drawSleepAccessory called, sleeping=" .. tostring(npc.nightlifeSleeping))
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     -- Only draw for sleeping NPCs
     if not npc.nightlifeSleeping then
@@ -4936,6 +4936,15 @@ local function nightlifeTick(world, dt)
     local function bakeGrayLie(npc)
       if npc and isViridianSleepyOldMan(npc) then
         return false
+      -- Log sprite info for diagnosis (crowd NPC issue)
+      pcall(function()
+        local spr = npc and npc.sprite
+        if spr then
+          local fw = tonumber(spr.frameWidth) or -1
+          local fh = tonumber(spr.frameHeight) or -1
+          fileLog(string.format("BAKE fw=%d fh=%d", fw, fh))
+        end
+      end)
       end
       if not npc or not npc.sprite or npc._kantoSleepSpriteActive then
         return npc and npc._kantoSleepSpriteActive
