@@ -233,7 +233,9 @@ return function(ctx)
 
   local function eligible(npc)
     if not isKantoSpawn(npc) then return false end
-    if npc.hidden or npc.frozen or npc.nightlifeSleeping or npc.dsShelter
+    -- RESEARCH FIX: Don't exclude frozen NPCs (they're just talking).
+    -- The update loop skips stepping for frozen NPCs, preserving routine state.
+    if npc.hidden or npc.nightlifeSleeping or npc.dsShelter
        or npc.kantoLifeSleeping or npc.johtoLifeSleeping or npc.sleeping then return false end
     if npc._kantoServiceTraffic then return false end
     if npc.kantoLifeWaterBound or (npc.def and npc.def.kantoLifeWaterBound) then return false end
@@ -465,7 +467,10 @@ return function(ctx)
     st.wanderTarget = nil
     st.localTarget = nil
     st.localWait = 0
-    st.localRoamRadius = 18
+    st.localRoamRadius = 40
+    -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
+    -- They use wanderTarget() but never despawn at doors.
+    st.roamFar = (not traveling) and (math.random() < 0.3)
     st.blockedTime = 0
     st.blockedCount = 0
     st.travelKind = pickTravelKind(npc, world or lastWorld)
@@ -845,9 +850,11 @@ return function(ctx)
     -- Move in a broad local area, but never use the original anchor as a
     -- destination. The next target is selected from the actor's current cell,
     -- so successful movement naturally carries the actor away from spawn.
+    -- RESEARCH FIX: Expanded from ±18 to ±40 for far-distance travel
+    -- (user requirement: routines should travel far, not small squares)
     for _ = 1, 40 do
-      local tx = cx + math.random(-18, 18)
-      local ty = cy + math.random(-18, 18)
+      local tx = cx + math.random(-40, 40)
+      local ty = cy + math.random(-40, 40)
       if tx ~= cx or ty ~= cy then
         local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
         local warp = false
@@ -1094,6 +1101,9 @@ return function(ctx)
 
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
+      -- RESEARCH FIX: Skip frozen NPCs (talking) without deleting state.
+      -- They'll resume their routine when unfrozen.
+      if npc and npc.frozen then goto continue end
       -- pcall: the NPC may have been removed/modified by another mod.
       local ok, isEligible = pcall(eligible, npc)
       if not npc or not ok or not isEligible then
@@ -1109,7 +1119,14 @@ return function(ctx)
           st.localWait = 0
         end
         if not st.localTarget then
-          local tx, ty = localWanderTarget(world, npc)
+          -- RESEARCH FIX: roamFar NPCs use map-wide wanderTarget()
+          local tx, ty
+          if st.roamFar then
+            local wt = wanderTarget(world, npc)
+            if wt then tx, ty = wt[1], wt[2] end
+          else
+            tx, ty = localWanderTarget(world, npc)
+          end
           if tx and ty then st.localTarget = {tx, ty} end
         end
         if st.localTarget and not npc.moving then

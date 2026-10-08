@@ -5019,11 +5019,17 @@ local function nightlifeTick(world, dt)
               if fx and type(self.npcAtCell) == "function" then
                 local npc = self:npcAtCell(fx, fy)
                 if npc and npc.moving and (isAmbientNpc(npc) or isPokeAmbient(npc)) then
-                  -- Stop the NPC so the engine's moving check passes
+                  -- RESEARCH FIX: Complete the step FORWARD (Pikachu follower pattern),
+                  -- not snap back. Clears stale targets so routine resumes cleanly.
+                  if npc.targetX ~= nil and npc.targetY ~= nil then
+                    npc.cellX, npc.cellY = npc.targetX, npc.targetY
+                  end
+                  npc.targetX, npc.targetY = nil, nil
+                  npc.goalX, npc.goalY = nil, nil
                   npc.moving = false
                   npc.marching = false
                   npc.progress = 0
-                  -- Snap to cell to ensure clean state
+                  npc.hopStep = nil
                   if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
                     npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
                   end
