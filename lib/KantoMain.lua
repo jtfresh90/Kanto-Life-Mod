@@ -3179,12 +3179,19 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
-  -- Debug log: use love.filesystem (writes to Documents/ on iOS, same place
-  -- as lua-error.log which the user can already find). Falls back to io.open.
+  -- Debug log: try mod folder first (user-visible in Files app under the
+  -- mod), then love.filesystem (Documents/, same as lua-error.log).
   local function fileLog(msg)
     pcall(function()
       local line = os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n"
-      -- Try LÖVE filesystem first (iOS Documents/)
+      -- Try mod folder first (user requested: visible in Files app)
+      if mod and mod.path then
+        pcall(function()
+          local f = io.open(mod.path .. "/kanto_debug.log", "a")
+          if f then f:write(line) f:close() return end
+        end)
+      end
+      -- Try LÖVE filesystem (iOS Documents/)
       if love and love.filesystem then
         pcall(function()
           local f = love.filesystem.newFile("kanto_debug.log")
@@ -4797,6 +4804,40 @@ local function nightlifeTick(world, dt)
       if type(baseTalk) == "function" then return baseTalk(world, npc) end
       return false
     end
+
+    -- Allow talking to MOVING Kanto Life NPCs. The engine's OverworldState:interact
+    -- skips NPCs with npc.moving=true, but Kanto Life NPCs wander. If the player
+    -- presses A facing a moving ambient NPC, stop it briefly so the talk proceeds.
+    pcall(function()
+      local OWS = safeRequire("src.world.OverworldController")
+      -- OverworldController returns the OverworldState class
+      if OWS and type(OWS.interact) == "function" and not OWS._kantoLifeInteractWrapped then
+        local baseOWSInteract = OWS.interact
+        OWS._kantoLifeInteractWrapped = true
+        OWS.interact = function(self)
+          -- Pre-check: is there a moving Kanto Life NPC in front?
+          pcall(function()
+            if self and self.player and type(self.player.facingCell) == "function" then
+              local fx, fy = self.player:facingCell()
+              if fx and type(self.npcAtCell) == "function" then
+                local npc = self:npcAtCell(fx, fy)
+                if npc and npc.moving and (isAmbientNpc(npc) or isPokeAmbient(npc)) then
+                  -- Stop the NPC so the engine's moving check passes
+                  npc.moving = false
+                  npc.marching = false
+                  npc.progress = 0
+                  -- Snap to cell to ensure clean state
+                  if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+                    npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+                  end
+                end
+              end
+            end
+          end)
+          return baseOWSInteract(self)
+        end
+      end
+    end)
 
     local baseWarp = Overworld.takeWarp
     Overworld.takeWarp = function(warpDef)
