@@ -168,8 +168,7 @@ return function(mod)
      { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
-    { key = "debug_log", type = "choice", label = "DEBUG LOG",
-      choices = { { "Off", 0 }, { "View Log", 1 } }, default = 0 },
+    { key = "debug_log", type = "toggle", label = "VIEW DEBUG LOG", default = false },
   })
 
   local function opt(key)
@@ -5404,7 +5403,10 @@ local function nightlifeTick(world, dt)
         -- Yaw controls orientation deterministically; sign randomization removed.
         local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
-        local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+        -- Beds/bags rotated 90deg (PI/2) to align vertically with sleeping sprites.
+        local flatRot = Mat4.mul(Mat4.rotateY(yaw + math.pi / 2), Mat4.rotateX(-math.pi / 2))
+        -- Body keeps original yaw (no extra rotation) to match sprite orientation.
+        local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
         -- Shared center: tile center (px+8, py+8). For rotateX(-PI/2) with centered
         -- anchor, card extends north from origin, so cz = py+8+fh/2.
         -- Use body dimensions for centering (body is the reference).
@@ -5412,7 +5414,7 @@ local function nightlifeTick(world, dt)
         local bcz = py + 8 + h / 2
         local bodyModel = Mat4.mul(
           Mat4.translate(bcx, gh + 0.25, bcz),
-          flatRot
+          bodyRot
         )
 
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0) -- Accessories re-enabled (1.4.45)
@@ -5468,13 +5470,24 @@ local function nightlifeTick(world, dt)
             -- Use shared (bcx, bcz) for alignment with body and base
             propCx, propCz = bcx, bcz
           end
-          local propModel = Mat4.mul(
-            Mat4.translate(propCx, propY, propCz),
-            propRotation
-          )
-          -- pull=0.2 biases overlay toward camera in depth vs body
-          local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
-          if not okD then fileLog("VOXEL overlay draw FAILED: " .. tostring(errD)) end
+          -- Tent (style 1): draw 4-sided (cross from top) for 3D volume.
+          -- Bed/bag: single flat draw.
+          if propStyle == 1 then
+            for i = 0, 3 do
+              local rot4 = Mat4.rotateY(tentYaw + i * math.pi / 2)
+              local model4 = Mat4.mul(Mat4.translate(propCx, propY, propCz), rot4)
+              local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, model4, 0.2, model4)
+              if not okD then fileLog("VOXEL tent draw FAILED: " .. tostring(errD)) end
+            end
+          else
+            local propModel = Mat4.mul(
+              Mat4.translate(propCx, propY, propCz),
+              propRotation
+            )
+            -- pull=0.2 biases overlay toward camera in depth vs body
+            local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
+            if not okD then fileLog("VOXEL overlay draw FAILED: " .. tostring(errD)) end
+          end
         end
         -- End disabled prop drawing ]]
 
@@ -5567,6 +5580,36 @@ local function nightlifeTick(world, dt)
     if NPCMod and type(NPCMod.update) == "function" then
       local baseUpdate = NPCMod.update
       function NPCMod:update(map, entities)
+        -- DEBUG LOG polling: if user turned on View Log, show it once
+        pcall(function()
+          if opt("debug_log") == true and not _kantoDebugLogShown then
+            _kantoDebugLogShown = true
+            local text = table.concat(debugLogBuffer, "\n")
+            if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
+            local lines = {}
+            for line in text:gmatch("[^\n]+") do
+              table.insert(lines, line)
+              if #lines >= 12 then break end
+            end
+            local shortText = table.concat(lines, "\n")
+            if #lines == 12 then shortText = shortText .. "\n...(see full log via screenshot)" end
+            -- Show via pushText if available
+            if type(pushText) == "function" then
+              local ow = mod.world and mod.world:overworld()
+              if ow then
+                local g = nil
+                pcall(function() g = G() end)
+                if g then pushText(g, ow, shortText, nil) end
+              end
+            end
+            -- Reset the toggle
+            if mod.options and mod.options.set then
+              pcall(function() mod.options:set("debug_log", false) end)
+            end
+            -- Allow re-triggering after reset
+            _kantoDebugLogShown = false
+          end
+        end)
         -- Enforce sleep every frame (source of truth)
         if opt("sleeping_npcs") and type(shouldSleepNow) == "function" then
           local isNight = false
