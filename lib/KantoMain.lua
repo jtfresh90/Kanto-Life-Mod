@@ -5434,13 +5434,18 @@ local function nightlifeTick(world, dt)
               Mat4.translate(bcx, gh + 0.03, bcz),
               flatRot
             )
-            Voxel3D.draw(pbm.mesh, pbm.image, baseModel, 0, baseModel)
+            local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
+            if not okD then fileLog("VOXEL base draw FAILED: " .. tostring(errD)) end
+          else
+            fileLog("VOXEL base mesh nil for style=" .. tostring(propStyle))
           end
         end
         -- Body: hidden for tent (style 1 replaces NPC), visible for bed/bag
         -- sandwiched between base and overlay.
         if propStyle ~= 1 then
-          Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
+          -- pull=0.1 biases body toward camera in depth vs base
+          local okD, errD = pcall(Voxel3D.draw, bodyMesh, body, bodyModel, 0.1, bodyModel)
+          if not okD then fileLog("VOXEL body draw FAILED: " .. tostring(errD)) end
         end
         -- Overlay on top (or tent upright)
         if pm and pm.mesh then
@@ -5460,7 +5465,9 @@ local function nightlifeTick(world, dt)
             Mat4.translate(propCx, propY, propCz),
             propRotation
           )
-          Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
+          -- pull=0.2 biases overlay toward camera in depth vs body
+          local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
+          if not okD then fileLog("VOXEL overlay draw FAILED: " .. tostring(errD)) end
         end
         -- End disabled prop drawing ]]
 
