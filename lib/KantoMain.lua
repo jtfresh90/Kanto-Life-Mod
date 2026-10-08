@@ -3826,8 +3826,14 @@ function putToSleep(npc)
                 local scale = pxPer12 / 12
                 if scale < 0.5 then scale = 0.5 end
                 if scale > 8 then scale = 8 end
-                -- Draw at projected head position (no offset)
-                drawCollisionBubble(npc, x1 * sxRatio, y1 * syRatio, scale * sxRatio)
+                -- RESEARCH FIX: Clamp to viewport (prevents offscreen at scene edges)
+                local bx, by = x1 * sxRatio, y1 * syRatio
+                local vw, vh = G.getDimensions()
+                if bx < 8 then bx = 8 end
+                if bx > vw - 8 then bx = vw - 8 end
+                if by < 8 then by = 8 end
+                if by > vh - 8 then by = vh - 8 end
+                drawCollisionBubble(npc, bx, by, scale * sxRatio)
               end
               end  -- end if ghOk else
             end
@@ -4809,7 +4815,9 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     if not d then return false end
     if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
     local isNight = night(world)
-    local asleep = opt("sleeping_npcs") and shouldSleepNow(npc, isNight)
+    -- RESEARCH FIX: Include nightlifeSleeping (shouldSleepNow can mismatch
+    -- for visually-sleeping NPCs)
+    local asleep = opt("sleeping_npcs") and (npc.nightlifeSleeping or shouldSleepNow(npc, isNight))
 
     if isPokeAmbient(npc) and not asleep then
       return progressiveAmbientTalk(g, world, npc, true)
@@ -4824,7 +4832,8 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       return true
     end
     npc.frozen = true
-    pushText(g, world, string.format("%s is fast\nasleep.", tostring(d.name or "This person"):gsub("_", " ")))
+    -- RESEARCH FIX: Unfreeze when text closes (prevents permanent frozen state)
+    pushText(g, world, string.format("%s is fast\nasleep.", tostring(d.name or "This person"):gsub("_", " ")), function() npc.frozen = false end)
     return true
   end
 
@@ -5019,11 +5028,9 @@ local function nightlifeTick(world, dt)
               if fx and type(self.npcAtCell) == "function" then
                 local npc = self:npcAtCell(fx, fy)
                 if npc and npc.moving and (isAmbientNpc(npc) or isPokeAmbient(npc)) then
-                  -- RESEARCH FIX: Complete the step FORWARD (Pikachu follower pattern),
-                  -- not snap back. Clears stale targets so routine resumes cleanly.
-                  if npc.targetX ~= nil and npc.targetY ~= nil then
-                    npc.cellX, npc.cellY = npc.targetX, npc.targetY
-                  end
+                  -- RESEARCH FIX: Keep NPC at facing cell (don't move to targetX).
+                  -- Moving forward puts it out of npcAtCell reach. Clear stale
+                  -- targets so routine resumes cleanly after talk.
                   npc.targetX, npc.targetY = nil, nil
                   npc.goalX, npc.goalY = nil, nil
                   npc.moving = false
