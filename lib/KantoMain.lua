@@ -2914,7 +2914,18 @@ local nm = storyDisplayName(talker)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
-    if sprite._kantoSleepBaked then return true end
+    if sprite._kantoSleepBaked then
+      -- Log if already baked (possible shared sprite issue)
+      pcall(function()
+        fileLog(string.format("2D BAKE SKIP (already baked) npc=%s", tostring(npc.name or "?")))
+      end)
+      return true
+    end
+    -- Log bake attempt
+    pcall(function()
+      local fw = tonumber(sprite.frameWidth) or -1
+      fileLog(string.format("2D BAKE npc=%s fw=%d", tostring(npc.name or "?"), fw))
+    end)
     -- For HGSS: don't bake the native image (complex, error-prone).
     -- Mark as baked and let the draw hook handle rotation/tint via the proxy.
     local isHgssSprite = sprite.def and type(sprite.def.hgssNativeImage) == "string"
@@ -3697,15 +3708,19 @@ function putToSleep(npc)
               -- project() is relative, not pixels — using it directly made
               -- bubbles pin-sized. Bubble base height is 12px at scale=1;
               -- scale so 12px = 12 world units (matches NPC scale).
-              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh + 16, py + 8)
-              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 28, py + 8)
+              -- Project feet, offset bubble UP in screen space (reliable vs world Y guess)
+              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh, py + 8)
+              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 12, py + 8)
               if okP1 and okP2 and type(x1) == "number" and type(y1) == "number"
                  and type(y2) == "number" and math.abs(x1) < 10000 and math.abs(y1) < 10000 then
                 local pxPer12 = math.abs(y2 - y1)
                 local scale = pxPer12 / 12
                 if scale < 0.5 then scale = 0.5 end  -- sanity floor
                 if scale > 8 then scale = 8 end      -- sanity ceiling
-                drawCollisionBubble(npc, x1 * sxRatio, y1 * syRatio, scale * sxRatio)
+                -- 30px above feet in screen space
+                local bx = x1 * sxRatio
+                local by = (y1 * syRatio) - (30 * scale * syRatio)
+                drawCollisionBubble(npc, bx, by, scale * sxRatio)
               end
             end
           end
@@ -5480,21 +5495,41 @@ local function nightlifeTick(world, dt)
           -- Mesh local center x=8, so translate by px to place at px+8.
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
-            -- Bed/bag (flat, center-anchored): use shared (bcx, bcz).
+            -- Bed/bag: use bed-specific center (not body-based bcx,bcz).
+            -- Each mesh has different dimensions; must center individually.
             propCx, propCz = px + 8 - (pm.w or 20) / 2, py + 8 + (pm.h or 24) / 2
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
-            -- Use shared (bcx, bcz) for alignment with body and base
-            propCx, propCz = bcx, bcz
           end
-          -- Tent (style 1): draw 4-sided (cross from top) for 3D volume.
+          -- Tent (style 1): PROPER 3D pyramid (square base + apex).
           -- Bed/bag: single flat draw.
           if propStyle == 1 then
-            for i = 0, 3 do
-              local rot4 = Mat4.rotateY(tentYaw + i * math.pi / 2)
-              local model4 = Mat4.mul(Mat4.translate(propCx, propY, propCz), rot4)
-              local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, model4, 0.2, model4)
-              if not okD then fileLog("VOXEL tent draw FAILED: " .. tostring(errD)) end
+            -- Build pyramid mesh: 20x20 base, 24 tall, UV-mapped with tent texture
+            local okPyr, pyrMesh = pcall(function()
+              local hw, hh = 10, 24
+              local verts = {
+                -- Front (-Z)
+                {-hw, 0, -hw,  0, 1}, { hw, 0, -hw,  1, 1}, {  0, hh,  0,  0.5, 0},
+                -- Right (+X)
+                { hw, 0, -hw,  0, 1}, { hw, 0,  hw,  1, 1}, {  0, hh,  0,  0.5, 0},
+                -- Back (+Z)
+                { hw, 0,  hw,  0, 1}, {-hw, 0,  hw,  1, 1}, {  0, hh,  0,  0.5, 0},
+                -- Left (-X)
+                {-hw, 0,  hw,  0, 1}, {-hw, 0, -hw,  1, 1}, {  0, hh,  0,  0.5, 0},
+              }
+              local m = love.graphics.newMesh(verts, "triangles")
+              m:setTexture(pm.image)
+              return m
+            end)
+            if okPyr and pyrMesh then
+              local pyrModel = Mat4.mul(
+                Mat4.translate(propCx, propY, propCz),
+                Mat4.rotateY(tentYaw)
+              )
+              local okD, errD = pcall(Voxel3D.draw, pyrMesh, pm.image, pyrModel, 0.2, pyrModel)
+              if not okD then fileLog("VOXEL pyramid tent draw FAILED: " .. tostring(errD)) end
+            else
+              fileLog("VOXEL pyramid mesh build FAILED")
             end
           else
             local propModel = Mat4.mul(
