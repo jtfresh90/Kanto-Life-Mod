@@ -3732,12 +3732,19 @@ function putToSleep(npc)
               local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
               local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
               local gh = 0
+              local ghOk = false
               if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
                 local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
-                if okH and type(h) == "number" then
+                if okH and type(h) == "number" and h ~= 0 then
                   gh = h
+                  ghOk = true
                 end
               end
+              -- FRESH: Skip bubbles if ground height unreliable (indoors).
+              -- Indoors, groundAt returns 0, causing misaligned bubbles.
+              if not ghOk then
+                -- Skip this NPC's bubble (don't draw misaligned)
+              else
               -- Measure true pixel scale by projecting two points 12 world
               -- units apart vertically. The raw perspective scale `s` from
               -- project() is relative, not pixels — using it directly made
@@ -3756,6 +3763,7 @@ function putToSleep(npc)
                 -- Draw at projected head position (no offset)
                 drawCollisionBubble(npc, x1 * sxRatio, y1 * syRatio, scale * sxRatio)
               end
+              end  -- end if ghOk else
             end
           end
           pcall(G.setCanvas, prev)
