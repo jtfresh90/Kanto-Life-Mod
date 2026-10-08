@@ -5648,10 +5648,9 @@ local function nightlifeTick(world, dt)
         -- Beds (3): offset left a little, towards feet (feet covered, head out).
         -- Sleeping bags (2): centered (no offset).
         -- (Joshua: bags were off-center in voxel)
+        -- RESEARCH FIX: No offset. User wants everything centered on the cell.
+        -- The (-2,+3) was world-space, pointing different directions per facing.
         local bedDx, bedDz = 0, 0
-        if propStyle == 3 then
-          bedDx, bedDz = -2, 3
-        end
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
@@ -5893,7 +5892,12 @@ local function nightlifeTick(world, dt)
         end
         hardFreeze(self)
         -- Always try bake once (helps voxel / true sprite path)
-        if not self._kantoSleepSpriteActive and not isPokemonLike(self) and not isViridianSleepyOldMan(self) then
+        -- RESEARCH FIX: Skip bake for 3-frame sprites (clerk). The bake's proxy
+        -- corrupts them. They use the original sprite directly via getPoseGeometry,
+        -- same code path as Pokemon NPCs.
+        local frameCount = self.sprite and tonumber(self.sprite.frameCount) or 6
+        local isThreeFrame = (frameCount == 3)
+        if not self._kantoSleepSpriteActive and not isPokemonLike(self) and not isViridianSleepyOldMan(self) and not isThreeFrame then
           pcall(bakeGrayLie, self)
         end
         local G = love.graphics
@@ -5950,10 +5954,8 @@ local function nightlifeTick(world, dt)
           G.push("all")
           G.translate(sx + 8, sy + 8)
           G.rotate(angle)
-          -- RESEARCH FIX: translate by -8,-4. Engine's spr:draw blits at
-          -- getScreenOrigin=(0,-4), so visual center is (8,4), not (8,8).
-          -- This centers the NPC at (sx+8, sy+8) matching base/overlay.
-          G.translate(-8, -4)
+          -- RESEARCH FIX: G.draw(img, quad, -fw/2, -fh/2) already centers.
+          -- The extra translate(-8,-4) caused 8px left / 4px up offset.
           G.setColor(0.55, 0.55, 0.60, 1)
           -- Draw stand-down frame at local origin
           local ok = pcall(function()
