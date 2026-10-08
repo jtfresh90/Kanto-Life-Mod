@@ -168,6 +168,8 @@ return function(mod)
      { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
+    { key = "debug_log", type = "choice", label = "DEBUG LOG",
+      choices = { { "Off", 0 }, { "Copy to Clipboard", 1 } }, default = 0 },
   })
 
   local function opt(key)
@@ -1359,6 +1361,21 @@ return function(mod)
 
   mod.events:on("mod.options_changed", function(payload)
     if not payload or payload.mod ~= mod.id then return end
+    -- DEBUG LOG: Copy to clipboard when user selects "Copy to Clipboard"
+    if payload.key == "debug_log" and tonumber(payload.value) == 1 then
+      pcall(function()
+        local text = table.concat(debugLogBuffer, "\n")
+        if text == "" then text = "(debug log empty)" end
+        if love and love.system and love.system.setClipboardText then
+          love.system.setClipboardText(text)
+        end
+        -- Reset the option back to Off
+        if mod.options and mod.options.set then
+          mod.options:set("debug_log", 0)
+        end
+      end)
+      return
+    end
     local ow = mod.world and mod.world:overworld()
     if not ow or not ow.map then return end
     local mapId = ow.map.id
@@ -3179,9 +3196,18 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
-  -- Debug log: writes to lib/kanto_debug.log in the installed mod folder
-  -- (visible in iPhone Files app). Created dynamically when debug runs.
+  -- In-memory debug log buffer (max 200 lines). User can copy via
+  -- Pause > Mods > Kanto Life > DEBUG LOG > Copy to Clipboard.
+  local debugLogBuffer = {}
   local function fileLog(msg)
+    -- Always append to in-memory buffer
+    pcall(function()
+      local line = os.date("%H:%M:%S") .. " " .. tostring(msg)
+      table.insert(debugLogBuffer, line)
+      if #debugLogBuffer > 200 then
+        table.remove(debugLogBuffer, 1)
+      end
+    end)
     pcall(function()
       local line = os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n"
       -- Write to lib/ folder of the installed mod (user-visible in Files app)
