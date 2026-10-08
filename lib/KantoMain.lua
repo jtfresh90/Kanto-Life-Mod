@@ -5821,7 +5821,10 @@ local function nightlifeTick(world, dt)
         if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
         -- Small pull (camera-ward bias) so the Z doesn't z-fight the upright
         -- tent billboard (both sit at z=py+8). Pull has zero screen drift.
-        Voxel3D.draw(zMesh, z, zModel, 0.5, zModel)
+        -- WRAPPED: If Zzz throws, we still return true (bed/body already drawn).
+        -- Without this, CharacterRenderers.first continues to Porygonal which
+        -- draws a duplicate standing sprite.
+        pcall(Voxel3D.draw, zMesh, z, zModel, 0.5, zModel)
         return true
       end
 
