@@ -3577,11 +3577,62 @@ function putToSleep(npc)
           local accImgOk = true
           -- Uniform sleeping draw: rotate 90deg (lying down) + gray tint.
           -- Uses game's own draw, so ALL sprites (glasses, Pikachu, etc.) work.
+          -- Uniform sleeping sprite: capture NPC appearance once via
+          -- baseNpcDraw to a canvas, rotate 90deg (lying down), tint gray.
+          -- Same code for ALL non-story NPCs and ALL Pokemon NPCs.
+          -- Cached per-NPC, so it runs once, not every frame.
+          local function getSleepingCanvas(npc)
+            if npc._kantoSleepCanvas then return npc._kantoSleepCanvas end
+            local G = love.graphics
+            -- Capture: draw NPC to 32x32 canvas (enough for 16x16 sprite)
+            local capOk, canvas = pcall(function()
+              local c = G.newCanvas(32, 32)
+              local prev = G.getCanvas()
+              G.setCanvas(c)
+              G.clear(0, 0, 0, 0)
+              -- Draw NPC at canvas center: camX = px-8 gives sx=8
+              local npx = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
+              local npy = npc.py or npc.y or ((npc.cellY or 0) * 16) or 0
+              baseNpcDraw(npc, npx - 8, npy - 8)
+              G.setCanvas(prev)
+              return c
+            end)
+            if not (capOk and canvas) then return nil end
+            -- Rotate 90deg and tint gray into final canvas
+            local finOk, final = pcall(function()
+              local f = G.newCanvas(32, 32)
+              local prev = G.getCanvas()
+              G.setCanvas(f)
+              G.clear(0, 0, 0, 0)
+              G.push("all")
+              G.translate(16, 16)
+              G.rotate(math.pi / 2)
+              G.translate(-16, -16)
+              G.setColor(0.55, 0.55, 0.60, 1)
+              G.draw(canvas, 0, 0)
+              G.pop()
+              G.setColor(1, 1, 1, 1)
+              G.setCanvas(prev)
+              return f
+            end)
+            if finOk and final then
+              npc._kantoSleepCanvas = final
+              return final
+            end
+            return nil
+          end
           local function drawSleepingNPC()
-            -- DIAGNOSTIC: plain draw, no tint, no rotation.
-            -- If glasses/Pikachu appear CORRECT (normal color, standing),
-            -- then tint/rotation was breaking them.
-            baseNpcDraw(self, camX, camY)
+            local canvas = getSleepingCanvas(self)
+            if canvas then
+              -- Draw the captured sleeping sprite at NPC position
+              local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
+              local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+              local sx, sy = px - (camX or 0), py - (camY or 0)
+              love.graphics.draw(canvas, sx - 8, sy - 8)
+            else
+              -- Fallback: draw normally (better than invisible)
+              baseNpcDraw(self, camX, camY)
+            end
           end
           if tentStyle then
             -- Tent: ALWAYS hide NPC (tent replaces it). Do not draw NPC even
