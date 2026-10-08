@@ -5259,9 +5259,8 @@ local function nightlifeTick(world, dt)
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
-        -- SpriteBillboards.mesh(def, frameIndex): frame 0 is the full image.
-        -- (pw/2, ph/2) was wrong; it only worked by accident via a fallback.
-        local mesh = SpriteBillboards.mesh(def, 0)
+        -- Use same anchor as body (ph/2) for 3-layer alignment
+        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propMeshCache[style]
       end
@@ -5278,7 +5277,8 @@ local function nightlifeTick(world, dt)
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_BASE_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
-        local mesh = SpriteBillboards.mesh(def, 0)
+        -- Use same anchor as body (ph/2) for 3-layer alignment
+        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
         if mesh then propBaseMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propBaseMeshCache[style]
       end
@@ -5330,14 +5330,19 @@ local function nightlifeTick(world, dt)
         local px = tonumber(ctx.px) or tonumber(npc.px) or 0
         local py = tonumber(ctx.py) or tonumber(npc.py) or 0
         local gh = tonumber(ctx.groundHeight) or 0
-        local sign = (tonumber(npc.kantoLifeSleepSide) or 1) >= 0 and 1 or -1
-        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing) + sign * math.pi / 2
-
-        -- SpriteBillboards' local card is centred by using anchorX/anchorY;
-        -- rotate that plane onto the ground and keep its centre over the NPC.
+        -- Research-based: fixed rotation (not sign-dependent), shared transform.
+        -- Yaw controls orientation deterministically; sign randomization removed.
+        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+        -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
+        local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+        -- Shared center: tile center (px+8, py+8). For rotateX(-PI/2) with centered
+        -- anchor, card extends north from origin, so cz = py+8+fh/2.
+        -- Use body dimensions for centering (body is the reference).
+        local bcx = px + 8 - w / 2
+        local bcz = py + 8 + h / 2
         local bodyModel = Mat4.mul(
-          Mat4.translate(px, gh + 0.25, py + 8),
-          Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+          Mat4.translate(bcx, gh + 0.25, bcz),
+          flatRot
         )
 
         local propStyle = math.floor(tonumber(opt("sleep_style")) or 0) -- Accessories re-enabled (1.4.45)
@@ -5352,14 +5357,14 @@ local function nightlifeTick(world, dt)
         -- hole) ABOVE body. Tent (1) stays a single upright billboard.
         -- Accessories re-enabled (1.4.45)
         local pm = sleepPropMesh(propStyle)
-        local flatRotation = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
+        -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
         -- Base first (opaque, under the body)
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
             local baseModel = Mat4.mul(
-              Mat4.translate(px, gh + 0.03, py + 8),
-              flatRotation
+              Mat4.translate(bcx, gh + 0.03, bcz),
+              flatRot
             )
             Voxel3D.draw(pbm.mesh, pbm.image, baseModel, 0, baseModel)
           end
@@ -5376,12 +5381,15 @@ local function nightlifeTick(world, dt)
           local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
           local propRotation = Mat4.rotateY(tentYaw)
           local propY = gh + 0.05
+          local propCx, propCz = px + 8 - (pm.w or 20) / 2, py + 8 + (pm.h or 24) / 2
           if propStyle ~= 1 then
-            propRotation = flatRotation
+            propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
+            -- Use shared (bcx, bcz) for alignment with body and base
+            propCx, propCz = bcx, bcz
           end
           local propModel = Mat4.mul(
-            Mat4.translate(px, propY, py + 8),
+            Mat4.translate(propCx, propY, propCz),
             propRotation
           )
           Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
