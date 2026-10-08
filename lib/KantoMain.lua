@@ -3555,9 +3555,8 @@ function putToSleep(npc)
       NPCMod.draw = function(self, camX, camY)
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
-          if self.sprite and not self.sprite._kantoSleepBaked then
-            pcall(bakeSleepSprite, self)
-          end
+          -- UNIFORM: Skip bake. Draw with rotation+tint at draw time.
+          -- Uses game's own sprite rendering, works for all sprites.
           -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
           local style = 0
           pcall(function() style = resolveSleepStyle(self) end)
@@ -3576,6 +3575,36 @@ function putToSleep(npc)
             pcall(drawSleepAccessoryBase, self, baseSx, baseSy)
           end
           local accImgOk = true
+          -- Uniform sleeping draw: rotate 90deg (lying down) + gray tint.
+          -- Uses game's own draw, so ALL sprites (glasses, Pikachu, etc.) work.
+          local function drawSleepingNPC()
+            local G = love.graphics
+            -- Get sprite screen center for rotation pivot
+            local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
+            local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+            local sx, sy = px - (camX or 0), py - (camY or 0)
+            if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+              local ok, ox, oy = pcall(function()
+                return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
+              end)
+              if ok and ox then sx, sy = ox, oy end
+            end
+            -- Sprite is 16x16 (or frameWidth x frameHeight); center for rotation
+            local fw = 16
+            local fh = 16
+            if self.sprite then
+              fw = tonumber(self.sprite.frameWidth) or 16
+              fh = tonumber(self.sprite.frameHeight) or 16
+            end
+            local cx, cy = sx + fw / 2, sy + fh / 2
+            G.push("all")
+            G.translate(cx, cy)
+            G.rotate(math.pi / 2)
+            G.translate(-cx, -cy)
+            G.setColor(0.55, 0.55, 0.60, 1)  -- Gray tint
+            baseNpcDraw(self, camX, camY)
+            G.pop()
+          end
           if tentStyle then
             -- For tent: verify image loads BEFORE hiding NPC
             local tStyle = 0
@@ -3586,11 +3615,11 @@ function putToSleep(npc)
               -- Tent image OK: hide NPC, draw tent
             else
               -- Tent image FAILED: draw NPC anyway (don't leave invisible)
-              baseNpcDraw(self, camX, camY)
+              drawSleepingNPC()
               accImgOk = false
             end
           else
-            baseNpcDraw(self, camX, camY)
+            drawSleepingNPC()
           end
           -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
           local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
@@ -5477,10 +5506,22 @@ local function nightlifeTick(world, dt)
           pcall(function()
             fileLog("VOXEL bake failed for npc=" .. tostring(npc.name or "?") .. ", using fallback")
           end)
-          -- Fallback: use original sprite as billboard (not baked, but visible)
+          -- Fallback: use original sprite as billboard (not baked, but visible).
+          -- Try all image sources (uniform with 2D bake).
           local fbSprite = npc._kantoOrigSprite or npc.sprite
-          if fbSprite and fbSprite.image then
-            local fbDef = { image = fbSprite.image, w = 16, h = 16 }
+          local fbImg = fbSprite and fbSprite.image or nil
+          if not fbImg and fbSprite and type(fbSprite.resolveImage) == "function" then
+            pcall(function() fbImg = fbSprite:resolveImage() end)
+          end
+          if not fbImg and fbSprite and fbSprite.def and fbSprite.def.image
+            and type(Assets) == "table" and type(Assets.imageData) == "function" then
+            pcall(function()
+              local d = Assets.imageData(fbSprite.def.image)
+              if d then fbImg = love.graphics.newImage(d) end
+            end)
+          end
+          if fbImg then
+            local fbDef = { image = fbImg, w = 16, h = 16 }
             local fbMesh = nil
             pcall(function()
               if type(SpriteBillboards.mesh) == "function" then
@@ -5493,7 +5534,7 @@ local function nightlifeTick(world, dt)
                 Mat4.rotateY(yaw)
               )
               pcall(function()
-                Voxel3D.draw(fbMesh, fbSprite.image, fbModel, 0.1, fbModel)
+                Voxel3D.draw(fbMesh, fbImg, fbModel, 0.1, fbModel)
               end)
               return true  -- Drew fallback, not invisible
             end
