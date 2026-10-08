@@ -5560,12 +5560,13 @@ local function nightlifeTick(world, dt)
         local px = tonumber(ctx.px) or tonumber(npc.px) or 0
         local py = tonumber(ctx.py) or tonumber(npc.py) or 0
         local gh = tonumber(ctx.groundHeight) or 0
-        -- Voxel: fixed yaw for all sleeping NPCs (addresses E-W vs N-S mismatch).
-        -- Per-NPC facing caused beds/sprites to be perpendicular.
-        local yaw = 0
+        -- Voxel body: per-NPC yaw (different directions, as Joshua requested).
+        local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
-        -- Beds/bags use SAME yaw as body (reverted 90deg: it broke alignment).
-        local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+        -- Bed/bag: rotated 90deg from body (yaw + PI/2), SAME center.
+        -- (Joshua: "rotated 90 degrees on the sprite they are tied to without changing the center")
+        local bedYaw = yaw + math.pi / 2
+        local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
         -- Shared center: tile center (px+8, py+8). For rotateX(-PI/2) with centered
@@ -5616,8 +5617,8 @@ local function nightlifeTick(world, dt)
         -- Overlay on top (or tent upright)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
-          -- Fixed yaw for consistent orientation (matches body/bed).
-          local tentYaw = 0
+          -- Per-NPC yaw (different directions, as Joshua requested).
+          local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
           local propRotation = Mat4.rotateY(tentYaw)
           local propY = gh + 0.05
           -- Tent (upright, bottom-anchored): center on tile (px+8, py+8).
