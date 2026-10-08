@@ -3287,10 +3287,29 @@ function putToSleep(npc)
       if mod.log then mod.log:warn("Kanto Life: drawSleepAccessory skipped, not sleeping") end
       return
     end
-    local style = resolveSleepStyle(npc)
-    if mod.log then mod.log:warn("Kanto Life: drawSleepAccessory style=%d", style) end
-    if style == 0 then return end
-    local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
+    local style = 0
+    pcall(function() style = resolveSleepStyle(npc) end)
+    if style == 0 then
+      -- On-screen debug: red dot indicates style=0 (no accessory configured)
+      pcall(function()
+        love.graphics.push("all")
+        love.graphics.setColor(1, 0, 0, 1)
+        love.graphics.circle("fill", sx + 8, sy - 10, 3)
+        love.graphics.pop()
+      end)
+      return
+    end
+    local img = sleepAccessoryImage(style)
+    if not img then
+      -- On-screen debug: blue dot indicates image failed to load
+      pcall(function()
+        love.graphics.push("all")
+        love.graphics.setColor(0, 0, 1, 1)
+        love.graphics.circle("fill", sx + 8, sy - 10, 3)
+        love.graphics.pop()
+      end)
+      return
+    end
     -- Use getScreenOrigin for accurate positioning (same as Zzz).
     -- Falls back to sx, sy if not available.
     local px = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
