@@ -3578,14 +3578,10 @@ function putToSleep(npc)
           -- Uniform sleeping draw: rotate 90deg (lying down) + gray tint.
           -- Uses game's own draw, so ALL sprites (glasses, Pikachu, etc.) work.
           local function drawSleepingNPC()
-            local G = love.graphics
-            -- DIAGNOSTIC: tint only, no rotation. If sprites appear correct
-            -- (gray, standing), rotation was the problem. If black blobs
-            -- persist, baseNpcDraw is the problem.
-            G.push("all")
-            G.setColor(0.55, 0.55, 0.60, 1)  -- Gray tint
+            -- DIAGNOSTIC: plain draw, no tint, no rotation.
+            -- If glasses/Pikachu appear CORRECT (normal color, standing),
+            -- then tint/rotation was breaking them.
             baseNpcDraw(self, camX, camY)
-            G.pop()
           end
           if tentStyle then
             -- Tent: ALWAYS hide NPC (tent replaces it). Do not draw NPC even
