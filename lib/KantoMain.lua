@@ -5594,11 +5594,14 @@ local function nightlifeTick(world, dt)
         -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
         -- (On-screen 3-layer debug removed: mirrored by camera transform)
         -- Base first (opaque, under the body)
+        -- Offset: left a little, then towards feet (feet covered, head out).
+        -- (Joshua: "move to the left a little... then move down... towards their feet")
+        local bedDx, bedDz = -2, 3
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
             local baseModel = Mat4.mul(
-              Mat4.translate(bcx, gh + 0.03, bcz),
+              Mat4.translate(bcx + bedDx, gh + 0.03, bcz + bedDz),
               flatRot
             )
             local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
@@ -5625,9 +5628,9 @@ local function nightlifeTick(world, dt)
           -- Mesh local center x=8, so translate by px to place at px+8.
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
-            -- Bed/bag: use SHARED (bcx,bcz) for alignment (reverted 1.4.94 change).
-            -- Beds were aligned before; bed-specific center broke it.
-            propCx, propCz = bcx, bcz
+            -- Bed/bag: use SHARED (bcx,bcz) plus offset for alignment.
+            -- Offset matches base: left a little, towards feet.
+            propCx, propCz = bcx + bedDx, bcz + bedDz
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
