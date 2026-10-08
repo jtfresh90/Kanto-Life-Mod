@@ -5542,8 +5542,14 @@ local function nightlifeTick(world, dt)
         if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
         if isViridianSleepyOldMan(npc) then return false end
         -- (On-screen voxel debug removed: mirrored by camera transform)
-        if not npc._kantoSleepVoxelFrames then
-          pcall(bakeGrayLie, npc)
+        -- CONSISTENT SKIP: Pokemon-like and 3-frame skip the bake everywhere
+        -- (matches the other three call sites from 1.4.131).
+        if not npc._kantoSleepVoxelFrames and not isPokemonLike(npc) then
+          local srcSpr = npc._kantoOrigSprite or npc.sprite
+          local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+          if fc ~= 3 then
+            pcall(bakeGrayLie, npc)
+          end
         end
         -- Battle Art can reuse a pose without calling NPC:update every render
         -- pass. Advance the Z frame from the same monotonic clock here as a
@@ -5626,9 +5632,11 @@ local function nightlifeTick(world, dt)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
         -- Bed/bag: rotated 90deg from body (yaw + PI/2), SAME center.
         -- (Joshua: "rotated 90 degrees on the sprite they are tied to without changing the center")
-        -- USER CORRECTION: bedYaw = yaw + PI (full 180° flip). The bed head-hole
-    -- was 180° opposite the body head. (The +PI/2 analysis was wrong.)
-    local bedYaw = yaw + math.pi
+        -- RESEARCH FIX: The bake pre-rotates the body 90° (direction by
+    -- kantoLifeSleepSide = ±1). The bed is NOT pre-rotated, so it must
+    -- compensate: bedYaw = yaw - sign*PI/2. Aligns head-hole with head.
+    local sleepSide = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+    local bedYaw = yaw - sleepSide * (math.pi / 2)
         local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
