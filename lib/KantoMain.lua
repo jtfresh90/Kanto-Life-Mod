@@ -5296,6 +5296,16 @@ local function nightlifeTick(world, dt)
         if isPokemonFollower(npc) then return false end
         if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
         if isViridianSleepyOldMan(npc) then return false end
+        -- On-screen debug (always show for voxel sleepers)
+        pcall(function()
+          if love and love.graphics then
+            love.graphics.push("all")
+            love.graphics.setColor(1, 1, 0, 1)
+            local hasFrames = npc._kantoSleepVoxelFrames ~= nil
+            love.graphics.print("VOXEL SLEEP: frames=" .. tostring(hasFrames), 10, 10)
+            love.graphics.pop()
+          end
+        end)
         if not npc._kantoSleepVoxelFrames then
           pcall(bakeGrayLie, npc)
         end
