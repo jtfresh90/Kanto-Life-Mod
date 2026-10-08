@@ -3272,8 +3272,12 @@ function putToSleep(npc)
   local function drawSleepAccessory(npc, sx, sy)
     -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
     -- Only draw for sleeping NPCs
-    if not npc.nightlifeSleeping then return end
+    if not npc.nightlifeSleeping then
+      if mod.log then mod.log:debug("Kanto Life: drawSleepAccessory skipped, not sleeping") end
+      return
+    end
     local style = resolveSleepStyle(npc)
+    if mod.log then mod.log:debug("Kanto Life: drawSleepAccessory style=%d for NPC", style) end
     if style == 0 then return end
     local img = sleepAccessoryImage(style); if not img then local key = "_kantoSleepAccWarn" .. tostring(style); if not npc[key] then npc[key] = true; if mod.log then mod.log:warn("Kanto Life: sleep accessory image missing for style %d", style) end end; return end -- Log once per style to aid debugging; don't spam the log every frame.
     -- Use getScreenOrigin for accurate positioning (same as Zzz).
@@ -4501,6 +4505,10 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       display = speciesDisplayName(species)
     else
       display = d.kantoLifeDisplayName or stableNameFor(npc) or "TRAINER"
+      if mod.log then
+        mod.log:debug("Kanto Life: NPC display name: kantoLifeDisplayName=%s, stable=%s, final=%s",
+          tostring(d.kantoLifeDisplayName), tostring(stableNameFor(npc)), tostring(display))
+      end
     end
 
     if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
