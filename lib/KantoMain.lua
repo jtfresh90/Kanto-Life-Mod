@@ -3588,18 +3588,9 @@ function putToSleep(npc)
             G.pop()
           end
           if tentStyle then
-            -- For tent: verify image loads BEFORE hiding NPC
-            local tStyle = 0
-            pcall(function() tStyle = resolveSleepStyle(self) end)
-            local tImg = nil
-            pcall(function() tImg = sleepAccessoryImage(tStyle) end)
-            if tImg then
-              -- Tent image OK: hide NPC, draw tent
-            else
-              -- Tent image FAILED: draw NPC anyway (don't leave invisible)
-              drawSleepingNPC()
-              accImgOk = false
-            end
+            -- Tent: ALWAYS hide NPC (tent replaces it). Do not draw NPC even
+            -- if tent image fails (user reported NPCs visible with tents).
+            accImgOk = true
           else
             drawSleepingNPC()
           end
