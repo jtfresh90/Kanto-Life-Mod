@@ -4548,11 +4548,9 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       end
       display = speciesDisplayName(species)
     else
-      display = d.kantoLifeDisplayName or stableNameFor(npc) or "TRAINER"
-      if mod.log then
-        mod.log:warn("Kanto Life: NPC display name: kantoLifeDisplayName=%s, stable=%s, final=%s",
-          tostring(d.kantoLifeDisplayName), tostring(stableNameFor(npc)), tostring(display))
-      end
+      local ok, stable = pcall(stableNameFor, npc)
+      if not ok then stable = "TRAINER" end
+      display = d.kantoLifeDisplayName or stable or "TRAINER"
     end
 
     if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
@@ -4594,10 +4592,15 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     local asleep = opt("sleeping_npcs") and shouldSleepNow(npc, isNight)
 
     if isPokeAmbient(npc) and not asleep then
-      return progressiveAmbientTalk(g, world, npc, true)
+      local ok, result = pcall(progressiveAmbientTalk, g, world, npc, true)
+      if ok then return result end
+      return false
     end
     if isAmbientNpc(npc) and not asleep and not isPokeAmbient(npc) then
-      return progressiveAmbientTalk(g, world, npc, false)
+      local ok, result = pcall(progressiveAmbientTalk, g, world, npc, false)
+      if ok then return result end
+      -- If progressiveAmbientTalk fails, fall through to base behavior
+      return false
     end
     if not asleep then return false end
     if isSpecialCharacter(npc) then return false end
