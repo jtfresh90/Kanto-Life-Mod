@@ -3820,18 +3820,26 @@ function putToSleep(npc)
               -- project() is relative, not pixels — using it directly made
               -- bubbles pin-sized. Bubble base height is 12px at scale=1;
               -- scale so 12px = 12 world units (matches NPC scale).
-              -- FRESH: project head position (gh+20), draw bubble at projected XY.
-              -- No screen-space offset; let projection handle placement.
-              local okP1, x1, y1 = pcall(Voxel3D.project, px + 8, gh + 20, py + 8)
-              local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 32, py + 8)
-              if okP1 and okP2 and type(x1) == "number" and type(y1) == "number"
-                 and type(y2) == "number" and math.abs(x1) < 10000 and math.abs(y1) < 10000 then
-                local pxPer12 = math.abs(y2 - y1)
-                local scale = pxPer12 / 12
-                if scale < 0.5 then scale = 0.5 end
-                if scale > 8 then scale = 8 end
-                -- RESEARCH FIX: Clamp to viewport (prevents offscreen at scene edges)
-                local bx, by = x1 * sxRatio, y1 * syRatio
+              -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
+              -- Camera pitch displaces high 3D points horizontally; at body
+              -- height the projected X matches the sprite's screen center.
+              -- Then apply screen-space Y offset (no pitch distortion).
+              local okP, bx3d, by3d = pcall(Voxel3D.project, px + 8, gh + 2, py + 8)
+              if okP and type(bx3d) == "number" and type(by3d) == "number"
+                 and math.abs(bx3d) < 10000 and math.abs(by3d) < 10000 then
+                local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 14, py + 8)
+                local scale = 1
+                if okP2 and type(y2) == "number" then
+                  local pxPer12 = math.abs(y2 - by3d)
+                  scale = pxPer12 / 12
+                  if scale < 0.5 then scale = 0.5 end
+                  if scale > 8 then scale = 8 end
+                end
+                local bx, by = bx3d * sxRatio, by3d * syRatio
+                -- Screen-space offset above body center
+                local yOff = 26 * scale * sxRatio
+                by = by - yOff
+                -- Viewport clamp (preserves 1.4.132 edge fix)
                 local vw, vh = G.getDimensions()
                 if bx < 8 then bx = 8 end
                 if bx > vw - 8 then bx = vw - 8 end
