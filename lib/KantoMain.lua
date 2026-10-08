@@ -2950,15 +2950,8 @@ local nm = storyDisplayName(talker)
       local fw = tonumber(sprite.frameWidth) or -1
       fileLog(string.format("2D BAKE npc=%s fw=%d", tostring(npc.name or "?"), fw))
     end)
-    -- For HGSS: don't bake the native image (complex, error-prone).
-    -- Mark as baked and let the draw hook handle rotation/tint via the proxy.
-    local isHgssSprite = sprite.def and type(sprite.def.hgssNativeImage) == "string"
-      and sprite.def.hgssNativeImage ~= ""
-    if isHgssSprite then
-      sprite._kantoSleepBaked = true
-      sprite._kantoSleepIsHgss = true
-      return true
-    end
+    -- HGSS: bake normally (early return broke 2D - sprite never baked).
+    -- The bake code below handles HGSS native images.
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
