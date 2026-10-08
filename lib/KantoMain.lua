@@ -1980,8 +1980,9 @@ return function(mod)
         end
       end
       lastTalkNpc = nil
-      if isAmbientNpc(talker) then return baseTB(gameArg, text, onDone, opts) end
-      -- Ambient spawns already format their own text; skip re-prefix.
+      -- Ambient NPCs DO need name injection (they show raw internal IDs like
+      -- "VIRIDIAN CITY obj" without it). The textAlreadyNamed check above
+      -- prevents double-prefixing if they already formatted their own text.
       -- Pokemon-like with a real species field still get a name via storyDisplayName.
             if talker and isPokemonLike(talker) and not isPokeAmbient(talker) then
         return baseTB(gameArg, text, onDone, opts)
