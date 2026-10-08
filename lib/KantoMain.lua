@@ -3168,9 +3168,24 @@ function putToSleep(npc)
 
   local sleepAccessoryCache = {}
   -- File-based logging for iOS (no console access)
+  -- Debug log goes to <mod>/debug/kanto_debug.log so it's visible in the
+  -- iOS Files app under gen1recomp/mods/Kanto-Life-Mod/debug/.
+  local debugDirReady = false
   local function fileLog(msg)
     pcall(function()
-      local path = (mod.path or ".") .. "/kanto_debug.log"
+      local base = mod.path or "."
+      -- Create debug/ once (io.open can't make directories; use os.execute).
+      if not debugDirReady then
+        pcall(function() os.execute('mkdir -p "' .. base .. '/debug"') end)
+        debugDirReady = true
+        -- Record the absolute path on first write so the user knows where to look.
+        local pf = io.open(base .. "/debug/kanto_debug.log", "a")
+        if pf then
+          pf:write(os.date("%H:%M:%S") .. " Kanto Life debug log at: " .. base .. "/debug/kanto_debug.log\n")
+          pf:close()
+        end
+      end
+      local path = base .. "/debug/kanto_debug.log"
       local f = io.open(path, "a")
       if f then
         f:write(os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n")
@@ -3254,9 +3269,16 @@ function putToSleep(npc)
   local function drawSleepAccessoryBase(npc, sx, sy)
     if not npc.nightlifeSleeping then return end
     local style = resolveSleepStyle(npc)
-    if style == 0 or style == 1 then return end  -- No base for Default or Tent
+    if style == 0 or style == 1 then
+      fileLog("BASE skip: style=" .. tostring(style))
+      return
+    end
     local img = sleepAccessoryBaseImage(style)
-    if not img then return end
+    if not img then
+      fileLog("BASE skip: image nil for style=" .. tostring(style))
+      return
+    end
+    fileLog("BASE drawing: style=" .. tostring(style) .. " at " .. tostring(sx) .. "," .. tostring(sy))
     if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
