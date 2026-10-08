@@ -3498,9 +3498,10 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- Shift toward feet so the head hole aligns with the head (not covering it)
-    local shiftX = style == 1 and 0 or (math.sin(angle) * 10)
-    love.graphics.translate(cx + shiftX, cy)
+    -- FRESH 3-layer: same transform as base for perfect alignment.
+    -- Base (under) and overlay (over) share center; NPC sandwiched between.
+    local shiftY = -4  -- Match base offset
+    love.graphics.translate(cx, cy + shiftY)
     if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
@@ -3645,11 +3646,12 @@ function putToSleep(npc)
           local function drawSleepingNPC()
             local canvas = getSleepingCanvas(self)
             if canvas then
-              -- Draw the captured sleeping sprite at NPC position
+              -- Draw the captured sleeping sprite at NPC position.
+              -- Aligned with base/overlay (shiftY=-4 for 3-layer).
               local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
               local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
               local sx, sy = px - (camX or 0), py - (camY or 0)
-              love.graphics.draw(canvas, sx - 8, sy - 8)
+              love.graphics.draw(canvas, sx - 8, sy - 8 - 4)
             else
               -- Capture failed (e.g., glasses/ambient Pikachu): HIDE the NPC.
               -- (Scratch the bake for these - bed + Zzz still show, no blob.)
