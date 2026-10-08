@@ -5325,8 +5325,11 @@ local function nightlifeTick(world, dt)
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
-        -- Use same anchor as body (ph/2) for 3-layer alignment
-        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
+        -- Tent (1) is upright: bottom-anchor (ph) so it sits on the ground.
+        -- Bed/bag (2,3) lie flat: center-anchor (ph/2) for 3-layer alignment.
+        local anchorY = ph / 2
+        if style == 1 then anchorY = ph end
+        local mesh = SpriteBillboards.mesh(def, 0, anchorY)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propMeshCache[style]
       end
@@ -5454,8 +5457,12 @@ local function nightlifeTick(world, dt)
           local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
           local propRotation = Mat4.rotateY(tentYaw)
           local propY = gh + 0.05
-          local propCx, propCz = px + 8 - (pm.w or 20) / 2, py + 8 + (pm.h or 24) / 2
+          -- Tent (upright, bottom-anchored): center on tile (px+8, py+8).
+          -- Mesh local center x=8, so translate by px to place at px+8.
+          local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
+            -- Bed/bag (flat, center-anchored): use shared (bcx, bcz).
+            propCx, propCz = px + 8 - (pm.w or 20) / 2, py + 8 + (pm.h or 24) / 2
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
             -- Use shared (bcx, bcz) for alignment with body and base
