@@ -169,7 +169,7 @@ return function(mod)
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     { key = "debug_log", type = "choice", label = "DEBUG LOG",
-      choices = { { "Off", 0 }, { "Copy to Clipboard", 1 } }, default = 0 },
+      choices = { { "Off", 0 }, { "View Log", 1 } }, default = 0 },
   })
 
   local function opt(key)
@@ -1361,13 +1361,30 @@ return function(mod)
 
   mod.events:on("mod.options_changed", function(payload)
     if not payload or payload.mod ~= mod.id then return end
-    -- DEBUG LOG: Copy to clipboard when user selects "Copy to Clipboard"
+    -- DEBUG LOG: Show log in text box when user selects "View Log"
     if payload.key == "debug_log" and tonumber(payload.value) == 1 then
       pcall(function()
         local text = table.concat(debugLogBuffer, "\n")
-        if text == "" then text = "(debug log empty)" end
-        if love and love.system and love.system.setClipboardText then
-          love.system.setClipboardText(text)
+        if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
+        -- Show in text box (user can screenshot)
+        local ow = mod.world and mod.world:overworld()
+        if ow then
+          -- Use pushText to display (truncate to fit)
+          local lines = {}
+          for line in text:gmatch("[^\n]+") do
+            table.insert(lines, line)
+            if #lines >= 15 then break end
+          end
+          local shortText = table.concat(lines, "\n")
+          if #lines == 15 then shortText = shortText .. "\n...(truncated)" end
+          -- Find pushText function
+          if type(pushText) == "function" then
+            local g = nil
+            pcall(function() g = G() end)
+            if g and ow then
+              pushText(g, ow, shortText, nil)
+            end
+          end
         end
         -- Reset the option back to Off
         if mod.options and mod.options.set then
