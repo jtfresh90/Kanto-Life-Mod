@@ -4850,7 +4850,12 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     end
     npc.frozen = true
     -- RESEARCH FIX: Unfreeze when text closes (prevents permanent frozen state)
-    local sleepName = npc.kantoLifeStoryName or stableNameFor(npc) or tostring(d.name or "This person"):gsub("_", " ")
+    local sleepName
+    if isPokemonLike(npc) or isPokeAmbient(npc) then
+      sleepName = speciesLabelFromNpc(npc) or tostring(d.name or "Pokemon"):gsub("_", " ")
+    else
+      sleepName = npc.kantoLifeStoryName or stableNameFor(npc) or tostring(d.name or "This person"):gsub("_", " ")
+    end
   pushText(g, world, string.format("%s is fast\nasleep.", sleepName), function() npc.frozen = false end)
     return true
   end
@@ -5813,7 +5818,7 @@ local function nightlifeTick(world, dt)
             end
           end
         end
-        local headOffsetX, zt = sign * -5, ((love and love.timer and love.timer.getTime and love.timer.getTime()) or 0)
+        local headOffsetX, zt = sleepSide * -5, ((love and love.timer and love.timer.getTime and love.timer.getTime()) or 0)
         local rise = ((zt * 0.75) % 2.0) * 8; local zModel = Mat4.mul(
           Mat4.translate(px + headOffsetX, gh + 17 + rise, py + 8),
           Mat4.rotateY(zyaw)
