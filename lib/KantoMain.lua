@@ -5029,6 +5029,26 @@ local function nightlifeTick(world, dt)
     pcall(function()
       local OWS = safeRequire("src.world.OverworldController")
       -- OverworldController returns the OverworldState class
+      -- NEW: Wrap npcAtCell to find mid-step NPCs by target cell.
+      -- Engine only checks cellX/cellY, missing NPCs walking INTO the faced cell.
+      if OWS and type(OWS.npcAtCell) == "function" and not OWS._kantoLifeNpcAtCellWrapped then
+        local baseNpcAtCell = OWS.npcAtCell
+        OWS._kantoLifeNpcAtCellWrapped = true
+        OWS.npcAtCell = function(self, fx, fy)
+          local npc = baseNpcAtCell(self, fx, fy)
+          if npc then return npc end
+          -- Check target cells for mid-step NPCs
+          local npcs = self.npcs or (self.world and self.world.npcs)
+          if type(npcs) == "table" then
+            for _, n in pairs(npcs) do
+              if type(n) == "table" and n.targetX == fx and n.targetY == fy then
+                return n
+              end
+            end
+          end
+          return nil
+        end
+      end
       if OWS and type(OWS.interact) == "function" and not OWS._kantoLifeInteractWrapped then
         local baseOWSInteract = OWS.interact
         OWS._kantoLifeInteractWrapped = true
@@ -5042,18 +5062,10 @@ local function nightlifeTick(world, dt)
                 -- NEW APPROACH: Handle ANY moving NPC, not just ambient.
                 -- User: "press A next to any sprites whether they walk or not"
                 if npc and npc.moving then
-                  -- RESEARCH FIX: Keep NPC at facing cell (don't move to targetX).
-                  -- Moving forward puts it out of npcAtCell reach. Clear stale
-                  -- targets so routine resumes cleanly after talk.
-                  npc.targetX, npc.targetY = nil, nil
-                  npc.goalX, npc.goalY = nil, nil
+                  -- NEW APPROACH: Freeze in place. Don't touch cellX/cellY,
+                  -- targets, or px/py. NPC stays visually mid-step; talk
+                  -- proceeds; routine resumes naturally after (targets intact).
                   npc.moving = false
-                  npc.marching = false
-                  npc.progress = 0
-                  npc.hopStep = nil
-                  if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
-                    npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
-                  end
                 end
               end
             end
@@ -5859,7 +5871,9 @@ local function nightlifeTick(world, dt)
               spr._kantoSleepVoxelIndex = idx
             end
           end
-          if self._kantoSleepIsHgss and frames and #frames == 3 and spr then
+          -- FIX: Sleeping pose for ALL sprites (not just HGSS).
+          -- Prevents duplicate standing sprite in voxel.
+          if frames and #frames == 3 and spr then
             return spr, self.px, self.py, self.facing, 0, false
           end
         end

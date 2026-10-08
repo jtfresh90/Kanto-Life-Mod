@@ -523,9 +523,23 @@ return function(ctx)
            and not seen[k] and not occupied[k] then
           local ok, walkable = pcall(map.isWalkableCell, map, nx, ny)
           if ok and walkable then
-            seen[k] = true
-            parent[k] = {x=x, y=y, dir=d[3]}
-            qx[#qx+1], qy[#qy+1] = nx, ny
+            -- Don't path THROUGH doors (unless the door is the target).
+            -- Prevents NPCs from blocking doorways.
+            local isDoor = false
+            if nx ~= tx or ny ~= ty then
+              if type(map.warpAtCell) == "function" then
+                local wok, wv = pcall(map.warpAtCell, map, nx, ny)
+                isDoor = wok and wv ~= nil
+              elseif type(map.warpAt) == "function" then
+                local wok, wv = pcall(map.warpAt, map, nx, ny)
+                isDoor = wok and wv ~= nil
+              end
+            end
+            if not isDoor then
+              seen[k] = true
+              parent[k] = {x=x, y=y, dir=d[3]}
+              qx[#qx+1], qy[#qy+1] = nx, ny
+            end
           else
             -- The neighbor may be a ledge tile: the traversable node is the
             -- 2-away landing cell when the hop pattern matches.
