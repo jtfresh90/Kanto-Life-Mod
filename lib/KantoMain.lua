@@ -5619,9 +5619,9 @@ local function nightlifeTick(world, dt)
         -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
         -- Bed/bag: rotated 90deg from body (yaw + PI/2), SAME center.
         -- (Joshua: "rotated 90 degrees on the sprite they are tied to without changing the center")
-        -- RESEARCH FIX: bedYaw = yaw (not yaw + PI/2). The bed head-hole must align
-    -- with the body head for all facings. The +PI/2 was a misunderstanding.
-    local bedYaw = yaw
+        -- USER CORRECTION: bedYaw = yaw + PI (full 180° flip). The bed head-hole
+    -- was 180° opposite the body head. (The +PI/2 analysis was wrong.)
+    local bedYaw = yaw + math.pi
         local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
         -- Body keeps original yaw (no extra rotation) to match sprite orientation.
         local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
