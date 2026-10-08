@@ -3579,28 +3579,10 @@ function putToSleep(npc)
           -- Uses game's own draw, so ALL sprites (glasses, Pikachu, etc.) work.
           local function drawSleepingNPC()
             local G = love.graphics
-            -- Get sprite screen center for rotation pivot
-            local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
-            local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
-            local sx, sy = px - (camX or 0), py - (camY or 0)
-            if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
-              local ok, ox, oy = pcall(function()
-                return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
-              end)
-              if ok and ox then sx, sy = ox, oy end
-            end
-            -- Sprite is 16x16 (or frameWidth x frameHeight); center for rotation
-            local fw = 16
-            local fh = 16
-            if self.sprite then
-              fw = tonumber(self.sprite.frameWidth) or 16
-              fh = tonumber(self.sprite.frameHeight) or 16
-            end
-            local cx, cy = sx + fw / 2, sy + fh / 2
+            -- DIAGNOSTIC: tint only, no rotation. If sprites appear correct
+            -- (gray, standing), rotation was the problem. If black blobs
+            -- persist, baseNpcDraw is the problem.
             G.push("all")
-            G.translate(cx, cy)
-            G.rotate(math.pi / 2)
-            G.translate(-cx, -cy)
             G.setColor(0.55, 0.55, 0.60, 1)  -- Gray tint
             baseNpcDraw(self, camX, camY)
             G.pop()
