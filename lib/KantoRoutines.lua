@@ -467,7 +467,7 @@ return function(ctx)
     st.wanderTarget = nil
     st.localTarget = nil
     st.localWait = 0
-    st.localRoamRadius = 40
+    st.localRoamRadius = 70  -- 3x area (was 40)
     -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
     -- They use wanderTarget() but never despawn at doors.
     st.roamFar = (not traveling) and (math.random() < 0.3)
@@ -541,7 +541,8 @@ return function(ctx)
           end
         end
       end
-      if #qx > 5000 then break end
+      -- Raised for 3x area: covers ~d=63 in open terrain (was 5000)
+      if #qx > 8000 then break end
     end
     if not seen[goalKey] then return nil end
     local rev, k = {}, goalKey
@@ -852,9 +853,12 @@ return function(ctx)
     -- so successful movement naturally carries the actor away from spawn.
     -- RESEARCH FIX: Expanded from ±18 to ±40 for far-distance travel
     -- (user requirement: routines should travel far, not small squares)
+    -- 3x AREA: ±70 (140x140=19,600 cells vs 80x80=6,400)
+    -- User requirement: routines cover 3x as much area
     for _ = 1, 40 do
-      local tx = cx + math.random(-40, 40)
-      local ty = cy + math.random(-40, 40)
+      local radius = (st and st.localRoamRadius) or 70
+      local tx = cx + math.random(-radius, radius)
+      local ty = cy + math.random(-radius, radius)
       if tx ~= cx or ty ~= cy then
         local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
         local warp = false
