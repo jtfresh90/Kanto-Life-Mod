@@ -767,7 +767,9 @@ return function(mod)
       end
     end
     balance(humanTarget(mapId, map), false)
-    if isTown(mapId) or isRoute(mapId) then
+    -- Pokemon spawn on towns, routes, AND indoor maps (pokeTarget handles
+    -- the indoor count via the indoor_npcs/pokemon_npc_count options).
+    if isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map) then
       local modeNow = opt("poke_random") and true or false
       -- nil ~= true/false is true in Lua: first force-refresh and every toggle
       -- must clear existing poke NPCs so the active pool applies immediately.
@@ -2586,48 +2588,46 @@ function isVoxelPresentation()
     return cached
   end
     -- Draw the opaque base layer UNDER the NPC (3-layer system)
-    local function drawSleepAccessoryBase(self, ox, oy, scale)
+    -- sx, sy is the NPC's screen position (from getScreenOrigin or world-cam).
+    -- Do NOT re-add world px/py here; that double-counts the position.
+    local function drawSleepAccessoryBase(self, sx, sy, scale)
       if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 or style == 1 then return end
       local img = sleepPropBaseImage(style); if not img then return end
+      if sx == 0 and sy == 0 then return end
       local iw, ih = img:getDimensions()
-      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
-      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       local s = scale or 1
+      local cx, cy = (sx or 0) + 8, (sy or 0) + 8
       love.graphics.push("all")
-      love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
       local shiftX = (-math.sin(angle) * 6.5)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      love.graphics.translate(cx + shiftX, cy)
       love.graphics.rotate(angle)
       love.graphics.translate(-iw/2, -ih/2)
       love.graphics.draw(img, 0, 0)
       love.graphics.pop()
     end
-    local function drawSleepAccessory(self, ox, oy, scale)
+    -- sx, sy is the NPC's screen position (from getScreenOrigin or world-cam).
+    -- Do NOT re-add world px/py here; that double-counts the position.
+    local function drawSleepAccessory(self, sx, sy, scale)
       -- Only draw for sleeping NPCs
       if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
+      if sx == 0 and sy == 0 then return end
       local iw, ih = img:getDimensions()
-      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
-      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       local s = scale or 1
+      local cx, cy = (sx or 0) + 8, (sy or 0) + 8
       love.graphics.push("all")
-      -- Match the transform order used by drawZzzForNpc: translate by camera
-      -- offset, apply scale, then position in world coordinates. The old code
-      -- added (ox+px) before scaling, which placed props at wrong positions
-      -- whenever scale ~= 1 and offset them even at scale == 1.
-      love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      love.graphics.translate(cx + shiftX, cy)
       if style == 2 or style == 3 then love.graphics.rotate(angle) end
-      -- Center the accessory on the NPC (was -ih, causing head coverage)
+      -- Center the accessory on the NPC
       love.graphics.translate(-iw/2, -ih/2)
       love.graphics.draw(img,0,0)
       love.graphics.pop()
