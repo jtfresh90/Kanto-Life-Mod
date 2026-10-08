@@ -5617,8 +5617,8 @@ local function nightlifeTick(world, dt)
         -- Overlay on top (or tent upright)
         if pm and pm.mesh then
           -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
-          -- Per-NPC yaw (different directions, as Joshua requested).
-          local tentYaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
+          -- Tent: fixed yaw (all tents face same direction, per Joshua).
+          local tentYaw = 0
           local propRotation = Mat4.rotateY(tentYaw)
           local propY = gh + 0.05
           -- Tent (upright, bottom-anchored): center on tile (px+8, py+8).
