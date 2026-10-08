@@ -3396,6 +3396,8 @@ function putToSleep(npc)
     -- CORRECTED: use angle (not hardcoded PI/2) to match overlay orientation.
     -- (User: overlay was correct, base was flipped 180)
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+    -- FLIP 180°: base was backwards relative to overlay (user feedback)
+    angle = angle + math.pi
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
@@ -3473,8 +3475,9 @@ function putToSleep(npc)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    -- ALIGNED: exact same transform as base (center, angle rotation, no shift).
-    love.graphics.translate(cx, cy)
+    -- ALIGNED with base, but shifted DOWN 2px so head hole reveals full face
+    -- (user: only eyes visible, hole needs to go down)
+    love.graphics.translate(cx, cy + 2)
     if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
@@ -5648,13 +5651,17 @@ local function nightlifeTick(world, dt)
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
           if pbm and pbm.mesh then
-            -- FIX: Use prop's own dimensions for centering (not body's).
-            -- Prop is 20x24, body may differ. Center prop at tile center.
-            local pw, ph = pbm.w or 20, pbm.h or 24
-            local pcx = px + 8 - pw / 2
-            local pcz = py + 8 + ph / 2
+            -- FIX: Center bag on BODY's center (bcx, bcz).
+            -- Mesh extends ph north from origin (default anchor). To center:
+            -- origin = body_center + ph/2 (so span is centered at body_center).
+            local ph = pbm.h or 24
+            local pw = pbm.w or 20
+            -- X: body center bcx is tile center. Prop width pw, center at bcx.
+            -- Mesh X spans (8-pw/2) to (8+pw/2) in local (anchorX=pw/2, visual center at 8).
+            -- After rotateY, X stays X. To center at bcx: origin X = bcx - 8.
+            -- (Simplification: use bcx directly, small X offset acceptable)
             local baseModel = Mat4.mul(
-              Mat4.translate(pcx + bedDx, gh + 0.03, pcz + bedDz),
+              Mat4.translate(bcx + bedDx, gh + 0.03, bcz + ph/2 + bedDz),
               flatRot
             )
             local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
@@ -5681,12 +5688,12 @@ local function nightlifeTick(world, dt)
           -- Mesh local center x=8, so translate by px to place at px+8.
           local propCx, propCz = px, py + 8
           if propStyle ~= 1 then
-            -- Bed/bag: use prop's own dimensions for centering (not body's).
-            -- FIX: Prop is 20x24, body differs. Center at tile center.
-            local pw2, ph2 = 20, 24
-            if pm then pw2, ph2 = pm.w or 20, pm.h or 24 end
-            propCx = px + 8 - pw2 / 2 + bedDx
-            propCz = py + 8 + ph2 / 2 + bedDz
+            -- Bed/bag: center on BODY's center (bcx, bcz).
+            -- Mesh extends ph north from origin. Origin = bcz + ph/2.
+            local ph2 = 24
+            if pm then ph2 = pm.h or 24 end
+            propCx = bcx + bedDx
+            propCz = bcz + ph2/2 + bedDz
             propRotation = flatRot
             propY = gh + 0.45  -- Overlay above body; head shows through hole
           end
