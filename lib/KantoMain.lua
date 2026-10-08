@@ -2984,8 +2984,13 @@ function putToSleep(npc)
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
     -- Sleeping NPCs should not block doorways/movement
+    -- Try multiple properties that might control collision
     npc.kantoLifeOrigSolid = npc.solid
     npc.solid = false
+    npc.kantoLifeOrigCollidable = npc.collidable
+    npc.collidable = false
+    npc.kantoLifeOrigBlocks = npc.blocksMovement
+    npc.blocksMovement = false
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3035,8 +3040,14 @@ function putToSleep(npc)
     if npc.kantoLifeOrigSolid ~= nil then
       npc.solid = npc.kantoLifeOrigSolid
       npc.kantoLifeOrigSolid = nil
-    else
-      npc.solid = true
+    end
+    if npc.kantoLifeOrigCollidable ~= nil then
+      npc.collidable = npc.kantoLifeOrigCollidable
+      npc.kantoLifeOrigCollidable = nil
+    end
+    if npc.kantoLifeOrigBlocks ~= nil then
+      npc.blocksMovement = npc.kantoLifeOrigBlocks
+      npc.kantoLifeOrigBlocks = nil
     end
     npc.sleepPose = nil
     npc.kantoLifeSleepAngle = nil
@@ -3378,7 +3389,8 @@ function putToSleep(npc)
             pcall(bakeSleepSprite, self)
           end
           -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
-          local style = resolveSleepStyle(self)
+          local style = 0
+          pcall(function() style = resolveSleepStyle(self) end)
           local tentStyle = style == 1
           if not tentStyle and style ~= 0 then
             -- Draw base layer before NPC
