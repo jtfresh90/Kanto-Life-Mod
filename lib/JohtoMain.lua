@@ -2584,7 +2584,8 @@ function isVoxelPresentation()
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
       love.graphics.translate(px + 8 + shiftX, py + 8)
       if style == 2 or style == 3 then love.graphics.rotate(angle) end
-      love.graphics.translate(-iw/2,-ih)
+      -- Center the accessory on the NPC (was -ih, causing head coverage)
+      love.graphics.translate(-iw/2, -ih/2)
       love.graphics.draw(img,0,0)
       love.graphics.pop()
     end
