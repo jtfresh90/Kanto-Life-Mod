@@ -3191,6 +3191,11 @@ function putToSleep(npc)
           if f then f:write(line) f:close() return end
         end)
       end
+      -- Try mod_compat/kanto_life/ (engine-persisted, user-visible in Files app)
+      pcall(function()
+        local f = io.open("mod_compat/kanto_life/kanto_debug.log", "a")
+        if f then f:write(line) f:close() return end
+      end)
       -- Fallback: LÖVE filesystem (iOS Documents/)
       if love and love.filesystem then
         pcall(function()
@@ -5358,6 +5363,18 @@ local function nightlifeTick(world, dt)
         -- Accessories re-enabled (1.4.45)
         local pm = sleepPropMesh(propStyle)
         -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
+        -- On-screen debug: show mesh status (temporary)
+        pcall(function()
+          if love and love.graphics then
+            love.graphics.push("all")
+            love.graphics.setColor(1, 1, 1, 1)
+            local dbg = string.format("3L: bodyMesh=%s bodyImg=%s pm=%s",
+              tostring(bodyMesh ~= nil), tostring(body ~= nil),
+              tostring(pm ~= nil and pm.mesh ~= nil))
+            love.graphics.print(dbg, 10, 10)
+            love.graphics.pop()
+          end
+        end)
         -- Base first (opaque, under the body)
         if propStyle == 2 or propStyle == 3 then
           local pbm = sleepPropBaseMesh(propStyle)
