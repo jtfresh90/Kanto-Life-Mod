@@ -83,10 +83,16 @@ return function(ctx)
   local function startDepartEffect(npc, method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._johtoLifeDepartMethod = method
+    npc._johtoLifeDepartStart = now
     npc._johtoLifeDepartUntil = now + 1.2
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+    -- Gen 2 has a native NPC teleport script; let the engine run its original
+    -- from-animation instead of only showing a speech-bubble cue.
+    if method == "teleport" and type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "from")
+    end
   end
 
   local DIRS = {
@@ -1008,6 +1014,16 @@ return function(ctx)
       -- place, then despawns and a replacement spawns at a random exit.
       if st.phase == "special_depart" then
         st.wait = (st.wait or 0) - (dt or 0)
+        -- Gen 2's Fly departure rises out of view during the travel window.
+        -- Teleport uses NPC:scriptTeleport above, preserving the engine's
+        -- native spin/fade animation and keeping the actor entity persistent
+        -- until the routine completes.
+        if npc._johtoLifeDepartMethod == "fly" then
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          local elapsed = math.max(0, math.min(1.2, now - (tonumber(npc._johtoLifeDepartStart) or now)))
+          local t = elapsed / 1.2
+          npc.spriteYOffset = -math.floor(t * t * 60)
+        end
         if st.wait <= 0 then
           local dest = destinationFor(world, npc, nil, "door")
           if not dest then dest = destinationFor(world, npc, nil, "route") end
@@ -1015,7 +1031,9 @@ return function(ctx)
             states[key] = nil; stateKeys[key] = nil; goto continue
           end
           st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil
+          npc.spriteYOffset = 0
           npc._johtoLifeDepartMethod = nil
+          npc._johtoLifeDepartStart = nil
         end
         goto continue
       end
