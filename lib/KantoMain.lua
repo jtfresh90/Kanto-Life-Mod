@@ -399,6 +399,26 @@ return function(mod)
     return nil
   end
 
+  -- Get a sprite OBJECT (not just ID) for a Pokemon species.
+  -- Used by KantoRoutines for teleport (Abra) and fly (bird) animations.
+  -- Returns a SpriteRenderer-compatible sprite table, or nil.
+  local pokeSpriteCache = {}
+  local function getPokeSpriteObject(species)
+    if not species then return nil end
+    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    local spriteId = resolvePokeSprite(species)
+    if not spriteId then return nil end
+    local sprites = game and game.data and game.data.sprites
+    local spriteDef = sprites and sprites[spriteId]
+    if not spriteDef then return nil end
+    local ok, SR = pcall(require, "src.render.SpriteRenderer")
+    if not (ok and SR and SR.new) then return nil end
+    local ok2, spriteObj = pcall(SR.new, spriteDef)
+    if not (ok2 and spriteObj) then return nil end
+    pokeSpriteCache[species] = spriteObj
+    return spriteObj
+  end
+
   local function playSpeciesCry(species)
     pcall(function()
       if not species then return end
@@ -2343,6 +2363,7 @@ local nm = storyDisplayName(talker)
         isRoute = isRoute,
         resolveDestMap = resolveDestMap,
          getOption = function(k) return opt(k) end,
+        getPokeSpriteObject = getPokeSpriteObject,
       })
       if okInit and instance then
         kantoRoutines = instance

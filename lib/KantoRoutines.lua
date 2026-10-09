@@ -10,6 +10,7 @@ return function(ctx)
   local isRoute = ctx.isRoute or function() return false end
   local resolveDestMap = ctx.resolveDestMap
   local onRoutineExit = ctx.onRoutineExit
+  local getPokeSpriteObject = ctx.getPokeSpriteObject or function() return nil end
 
   local api = {}
   local enabled = true
@@ -196,13 +197,20 @@ return function(ctx)
       pcall(npc.scriptTeleport, npc, "from")
       return true
     end
-    -- Gen 1/3 custom: spin + rise
+    -- Gen 1/3 custom: spin + rise with Abra (user requirement)
+    -- Swap to Abra sprite for the teleport animation
+    local abraSprite = nil
+    pcall(function() abraSprite = getPokeSpriteObject("ABRA") end)
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,  -- 1.5s at 60fps (snappier than player's 135)
       mode = "out",
       origFacing = npc.facing or "down",
+      origSprite = npc.sprite,  -- Save to restore after
     }
+    if abraSprite then
+      npc.sprite = abraSprite  -- Show Abra during teleport
+    end
     npc.frozen = true
     return true
   end
@@ -232,21 +240,24 @@ return function(ctx)
   local function npcFlyOut(npc)
     local species = randomFlyingSpecies()
     if not species then return false end
+    -- Get bird sprite object
+    local birdSprite = nil
+    pcall(function() birdSprite = getPokeSpriteObject(species) end)
+    if not birdSprite then return false end  -- No sprite, fall back to bubble
     -- Play sound
     pcall(function()
       local gd = _G._kantoLifeGameData
       if gd then require("src.core.Sound").play(gd, "Fly") end
     end)
-    -- Store fly state; KantoMain draw hook will render the bird
+    -- Swap to bird sprite and fly away
     npc.kantoLifeFly = {
       species = species,
       frame = 0,
       total = 90,  -- 1.5s
       mode = "out",
-      startPx = npc.px or (npc.cellX or 0) * 16,
-      startPy = npc.py or (npc.cellY or 0) * 16,
+      origSprite = npc.sprite,  -- Save to restore (for arrivals)
     }
-    npc.kantoLifeFlyHidden = true  -- Draw hook skips NPC, draws bird instead
+    npc.sprite = birdSprite  -- Show bird during fly
     npc.frozen = true
     return true
   end
@@ -727,25 +738,12 @@ return function(ctx)
     st.localRoamRadius = 70  -- 3x area (was 40)
     -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
     -- They use wanderTarget() but never despawn at doors.
-    -- POKEMON: Roam map-wide ONLY if outdoors/caves (not in buildings).
-    -- User reported: "no Pokemon NPCs in houses now" — they were all leaving.
+    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area).
+    -- Note: Pokemon need to spawn indoors AND exit — the spawn system
+    -- must place them inside buildings, not just outdoors.
     local d2 = npc.def or {}
     local isPoke2 = npc.kantoLifePokeAmbient or d2.kantoLifePokeAmbient
-    -- Check if indoors (mirror the localWanderTarget logic)
-    local map2 = world and world.map
-    local mapId2 = map2 and tostring(map2.id or "") or ""
-    local indoor2 = false
-    pcall(function()
-      local id = mapId2:upper()
-      if id:match("^ROUTE_") or id:match("^TOWN_") then indoor2 = false; return end
-      indoor2 = id:find("HOUSE", 1, true) ~= nil
-        or id:find("GATE", 1, true) ~= nil
-        or id:find("_1F", 1, true) ~= nil or id:find("_2F", 1, true) ~= nil
-        or id:find("MART", 1, true) ~= nil or id:find("POKECENTER", 1, true) ~= nil
-        or id:find("GYM", 1, true) ~= nil or id:find("LAB", 1, true) ~= nil
-    end)
-    -- Pokemon roam far only if not in a building; humans 30% if not traveling
-    st.roamFar = (isPoke2 and not indoor2) or ((not traveling) and (math.random() < 0.3))
+    st.roamFar = isPoke2 or ((not traveling) and (math.random() < 0.3))
     st.blockedTime = 0
     st.blockedCount = 0
     st.travelKind = pickTravelKind(npc, world or lastWorld)
