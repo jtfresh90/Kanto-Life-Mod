@@ -6050,111 +6050,11 @@ local function nightlifeTick(world, dt)
 
     local function installPublicVoxelBubbleRenderer()
       -- DISABLED: Using 2D overlay instead (Pipelines.worldPresent).
-      -- The 3D billboard never worked reliably. See re-enabled 2D overlay above.
-      pcall(function() fileLog("BUBBLE: 3D renderer disabled, using 2D overlay") end)
+      -- The 3D billboard never worked reliably.
       return
     end
-      local api = okFind and battle and battle.exports
-        and battle.exports.characterRenderers or nil
-      if not api or type(api.register) ~= "function" then
-        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
-        return
-      end
-      local lib = battle.exports.lib
-      if not lib or type(lib.require) ~= "function" then return end
-      local okV, Voxel3D = pcall(lib.require, "Voxel3D")
-      local okM, Mat4 = pcall(lib.require, "Mat4")
-      local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
-      if not (okV and okM and okB and Voxel3D and type(Voxel3D.draw) == "function"
-              and Mat4 and type(Mat4.mul) == "function"
-              and type(Mat4.translate) == "function"
-              and type(Mat4.rotateY) == "function"
-              and SpriteBillboards and type(SpriteBillboards.mesh) == "function") then
-        return
-      end
-      -- NOTE: Mesh is now built per-bubble via SpriteBillboards.mesh (proven
-      -- Zzz pipeline). No hand-rolled mesh, no scale in model matrix.
 
-      local function drawBubble3D(ctx)
-        local npc = ctx and (ctx.actor or ctx.entity)
-        if not npc then return false end
-        if opt("npc_collision_bubbles") == false then return false end
-        if npc.visible == false or npc.hidden then return false end
-        -- Skip in first-person mode (matches 2D bubble behavior).
-        local state = ctx and ctx.state
-        if state and state.firstPerson and state.firstPerson.active then
-          return false
-        end
-        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-        local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-        if untilAt <= now then return false end
-        local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
-
-        -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
-        local entry = getBubbleImage(text)
-        if not entry or not entry.image then return false end
-        local def = {
-          id = "KANTO_LIFE_BUBBLE",
-          image = entry.path,
-          frames = 1,
-          frameWidth = entry.w,
-          frameHeight = entry.h,
-          trueColor = true,
-          walker = false,
-        }
-        -- Center anchor (entry.h / 2) like Zzz and accessories — fixes off-center placement
-        local mesh = SpriteBillboards.mesh(def, 0, entry.h / 2)
-        if not mesh then return false end
-
-        local px = tonumber(ctx.px) or tonumber(npc.px)
-          or tonumber((npc.cellX or 0) * 16) or 0
-        local py = tonumber(ctx.py) or tonumber(npc.py)
-          or tonumber((npc.cellY or 0) * 16) or 0
-        local gh = tonumber(ctx.groundHeight) or 0
-
-        -- Billboard yaw: face the camera (same approach as the Zzz).
-        local zyaw = 0
-        local host = ctx.host or {}
-        local fp = host.FirstPerson
-        if fp and type(fp.cardYaw) == "function" then
-          local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
-          if okYaw and tonumber(v) then zyaw = v end
-        end
-
-        -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
-        -- overlap (gh+26). World-space position: no projection needed.
-        -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
-        -- (same as Zzz). This was a key difference from the failed approach.
-        -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
-        -- then rotate, then translate.
-        local bubbleScale = 1.5
-        local model = Mat4.mul(
-          Mat4.translate(px + 8, gh + 26, py + 8),
-          Mat4.mul(
-            Mat4.rotateY(zyaw),
-            Mat4.scale(bubbleScale, bubbleScale, 1)
-          )
-        )
-        -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
-        pcall(Voxel3D.draw, mesh, entry.image, model, 0.5, model)
-        -- Return false: do NOT claim the actor; normal NPC rendering continues.
-        return false
-      end
-
-      local handle = api.register({
-        apiVersion = 1,
-        id = "KANTO_LIFE_BUBBLE_3D",
-        name = "Kanto Life Speech Bubbles",
-        priority = 5000,
-        drawEntity = drawBubble3D,
-      })
-      if handle and NPCMod then
-        NPCMod._kantoLifePublicBubbleRenderer = handle
-        pcall(function() fileLog("BUBBLE: renderer registered successfully") end)
-      end
-    end
-
-    installPublicVoxelBubbleRenderer()
+    -- installPublicVoxelBubbleRenderer()  -- DISABLED: using 2D overlay instead
 
     -- IMPORTANT: voxel/Battle Art consumes NPC:pose(), not NPC:draw().
     -- Keep the working 2D draw path untouched; only make pose expose the
@@ -6169,10 +6069,8 @@ local function nightlifeTick(world, dt)
         if not NPCMod._kantoLifePublicSleepRenderer then
           pcall(installPublicVoxelSleepRenderer)
         end
-        -- Bubble renderer: same lazy retry (was missing — root cause of no bubbles)
-        if not NPCMod._kantoLifePublicBubbleRenderer then
-          pcall(installPublicVoxelBubbleRenderer)
-        end
+        -- Bubble renderer disabled: using 2D overlay instead
+        -- (was: lazy retry, but 3D billboard never worked)
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
             return basePose(self, ...)
