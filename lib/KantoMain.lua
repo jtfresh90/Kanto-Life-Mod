@@ -671,11 +671,21 @@ return function(mod)
   end
 
   local function nearWarp(map, x, y)
-    -- 5-cell exclusion zone around doors (user: don't block doors)
+    -- 5-cell exclusion zone around doors (user: don't block doors).
+    -- In small interiors (<30x30), only check the exact cell:
+    -- a 5-cell radius would cover the entire house, blocking all sleep.
     if not map then return false end
+    local w = map.widthCells or map.width or 0
+    local h = map.heightCells or map.height or 0
+    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
+    if isSmallInterior then
+      local ok, isWarp = pcall(function() return map:warpAtCell(x, y) end)
+      return ok and isWarp or false
+    end
     for dx = -5, 5 do
       for dy = -5, 5 do
-        if map:warpAtCell(x + dx, y + dy) then
+        local ok, isWarp = pcall(function() return map:warpAtCell(x + dx, y + dy) end)
+        if ok and isWarp then
           return true
         end
       end
