@@ -1486,7 +1486,7 @@ return function(mod)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
-            elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
+            elseif npc.nightlifeSleeping then
               npc.frozen = false
               npc.nightlifeSleeping = nil
               npc.johtoLifeSleepAngle = nil
@@ -1664,7 +1664,7 @@ return function(mod)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
-            elseif npc.nightlifeSleeping then
+            elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
               npc.frozen = false
               npc.nightlifeSleeping = nil
 
