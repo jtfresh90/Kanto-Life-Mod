@@ -1,7 +1,7 @@
 {
   "id": "kanto_life",
   "name": "Kanto Life",
-  "version": "1.4.158",
+  "version": "1.4.159",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
