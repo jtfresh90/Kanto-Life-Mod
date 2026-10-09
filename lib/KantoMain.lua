@@ -3785,11 +3785,14 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- DISABLED: 2D projection bubbles replaced by 3D billboard renderer
-        -- (KANTO_LIFE_BUBBLE_3D). The projection approach failed (wrong canvas,
-        -- pitch distortion, offscreen at edges). 3D billboards like the Zzz
-        -- work reliably. Keeping this would draw duplicates.
-        do return out end
+        -- RE-ENABLED: 2D overlay is Battle Art's documented pattern for voxel FX.
+        -- The 3D billboard never worked reliably. This uses Voxel3D.project()
+        -- (Battle Art's own function) + drawCollisionBubble (proven 2D).
+        -- See: Voxel3D.lua "they stay ordinary 2D draws, anchored to wherever
+        -- their ground point lands under the same camera the 3D pass used."
+        -- (The old "wrong canvas/pitch/offscreen" issues were already fixed
+        -- in the code below: correct canvas, body-center projection + screen
+        -- Y offset, viewport clamp.)
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -6007,6 +6010,10 @@ local function nightlifeTick(world, dt)
     end
 
     local function installPublicVoxelBubbleRenderer()
+      -- DISABLED: Using 2D overlay instead (Pipelines.worldPresent).
+      -- The 3D billboard never worked reliably. See re-enabled 2D overlay above.
+      pcall(function() fileLog("BUBBLE: 3D renderer disabled, using 2D overlay") end)
+      return
       if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
       pcall(function() fileLog("BUBBLE: attempting registration") end)
       local okFind, battle = pcall(function()
