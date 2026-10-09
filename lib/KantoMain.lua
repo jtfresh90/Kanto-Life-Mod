@@ -576,8 +576,22 @@ return function(mod)
   local function isCeladonMap(mapId) if not mapId then return false end; local id = string.upper(tostring(mapId)); return id:find("CELADON", 1, true) ~= nil end
   local function pokeTargetCount(mapId, map)
     if not opt("poke_npcs") then return 0 end
-    if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map)) then return 0 end
+    local isOutdoor = isTown(mapId) or isRoute(mapId)
+    local indoor = isIndoor(mapId, map)
+    -- Fallback: small maps (<30x30) are likely building interiors
+    -- (isIndoor misses some like POWER_PLANT or custom interiors)
+    if not isOutdoor and not indoor then
+      local w = map and (map.widthCells or map.width or 0) or 0
+      local h = map and (map.heightCells or map.height or 0) or 0
+      if w > 0 and h > 0 and w < 30 and h < 30 then
+        indoor = true
+      else
+        return 0
+      end
+    end
     local n = math.floor(tonumber(opt("poke_npc_count")) or 0); if wildSpawnModActive() then n = math.floor(n / 2) end
+    -- Indoors: cap at 3 (houses are small)
+    if indoor and not isOutdoor then n = math.min(n, 3) end
     if n < 0 then n = 0 end
     if n > 50 then n = 50 end
     return n
@@ -725,7 +739,14 @@ return function(mod)
     local ok, walk = pcall(function() return map:isWalkableCell(x, y) end)
     if not ok or not walk then return false end
     if isWaterCell(map, x, y) then return false end
-    if nearWarp(map, x, y) then return false end
+    -- Never spawn ON a warp, but allow NEAR warps in small interiors
+    -- (houses are tiny; the exclusion zone covers too much)
+    local warpOk, isWarp = pcall(function() return map:warpAtCell(x, y) end)
+    if warpOk and isWarp then return false end
+    local w = map.widthCells or map.width or 0
+    local h = map.heightCells or map.height or 0
+    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
+    if not isSmallInterior and nearWarp(map, x, y) then return false end
     return true
   end
 

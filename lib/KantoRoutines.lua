@@ -1495,8 +1495,9 @@ return function(ctx)
         if blocked then
           st.phase = "blocked_return"
           st.blockedDoor = {t[1], t[2], t[3], t[4]}
-          local ax, ay = anchor(npc)
-          st.target = {ax, ay}
+          -- No anchor: pick new wander target instead of returning to spawn
+          local wx, wy = localWanderTarget(world, npc)
+          if wx and wy then st.target = {wx, wy} end
           st.wait = 0
           st.repath = 0
           goto continue
