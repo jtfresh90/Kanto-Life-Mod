@@ -705,11 +705,11 @@ return function(mod)
   end
 
   local function nearWarp(map, x, y)
+    -- 5-cell exclusion zone around doors (user: don't block doors)
     if not map then return false end
-    if map:warpAtCell(x, y) then return true end
-    for dx = -1, 1 do
-      for dy = -1, 1 do
-        if not (dx == 0 and dy == 0) and map:warpAtCell(x + dx, y + dy) then
+    for dx = -5, 5 do
+      for dy = -5, 5 do
+        if map:warpAtCell(x + dx, y + dy) then
           return true
         end
       end
@@ -2486,10 +2486,13 @@ local nm = storyDisplayName(talker)
     local ambient = npc.kantoLifeAmbient or d.kantoLifeAmbient
     local pokeAmbient = isPokeAmbient(npc) or npc.kantoLifePokeAmbient or d.kantoLifePokeAmbient
     if pokeAmbient and not ambient then return false end
+    -- FIX (1.4.142 clerk fix, now for all humans): npc.wanders is unreliable.
+    -- Use kantoLifeAmbient/steps instead.
+    local isWalker = npc.steps == true or npc.kantoLifeAmbient or d.kantoLifeAmbient
     if ambient then
-      return scheduleTravelSelected(npc) and (npc.wanders ~= false) and not (npc.kantoLifeWaterBound or d.kantoLifeWaterBound)
+      return scheduleTravelSelected(npc) and isWalker and not (npc.kantoLifeWaterBound or d.kantoLifeWaterBound)
     end
-    if not npc.wanders or isPokemonLike(npc) then return false end
+    if not isWalker or isPokemonLike(npc) then return false end
     return true
   end
 
@@ -3902,57 +3905,68 @@ function putToSleep(npc)
           if not pcall(G.setCanvas, out) then
             return
           end
+          -- BATTLE ART PATTERN (research 2026-10-09):
+          -- The engine's "!" bubble uses a 2D overlay with a translate trick.
+          -- Anchor at FOOT (px+8, py+16), project with world Y=0,
+          -- then slide flat coords onto the projected anchor.
+          -- See: OverworldController.lua ctx.drawFx, Battle Art main.lua:516
+          local cam = nil
+          if state and state.camera then
+            cam = state.camera
+          elseif ow and ow.camera then
+            cam = ow.camera
+          end
+          local camX, camY = 0, 0
+          if cam then
+            camX = tonumber(cam.x) or 0
+            camY = tonumber(cam.y) or 0
+          end
+          -- Scale: window zoom x supersample (Battle Art main.lua:517)
+          local uiScale = 1
+          if ctx and tonumber(ctx.scale) then
+            uiScale = tonumber(ctx.scale)
+          end
+          -- Try to get AntiAlias factor
+          local okAA, AA = pcall(lib.require, "AntiAlias")
+          if okAA and AA and type(AA.factor) == "function" then
+            local okF, f = pcall(AA.factor)
+            if okF and tonumber(f) then uiScale = uiScale * tonumber(f) end
+          end
           for _, npc in ipairs(actors) do
             local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
             if untilAt > now and npc.visible ~= false and not npc.hidden then
               local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
               local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
-              local gh = 0
-              local ghOk = false
-              if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
-                local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
-                if okH and type(h) == "number" and h ~= 0 then
-                  gh = h
-                  ghOk = true
-                end
-              end
-              -- FIX: Always draw bubbles. gh=0 is correct for flat maps
-              -- (outdoors and indoors). Skipping broke all flat-map bubbles.
-              -- (Research: groundAt==0 does NOT mean indoors.)
-              if true then
-              -- Measure true pixel scale by projecting two points 12 world
-              -- units apart vertically. The raw perspective scale `s` from
-              -- project() is relative, not pixels — using it directly made
-              -- bubbles pin-sized. Bubble base height is 12px at scale=1;
-              -- scale so 12px = 12 world units (matches NPC scale).
-              -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
-              -- Camera pitch displaces high 3D points horizontally; at body
-              -- height the projected X matches the sprite's screen center.
-              -- Then apply screen-space Y offset (no pitch distortion).
-              local okP, bx3d, by3d = pcall(Voxel3D.project, px + 8, gh + 2, py + 8)
-              if okP and type(bx3d) == "number" and type(by3d) == "number"
-                 and math.abs(bx3d) < 10000 and math.abs(by3d) < 10000 then
-                local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 14, py + 8)
-                local scale = 1
-                if okP2 and type(y2) == "number" then
-                  local pxPer12 = math.abs(y2 - by3d)
-                  scale = pxPer12 / 12
-                  if scale < 0.5 then scale = 0.5 end
-                  if scale > 8 then scale = 8 end
-                end
-                local bx, by = bx3d * sxRatio, by3d * syRatio
-                -- Screen-space offset above body center
-                local yOff = 26 * scale * sxRatio
-                by = by - yOff
-                -- Viewport clamp (preserves 1.4.132 edge fix)
+              -- 1. Anchor at FOOT (ground point), like engine's "!" bubble:
+              --    npc.px + 8, npc.py + 16 (OverworldController.lua:6296)
+              local wx, wy = px + 8, py + 16
+              -- 2. Project ground point to canvas pixels (world Y=0):
+              --    project(wx, 0, wy) - engine's 2D wy becomes world Z
+              local okP, sx, sy = pcall(Voxel3D.project, wx, 0, wy)
+              if okP and type(sx) == "number" and type(sy) == "number"
+                 and math.abs(sx) < 10000 and math.abs(sy) < 10000 then
+                -- 3. Flat-space foot (what 2D draw code expects):
+                local fx, fy = wx - camX, wy - camY
+                -- 4. Slide flat coords onto projected anchor:
+                G.push()
+                G.scale(uiScale, uiScale)
+                G.translate(sx / uiScale - fx, sy / uiScale - fy)
+                -- 5. Draw with EXISTING 2D bubble code at flat coords.
+                --    drawCollisionBubble expects screen coords; we give it
+                --    flat coords (npc.px - cam.x, npc.py - cam.y - height).
+                --    The translate above makes them land correctly.
+                local bx = px - camX
+                local by = py - camY - 20  -- 20px above head (like engine's fxEmote)
+                -- Viewport clamp in flat space
                 local vw, vh = G.getDimensions()
+                vw, vh = vw / uiScale, vh / uiScale
                 if bx < 8 then bx = 8 end
                 if bx > vw - 8 then bx = vw - 8 end
                 if by < 8 then by = 8 end
                 if by > vh - 8 then by = vh - 8 end
-                drawCollisionBubble(npc, bx, by, scale * sxRatio)
+                drawCollisionBubble(npc, bx, by, 1)
+                G.pop()
               end
-              end  -- end if ghOk else
             end
           end
           pcall(G.setCanvas, prev)
@@ -5505,6 +5519,37 @@ local function nightlifeTick(world, dt)
     end
 
     local NPCMod = NPC or safeRequire("src.world.NPC")
+
+    ----------------------------------------------------------------
+    -- NPC:pose wrapper for travel animations (teleport/fly).
+    --
+    -- RESEARCH (2026-10-09): The engine NEVER modifies player.py for
+    -- teleport/fly. The lift exists ONLY in the pose return value.
+    -- Player:pose returns raised py; 2D draws at returned py;
+    -- voxel computes p.lift = e.py - vy.
+    --
+    -- Our old approach wrote directly to npc.py, which broke voxel
+    -- (p.lift = 0) and polluted collision logic. This wrapper follows
+    -- the engine's exact pattern: npc.py stays at ground, pose returns
+    -- the animated values from npc._kantoTravelAnim.
+    ----------------------------------------------------------------
+    if NPCMod and not NPCMod._kantoLifePoseWrapped then
+      NPCMod._kantoLifePoseWrapped = true
+      local origPose = NPCMod.pose
+      function NPCMod:pose()
+        local ta = self._kantoTravelAnim
+        if ta then
+          -- Return animated values; npc.py/px stay at ground level
+          return ta.sprite or self.sprite,
+                 ta.px ~= nil and ta.px or self.px,
+                 ta.py ~= nil and ta.py or self.py,
+                 ta.facing or self.facing,
+                 ta.phase or 0,
+                 false, false
+        end
+        return origPose(self)
+      end
+    end
 
     ----------------------------------------------------------------
     -- Public voxel renderer bridge for Porygonal-compatible sleep.
