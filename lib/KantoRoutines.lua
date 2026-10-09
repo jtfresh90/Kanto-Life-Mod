@@ -340,8 +340,8 @@ return function(ctx)
 
       -- Done?
       if tp.frame >= tp.total then
-        if tp.origPy then npc.py = tp.origPy end
-        if tp.origPx then npc.px = tp.origPx end
+        -- Clear side-channel (npc.py was never modified)
+        npc.kantoLifeTeleportY = nil
         if tp.origSprite then npc.sprite = tp.origSprite end
         if tp.origFacing then npc.facing = tp.origFacing end
         npc.kantoLifeTeleport = nil
@@ -380,18 +380,9 @@ return function(ctx)
           npc._kantoLifeTravelHidden = true
         end
       else
-        -- Move up and away (simple arc)
-        local progress = fl.frame / total
-        if type(fl.origPx) == "number" and type(fl.origPy) == "number" then
-          if fl.mode == "out" then
-            npc.px = fl.origPx + progress * 120
-            npc.py = fl.origPy - progress * 100
-          else
-            npc.px = fl.origPx + (1 - progress) * 120
-            npc.py = fl.origPy - (1 - progress) * 100
-          end
-        end
-        -- Wing flap
+        -- DISABLED: Direct px/py writes may corrupt sleep bake.
+        -- (Fly movement re-add via side-channel later)
+        -- Wing flap only
         npc.facing = (fl.frame % 16 < 8) and "right" or "left"
       end
       return true

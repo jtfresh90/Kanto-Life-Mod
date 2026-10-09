@@ -3672,8 +3672,18 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
+        -- Teleport animation: apply vertical offset via side-channel (1.4.145).
+        -- npc.py is NEVER modified; offset applied during draw only.
+        local tpY = self.kantoLifeTeleportY
+        if tpY then
+          local origPy = self.py
+          if type(self.py) == "number" then self.py = self.py + tpY end
+          local ok, res = pcall(baseNpcDraw, self, camX, camY)
+          if type(origPy) == "number" then self.py = origPy end
+          if not ok then error(res) end
+          return
+        end
         -- Post-travel hide: NPC teleported/flew away, hide until despawn.
-        -- (Replaces the old fly early-return; fly now uses sprite swap.)
         if self._kantoLifeTravelHidden then
           return  -- Skip draw; NPC is gone
         end
