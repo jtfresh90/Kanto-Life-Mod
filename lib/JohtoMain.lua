@@ -2763,13 +2763,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         -- Always preserve original 2-arg behavior through base
         if scale == nil then
           local r = baseDraw(self, ox, oy)
-          if not isVoxelPresentation() then
-            drawZzzForNpc(self, ox, oy, nil)
-            local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
-            local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-            if cbUntil > cbNow then
-              pcall(drawCollisionBubble, self, ox, oy, nil)
-            end
+          -- The 2D draw hook is also used by some voxel render paths.
+          -- Draw effects in either presentation; helpers handle draw coordinates.
+          drawZzzForNpc(self, ox, oy, nil)
+          local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
+          local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          if cbUntil > cbNow then
+            pcall(drawCollisionBubble, self, ox, oy, nil)
           end
           return r
         end
@@ -2792,9 +2792,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             r = baseDraw(self, ox, oy, scale)
           end
           pcall(drawSleepAccessory, self, ox, oy, scale)
-          if not voxel then
-            drawZzzForNpc(self, ox, oy, scale)
-          end
+          drawZzzForNpc(self, ox, oy, scale)
           return r
         end
 
@@ -2825,9 +2823,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           pcall(drawSleepAccessory, self, ox, oy, scale)
         end
 
-        if not voxel then
-          drawZzzForNpc(self, ox, oy, scale)
-        end
+        drawZzzForNpc(self, ox, oy, scale)
         -- Draw collision bubble for awake NPCs
         local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
         local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
