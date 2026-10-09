@@ -891,9 +891,6 @@ return function(mod)
     local d = npc.def or {}
     if d.kantoLifePokeAmbient or npc.kantoLifePokeAmbient then return true end
     if tostring(d.name or ""):match("^KANTO_POKE_") then return true end
-    -- Wilds of Kanto names entities wilds_of_kanto_entity_%d
-    if tostring(d.name or ""):match("^wilds_of_kanto_entity_") then return true end
-    if tostring(npc.name or ""):match("^wilds_of_kanto_entity_") then return true end
     return false
   end
 
