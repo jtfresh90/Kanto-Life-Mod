@@ -6053,16 +6053,7 @@ local function nightlifeTick(world, dt)
       -- The 3D billboard never worked reliably. See re-enabled 2D overlay above.
       pcall(function() fileLog("BUBBLE: 3D renderer disabled, using 2D overlay") end)
       return
-      if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
-      pcall(function() fileLog("BUBBLE: attempting registration") end)
-      local okFind, battle = pcall(function()
-        return mod.find("BATTLE_ART_VOXEL_FORK")
-      end)
-      if not okFind or not battle then
-        okFind, battle = pcall(function()
-          return mod.find("BATTLE_ART_VOXEL")
-        end)
-      end
+    end
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
       if not api or type(api.register) ~= "function" then
