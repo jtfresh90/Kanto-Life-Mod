@@ -3148,6 +3148,9 @@ function putToSleep(npc)
     if (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then return end
     if isSpecialCharacter(npc) then return end
     if npc.nightlifeSleeping then return end
+    -- Clear travel-hidden flag: sleeping NPCs are visible
+    -- (Fix: flag was never cleared after teleport/fly, causing invisible sleepers)
+    npc._kantoLifeTravelHidden = nil
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
@@ -3650,17 +3653,6 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
-        -- Teleport animation: apply vertical offset (rise/descend)
-        local tpY = self.kantoLifeTeleportY
-        if tpY then
-          -- Temporarily offset py for the draw, restore after
-          local origPy = self.py
-          if type(self.py) == "number" then self.py = self.py + tpY end
-          local ok, res = pcall(baseNpcDraw, self, camX, camY)
-          if type(origPy) == "number" then self.py = origPy end
-          if not ok then error(res) end
-          return
-        end
         -- Post-travel hide: NPC teleported/flew away, hide until despawn.
         -- (Replaces the old fly early-return; fly now uses sprite swap.)
         if self._kantoLifeTravelHidden then
