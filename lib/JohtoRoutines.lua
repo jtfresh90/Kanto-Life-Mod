@@ -1030,12 +1030,6 @@ return function(ctx)
         -- until the routine completes.
         if npc._johtoLifeDepartMethod == "fly" or npc._johtoLifeDepartMethod == "teleport" then
           npc._johtoLifeDepartFrame = (tonumber(npc._johtoLifeDepartFrame) or 0) + math.max(1, (tonumber(dt) or 0) * 60)
-          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-          local elapsed = math.max(0, math.min(1.2, now - (tonumber(npc._johtoLifeDepartStart) or now)))
-          local t = elapsed / 1.2
-          if npc._johtoLifeDepartMethod == "fly" then
-            npc.spriteYOffset = -math.floor(t * t * 60)
-          end
         end
         if st.wait <= 0 then
           local dest = destinationFor(world, npc, nil, "door")
