@@ -2323,17 +2323,20 @@ local nm = storyDisplayName(talker)
     npc.kantoLifeSleepSchedule = (h < 3) and "day" or "night"
   end
   local function npcSleepHash(npc, isNight)
+    -- Use stable ID only (NOT position). NPCs wander, and including cellX/cellY
+    -- meant their hash changed as they moved, causing more than sleep_pct%
+    -- to fall asleep over time.
     local s = tostring(npc.id or "")
     if s == "" and npc.def then s = tostring(npc.def.name or npc.def.sprite or "") end
     if s == "" then
-      s = tostring(npc.cellX or npc.x or 0) .. "," .. tostring(npc.cellY or npc.y or 0)
+      -- Fallback: use spawn position (stable) not current position
+      s = tostring(npc.spawnX or npc.cellX or npc.x or 0) .. "," .. tostring(npc.spawnY or npc.cellY or npc.y or 0)
     end
     -- Include spawn index / ambient flag so mod NPCs distribute across the band
     if npc.kantoLifeAmbient then s = s .. ":amb" end
     if npc.kantoLifeName then s = s .. ":" .. tostring(npc.kantoLifeName) end
     local idn = 0
     for i = 1, #s do idn = idn + s:byte(i) * (i + 3) end
-    idn = idn + (tonumber(npc.cellX) or 0) * 7 + (tonumber(npc.cellY) or 0) * 13
     return (idn + (isNight and 0 or 97)) % 100
   end
   local function shouldSleepNow(npc, isNight)
