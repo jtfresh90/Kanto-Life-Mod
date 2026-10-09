@@ -6186,27 +6186,30 @@ local function nightlifeTick(world, dt)
         if self then
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
-            -- Teleport: spin + rise. Sprite = random Psychic type (or NPC if lookup fails).
-            -- GBC behavior: spin in place, then rise. Never mutate npc fields.
+            -- Teleport: GBC-faithful spin + rise with NPC's own sprite.
+            -- (No per-species Pokemon sprites in base game; GBC player
+            -- teleport never swaps sprite either — just spins/rises.)
+            -- Never mutate npc fields; pose-time only.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
-            local psySprite = nil
-            -- Use cached random Psychic species for this teleport (set by routine)
-            local psySpecies = tp.psySpecies or "ABRA"
-            pcall(function() psySprite = getPokeSpriteObject(psySpecies) end)
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
             -- GBC: spin in place first, then rise (mirror engine spinRise)
             local rise = 0
             if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
             if rise > 60 then rise = 60 end
-            return psySprite or sprite, px, py - rise, spinFacing, 0, false, false
+            return sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
-            -- Fly: bird sprite, arc up and away. Species = random Fly learner.
+            -- Fly: use SPRITE_BIRD (engine's fly sprite, guaranteed to exist).
+            -- GBC fxBird does exactly this while the player hides.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
-            pcall(function() bird = getPokeSpriteObject(fl.species or "PIDGEY") end)
+            pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
+            -- Fallback: try "BIRD" if SPRITE_BIRD lookup fails
+            if not bird then
+              pcall(function() bird = getPokeSpriteObject("BIRD") end)
+            end
             local total = fl.total or 90
             local progress = fl.frame / total
             if progress > 1 then progress = 1 end
