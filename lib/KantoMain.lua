@@ -3659,14 +3659,28 @@ function putToSleep(npc)
     end
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
-      NPCMod.draw = function(self, camX, camY)
+      -- Gen 1: draw(camX, camY) where camX/camY are camera coordinates
+      -- Gen 2: draw(ox, oy, scale, oamRow) where ox/oy are pre-calculated
+      --   screen offsets (ox = -cam.x * scale). Use correct math per gen.
+      local isGen2Draw = not gen1
+      NPCMod.draw = function(self, a, b, c, d)
+        local camX, camY = a, b
+        -- Helper: convert world px to screen px
+        local function toScreen(px, py)
+          if isGen2Draw then
+            local s = tonumber(c) or 1
+            return (tonumber(a) or 0) + px * s, (tonumber(b) or 0) + py * s
+          else
+            return px - (tonumber(a) or 0), py - (tonumber(b) or 0)
+          end
+        end
         -- Teleport animation: apply vertical offset (rise/descend)
         local tpY = self.kantoLifeTeleportY
         if tpY then
           -- Temporarily offset py for the draw, restore after
           local origPy = self.py
           if type(self.py) == "number" then self.py = self.py + tpY end
-          local ok, res = pcall(baseNpcDraw, self, camX, camY)
+          local ok, res = pcall(baseNpcDraw, self, a, b, c, d)
           if type(origPy) == "number" then self.py = origPy end
           if not ok then error(res) end
           return
@@ -3691,7 +3705,7 @@ function putToSleep(npc)
             -- Draw base layer before NPC
             local basePx = self.px or self.x or ((self.cellX or 0) * 16) or 0
             local basePy = self.py or self.y or ((self.cellY or 0) * 16) or 0
-            local baseSx, baseSy = basePx - (camX or 0), basePy - (camY or 0)
+            local baseSx, baseSy = toScreen(basePx, basePy)
             if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
               local ok, ox, oy = pcall(function()
                 return self.sprite:getScreenOrigin(basePx, basePy, camX or 0, camY or 0)
@@ -3809,7 +3823,7 @@ function putToSleep(npc)
           end
           pcall(drawCollisionBubble, self, sx, sy, 1)
         end
-        return baseNpcDraw(self, camX, camY)
+        return baseNpcDraw(self, a, b, c, d)
       end
       NPC = NPCMod
       NPCMod._kantoLifeSleepWrapped = true
