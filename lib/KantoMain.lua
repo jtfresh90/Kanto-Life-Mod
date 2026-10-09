@@ -3605,13 +3605,10 @@ function putToSleep(npc)
           if not ok then error(res) end
           return
         end
-        -- Fly animation: hide NPC, draw bird instead
-        if self.kantoLifeFlyHidden and self.kantoLifeFly then
-          local fl = self.kantoLifeFly
-          -- Draw bird sprite at fly position (simplified: use NPC draw with offset)
-          -- TODO: Draw actual flying Pokémon sprite. For now, skip NPC draw
-          -- (bird visual coming in next iteration).
-          return  -- Skip NPC draw; bird drawn separately
+        -- Post-travel hide: NPC teleported/flew away, hide until despawn.
+        -- (Replaces the old fly early-return; fly now uses sprite swap.)
+        if self._kantoLifeTravelHidden then
+          return  -- Skip draw; NPC is gone
         end
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")

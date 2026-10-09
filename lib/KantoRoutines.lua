@@ -276,58 +276,82 @@ return function(ctx)
   -- Returns true if the NPC is currently animating (skip normal routine).
   local function updateTravelAnimation(npc, dt)
     -- Teleport animation: spin + rise (Gen 1/3 custom; Gen 2 uses built-in)
+    -- FIX: Write directly to npc.py (not side-channel). Both 2D (NPC:pose)
+    -- and voxel (posesOf -> e:pose()) read self.py, so this renders in both.
     local tp = npc.kantoLifeTeleport
     if tp then
       tp.frame = tp.frame + 1
       if tp.frame >= tp.total then
-        -- Animation complete
+        -- Animation complete: restore original position/sprite
+        if tp.origPy then npc.py = tp.origPy end
+        if tp.origSprite then npc.sprite = tp.origSprite end
         npc.kantoLifeTeleport = nil
+        npc.kantoLifeTeleportY = nil  -- Clear side-channel (was leaking)
         npc.frozen = false
         if tp.mode == "out" then
-          -- Teleported away: hide until arrival (handled by routine)
-          npc.kantoLifeTeleportedAway = true
+          -- Hide until despawn (prevents 1.2s visible stand)
+          npc._kantoLifeTravelHidden = true
         end
       else
         -- Spin: cycle facing every 2 frames
         local spinOrder = {"down", "left", "up", "right"}
         local idx = math.floor(tp.frame / 2) % 4 + 1
         npc.facing = spinOrder[idx]
-        -- Rise (out) or descend (in): up to 24px vertical offset
+        -- Rise (out) or descend (in): write directly to npc.py
+        -- (mirrors Player.lua:345: py = py - floor((total-frame)*24/total))
+        if tp.origPy == nil then tp.origPy = npc.py end
         local progress = tp.frame / tp.total
         local offset = math.floor(progress * 24)
-        if tp.mode == "out" then
-          npc.kantoLifeTeleportY = -offset  -- Rise up
-        else
-          npc.kantoLifeTeleportY = -(24 - offset)  -- Start high, descend
+        if type(tp.origPy) == "number" then
+          if tp.mode == "out" then
+            npc.py = tp.origPy - offset  -- Rise up
+          else
+            npc.py = tp.origPy - (24 - offset)  -- Start high, descend
+          end
         end
       end
       return true  -- Animating, skip normal routine
     end
     
-    -- Fly animation: bird flies up and away (out) or in from above (in)
+    -- Fly animation: sprite-swap to bird, move px/py along path.
+    -- FIX: Write to real npc.px/npc.py (not fl.px/fl.py side-channels).
+    -- Both 2D and voxel read these via pose().
     local fl = npc.kantoLifeFly
     if fl then
       fl.frame = fl.frame + 1
       if fl.frame >= fl.total then
-        -- Animation complete
+        -- Animation complete: restore original sprite/position
+        if fl.origSprite then npc.sprite = fl.origSprite end
+        if fl.origPx then npc.px = fl.origPx end
+        if fl.origPy then npc.py = fl.origPy end
         npc.kantoLifeFly = nil
         npc.kantoLifeFlyHidden = false
         npc.frozen = false
         if fl.mode == "out" then
-          npc.kantoLifeFlewAway = true
+          npc._kantoLifeTravelHidden = true  -- Hide until despawn
         end
       else
-        -- Bird position: up-right path (simplified FLY_PATH1)
-        local progress = fl.frame / fl.total
-        if fl.mode == "out" then
-          -- Start at NPC, fly up-right off screen
-          fl.px = fl.startPx + progress * 100  -- Move right
-          fl.py = fl.startPy - progress * 80   -- Move up
-        else
-          -- Start off-screen up-right, fly to NPC position
-          fl.px = fl.startPx + (1 - progress) * 100
-          fl.py = fl.startPy - (1 - progress) * 80
+        -- Save originals on first frame
+        if fl.origPx == nil then
+          fl.origPx = npc.px
+          fl.origPy = npc.py
+          fl.origSprite = npc.sprite
+          -- TODO: Swap to bird sprite here (needs sprite object from KantoMain)
+          -- For now, keep NPC sprite but move it (visible movement)
         end
+        -- Move along up-right path (write to real npc.px/npc.py)
+        local progress = fl.frame / fl.total
+        if type(fl.origPx) == "number" and type(fl.origPy) == "number" then
+          if fl.mode == "out" then
+            npc.px = fl.origPx + progress * 100
+            npc.py = fl.origPy - progress * 80
+          else
+            npc.px = fl.origPx + (1 - progress) * 100
+            npc.py = fl.origPy - (1 - progress) * 80
+          end
+        end
+        -- Wing flap: toggle phase every 8 frames (both renderers read phase)
+        if fl.frame % 16 < 8 then npc.phase = 0 else npc.phase = 1 end
       end
       return true  -- Animating, skip normal routine
     end
