@@ -6623,9 +6623,14 @@ local function nightlifeTick(world, dt)
 
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseDraw = NPCMod.draw
-      function NPCMod:draw(camX, camY)
+      function NPCMod:draw(camX, camY, scale, oamRow)
         if not self.nightlifeSleeping then
-          return baseDraw(self, camX, camY)
+          return baseDraw(self, camX, camY, scale, oamRow)
+        end
+        -- Gold: sleep visuals are baked into sprite.image (1.4.180).
+        -- Skip render-time drawing to avoid double-draw/misalignment.
+        if not gen1 and self.sprite and self.sprite._kantoGoldBaked then
+          return baseDraw(self, camX, camY, scale, oamRow)
         end
         hardFreeze(self)
         -- Always try bake once (helps voxel / true sprite path)
