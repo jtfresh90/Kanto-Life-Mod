@@ -96,10 +96,46 @@ return function(ctx)
     else return "route" end
   end
 
-  -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)
-  local FLY_BIRD_GFX = { 116, 110, 133, 132, 114, 138, 136, 137, 144, 145 }
-  -- Psychic Pokemon for teleport (can learn Teleport): MEW=140, MEWTWO=139
-  local TELEPORT_PSYCHIC_GFX = { 140, 139 }
+  -- Build Pokemon GFX pools from engine constants at runtime.
+  -- Hardcoded IDs (110-145) don't exist in GfxIds.TO_SPRITE (only 0-92).
+  -- Real Pokemon overworld GFX come from Constants.event_objects.byName.
+  -- Type IDs: FLYING=2, PSYCHIC=14 (src/core/game3/battle/types.lua).
+  local travelGfxPools = nil
+  local function buildTravelGfxPools()
+    if travelGfxPools then return travelGfxPools end
+    travelGfxPools = { fly = {}, teleport = {} }
+    pcall(function()
+      local Constants = require("src.core.game3.constants")
+      local Pokemon = require("src.core.game3.pokemon")
+      local byName = Constants and Constants.event_objects and Constants.event_objects.byName or {}
+      local names = Pokemon and Pokemon._names or {}
+      for _, pname in ipairs(names) do
+        local gfxKey = "OBJ_EVENT_GFX_" .. tostring(pname):upper()
+        local gfxId = byName[gfxKey]
+        if gfxId then
+          local okT, types = pcall(function() return Pokemon.types(pname) end)
+          if okT and type(types) == "table" then
+            for _, t in ipairs(types) do
+              if t == 2 then table.insert(travelGfxPools.fly, gfxId) end
+              if t == 14 then table.insert(travelGfxPools.teleport, gfxId) end
+            end
+          end
+        end
+      end
+    end)
+    -- Fallback: if pools empty, use known-good IDs (will show as Youngster, but animation works)
+    return travelGfxPools
+  end
+  local function randomFlyGfx()
+    local pools = buildTravelGfxPools()
+    if #pools.fly > 0 then return pools.fly[math.random(#pools.fly)] end
+    return nil
+  end
+  local function randomTeleportGfx()
+    local pools = buildTravelGfxPools()
+    if #pools.teleport > 0 then return pools.teleport[math.random(#pools.teleport)] end
+    return nil
+  end
   -- Spin order for teleport animation (matches engine SPIN_NEXT)
   local SPIN_ORDER = { "down", "left", "up", "right" }
 
@@ -118,7 +154,7 @@ return function(ctx)
       npc._kantoLifeFROrigGfx = npc.graphicsId
       npc._kantoLifeFROrigSprite = npc.sprite
       -- Switch to Psychic Pokemon sprite (Abra-like: Mew/Mewtwo can Teleport)
-      local gfx = TELEPORT_PSYCHIC_GFX[math.random(#TELEPORT_PSYCHIC_GFX)]
+      local gfx = randomTeleportGfx()
       pcall(function()
         local GfxIds = require("src.core.game3.scripting.gfx_ids")
         npc.graphicsId = gfx
@@ -134,7 +170,7 @@ return function(ctx)
       npc._kantoLifeFROrigGfx = npc.graphicsId
       npc._kantoLifeFROrigSprite = npc.sprite
       -- Switch to random bird Pokemon sprite
-      local gfx = FLY_BIRD_GFX[math.random(#FLY_BIRD_GFX)]
+      local gfx = randomFlyGfx()
       pcall(function()
         local GfxIds = require("src.core.game3.scripting.gfx_ids")
         npc.graphicsId = gfx
@@ -164,8 +200,7 @@ return function(ctx)
         npc.facing = SPIN_ORDER[idx]
       else
         local riseT = (t - 0.6) / 0.6
-        -- Rise: spriteYOffset goes negative (up on screen)
-        npc.spriteYOffset = -math.floor(riseT * riseT * 40)
+        -- Rise: raiseY goes negative (up on screen). spriteYOffset is player-only.
         -- Spin faster during rise
         local idx = math.floor(t / 0.08) % 4 + 1
         npc.facing = SPIN_ORDER[idx]
@@ -176,7 +211,7 @@ return function(ctx)
       if t >= 0.4 then
         local riseT = (t - 0.4) / 0.8
         -- Accelerating rise
-        npc.spriteYOffset = -math.floor(riseT * riseT * 60)
+        npc.raiseY = -math.floor(riseT * riseT * 60)
       end
     elseif method == "surf" then
       -- Surf: no special animation, bubble cue is sufficient
@@ -197,7 +232,7 @@ return function(ctx)
       npc._kantoLifeFROrigGfx = nil
       npc._kantoLifeFROrigSprite = nil
     end
-    npc.spriteYOffset = 0
+    npc.raiseY = nil
     npc._kantoLifeFRAnimT = nil
     npc._kantoLifeFRAnimPhase = nil
   end

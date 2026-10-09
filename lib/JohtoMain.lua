@@ -221,7 +221,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 }, { "Natural", 5 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -672,7 +672,7 @@ return function(mod)
       aquatic = isWaterSpecies(monName)
       -- Native Gen2 uses SWIM_WANDER ($24) for water walkers.
       movement, radius = aquatic and 0x24 or MOVE_WANDER,
-                        aquatic and { x = 2, y = 2 } or { x = 2, y = 2 }
+                        aquatic and { x = 30, y = 30 } or { x = 30, y = 30 }
     else
       local pool = SPRITE_DEFS
       if isIndoor(mapId, map) then
@@ -695,7 +695,7 @@ return function(mod)
       elseif roll == 1 then movement = MOVE_WALK_UD
       elseif roll == 2 then movement = MOVE_WALK_LR
       else movement = MOVE_WANDER end
-      radius = { x = 3, y = 3 }
+      radius = { x = 40, y = 40 }
     end
 
     local x, y = pickCell(ow, map, aquatic and true or false)
@@ -944,9 +944,9 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
-        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
-          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
-          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
+        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
+          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%6; setOpt("sleep_style",n) end,
+          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%6; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_collision_bubbles", not (opt("npc_collision_bubbles") ~= false)) end },
         { label = "NPC ROUTINES", right = opt("npc_routines") and "ON" or "OFF", stepper = true,
@@ -1417,11 +1417,18 @@ return function(mod)
     end
     local pct = math.floor(tonumber(opt("sleep_pct")) or 10)
     if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
-    local isNight = false
-    if type(world.timeOfDay) == "function" then
-      local ok, tod = pcall(function() return world:timeOfDay() end)
-      local t = ok and tostring(tod):upper() or ""
-      isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
+    -- Use the game's internal clock (world.tod), not the host OS clock.
+    -- world:timeOfDay() with no args falls back to os.date("%H").
+    local t = tostring(world.tod or ""):upper()
+    local isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
+    if t == "" and type(world.timeOfDay) == "function" then
+      -- Fallback: pass game hour explicitly
+      local ok, hr = pcall(function() return world:hour() end)
+      if ok and hr then
+        local ok2, tod = pcall(function() return world:timeOfDay(hr) end)
+        t = ok2 and tostring(tod):upper() or ""
+        isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
+      end
     end
     local candidates = {}
     for _, npc in ipairs(world.npcs or {}) do
@@ -1454,6 +1461,28 @@ return function(mod)
         if chosen[npc] and not isExcluded then
           if not npc.nightlifeSleeping then
             npc.frozen = true; npc.nightlifeSleeping = true
+            -- Natural sleep style: resolve at sleep time (Gen 1 parity)
+            pcall(function()
+              if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                local mapId = tostring(world.map.id or "")
+                local naturalResult
+                if not isIndoor(mapId, world.map) then
+                  naturalResult = 1
+                elseif mapId:upper():find("HOUSE", 1, true) then
+                  naturalResult = 3
+                else
+                  local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                  local h = 0
+                  for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                  naturalResult = (h < 80) and 2 or 0
+                end
+                npc.johtoLifeNaturalSleepStyle = naturalResult
+              end
+            end)
+            -- Snap px/py to grid (Gen 1 parity): centers sprite on cell
+            if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+              npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+            end
             if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
             local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
             npc.johtoLifeSleepAngle = sign * (math.pi / 2); npc.johtoLifeSleepSide = sign
@@ -1619,11 +1648,16 @@ return function(mod)
       if opt("sleeping_npcs") then
         local pct = math.floor(tonumber(opt("sleep_pct")) or 10)
         if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
-        local isNight = false
-        if type(world.timeOfDay) == "function" then
-          local ok, tod = pcall(function() return world:timeOfDay() end)
-          local t = ok and tostring(tod):upper() or ""
-          isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
+        -- Use game clock (world.tod), not host OS clock.
+        local t2 = tostring(world.tod or ""):upper()
+        local isNight = t2 == "NIGHT" or t2 == "NITE" or t2 == "MIDNIGHT"
+        if t2 == "" and type(world.timeOfDay) == "function" then
+          local ok, hr = pcall(function() return world:hour() end)
+          if ok and hr then
+            local ok2, tod = pcall(function() return world:timeOfDay(hr) end)
+            t2 = ok2 and tostring(tod):upper() or ""
+            isNight = t2 == "NIGHT" or t2 == "NITE" or t2 == "MIDNIGHT"
+          end
         end
 
         local candidates = {}
@@ -2638,6 +2672,12 @@ function isVoxelPresentation()
   local function resolveSleepStyle(npc)
     -- Accessories re-enabled (1.4.45)
     local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style == 5 then
+      -- Natural: resolved at sleep time (outdoor→tent, house→bed, else 80% bag/20% default)
+      local cached = npc.johtoLifeNaturalSleepStyle
+      if cached ~= nil then return cached end
+      return 1  -- Fallback: tent
+    end
     if style ~= 4 then return style end
     local cached = npc.kantoLifeRandomSleepStyle
     if cached == nil then
@@ -2701,20 +2741,32 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if untilAt <= now then return end
       local text = tostring(self._kantoLifeCollisionBubbleText or ":)")
       local G = love.graphics
-      G.push("all")
-      if scale and scale ~= 1 then G.scale(scale,scale) end
-      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
-      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
+      -- Gen 2: ox/oy are pre-calculated screen offsets (ox = -cam.x * s),
+      -- NOT camera coordinates. Mirror NPC:draw: translate(ox, oy), scale(s),
+      -- then draw in world pixels. (Engine: Npc.lua:838, World.lua:11382)
+      local px = (self.px ~= nil) and self.px or ((self.cellX or 0) * 16)
+      local py = (self.py ~= nil) and self.py or ((self.cellY or 0) * 16)
+      local s = tonumber(scale) or 1
       local font = G.getFont()
       local tw, th = font:getWidth(text), font:getHeight()
       local w, h = math.max(22, tw + 10), math.max(13, th + 5)
-      local x = px - (ox or 0) + 8 - w/2
-      local y = py - (oy or 0) - h - 4
+      G.push("all")
+      if scale == nil then
+        -- Legacy 2-arg path: ox/oy ARE camera coords (Gen 1 convention)
+        G.translate(-(ox or 0), -(oy or 0))
+      else
+        G.translate(ox or 0, oy or 0)
+        if s ~= 1 then G.scale(s, s) end
+      end
+      -- World-space anchor: centered, 16 world-px above foot (matches engine drawEmote)
+      local cx, cy = px + 8, py - 16
+      local x = math.floor(cx - w/2)
+      local y = math.floor(cy - h - 4)
       G.setColor(1,1,1,1); G.rectangle("fill",x,y,w,h,2,2)
       G.setColor(0.1,0.1,0.1,1); G.rectangle("line",x,y,w,h,2,2)
       G.polygon("fill",x+w/2-2,y+h,x+w/2+2,y+h,x+w/2,y+h+3)
       G.setColor(0.1,0.1,0.1,1)
-      G.print(text, px - (ox or 0) + 8 - tw/2, y + (h-th)/2)
+      G.print(text, cx - tw/2, y + (h-th)/2)
       G.pop()
     end
 
@@ -2839,33 +2891,29 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local basePose = NPC.pose
         local travelSpriteCache = {}
         local function travelPokemonSprite(species)
+          -- Engine-proven pattern (World:breedmonSpriteDef): Gen 2 has no
+          -- named per-species overworld sprites (SPRITE_PIDGEY doesn't exist).
+          -- Pokemon overworld uses SPRITE_POKEMON ($80) indexed mechanism.
+          -- Use menu icons (gen2Icons) which exist for all 251 species.
           if type(species) ~= "string" or species == "" then return nil end
           if travelSpriteCache[species] then return travelSpriteCache[species] end
           local g = G()
           local data = g and g.data
-          local sprites = data and data.sprites or {}
-          local candidates = {species, "SPRITE_" .. species, "SPRITE_POKEMON_" .. species}
-          local pdef = data and data.pokemon and data.pokemon[species]
-          if type(pdef) == "table" then
-            for _, key in ipairs({"overworldSprite", "sprite", "fieldSprite", "owSprite"}) do
-              if pdef[key] then candidates[#candidates + 1] = pdef[key] end
-            end
-          end
-          local spriteId
-          for _, id in ipairs(candidates) do
-            if sprites[id] then spriteId = id; break end
-          end
-          if not spriteId then
-            local wanted = species:upper()
-            for id in pairs(sprites) do
-              local upper = tostring(id):upper()
-              if upper:find(wanted, 1, true) and not upper:find("BACK", 1, true) then
-                spriteId = id; break
-              end
-            end
-          end
-          local def = spriteId and sprites[spriteId]
-          if not def then return nil end
+          local icons = data and data.gen2Icons
+          local iconId = icons and icons.species and icons.species[species]
+          local entry = iconId and icons.icons and icons.icons[iconId]
+          if not (entry and entry.image) then return nil end
+          local def = {
+            id = "SPRITE_JOHTO_TRAVEL_MON",
+            image = entry.image,
+            frames = 2,
+            walker = false,
+            spriteType = "POKEMON_SPRITE",
+            palette = "PAL_OW_RED",
+            paletteId = 0,
+            species = species,
+            icon = iconId,
+          }
           local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
           if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
           local okSprite, sprite = pcall(Renderer.new, def)
@@ -2911,8 +2959,15 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       local Voxel3D = nil
       local VoxelScene = nil
 
-      local ba = type(mod.find) == "function" and mod.find("BATTLE_ART_VOXEL_GEN2") or nil
-      local V = ba and (ba.lib or (ba.exports and ba.exports.lib)) or nil
+      -- Try Battle Art Gen 2 first, then Potato Voxel (both support Gen 2).
+      local V = nil
+      if type(mod.find) == "function" then
+        for _, vid in ipairs({ "BATTLE_ART_VOXEL_GEN2", "potato_voxel" }) do
+          local ok, m = pcall(mod.find, vid)
+          local cand = ok and m and (m.lib or (m.exports and m.exports.lib)) or nil
+          if cand and type(cand.require) == "function" then V = cand; break end
+        end
+      end
       if V and type(V.require) == "function" then
         Voxel3D = V.require("Voxel3D")
         VoxelScene = V.require("VoxelScene")

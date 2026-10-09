@@ -3944,35 +3944,36 @@ function putToSleep(npc)
               -- scale so 12px = 12 world units (matches NPC scale).
               -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
               -- Match engine/Battle Art: project FOOT (ground level),
-              -- ENGINE-FAITHFUL VOXEL BUBBLE PROJECTION (research-backed)
-              -- Voxel3D.project returns 3D-pass canvas px (supersampled by
-              -- AntiAlias.factor()); `out` is the AntiAlias-resolved canvas
-              -- (display px). Convert, then draw under engine-equivalent scale.
-              local aa = 1
-              pcall(function()
-                local AALib = lib.require("AntiAlias")
-                if AALib and type(AALib.factor) == "function" then
-                  aa = tonumber(AALib.factor()) or 1
+              -- VOXEL BUBBLE PROJECTION: derive scale from reality, not API.
+              -- Voxel3D.project returns supersampled px; `out` is display px.
+              -- AntiAlias.factor() was unreliable (returned 1 when actual was 2,
+              -- doubling coordinates and pinning bubbles to screen bottom).
+              -- Use Voxel3D.size() (actual supersampled dims) vs out dims.
+              local sxRatio, syRatio = 1, 1
+              if type(Voxel3D.size) == "function" then
+                local va, vb = Voxel3D.size()
+                va, vb = tonumber(va) or 0, tonumber(vb) or 0
+                if va > 0 and vb > 0 then
+                  local cw, ch = nil, nil
+                  pcall(function() cw, ch = out:getDimensions() end)
+                  cw, ch = tonumber(cw) or 0, tonumber(ch) or 0
+                  if cw > 0 and ch > 0 then
+                    sxRatio, syRatio = cw / va, ch / vb
+                  end
                 end
-              end)
-              if not (aa >= 1) then aa = 1 end
-              local wscale = tonumber(ctx and ctx.scale) or 1
-              if not (wscale > 0) then wscale = 1 end
+              end
               local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
               if okP and type(sx) == "number" and type(sy) == "number" then
-                -- Foot anchor in `out` canvas px:
-                local ox, oy = sx / aa, sy / aa
-                -- Viewport clamp in OUT's pixel space (not window points!)
+                local ox, oy = sx * sxRatio, sy * syRatio
+                -- Skip off-screen projections (don't clamp to edge).
                 local vwo, vho = nil, nil
                 pcall(function() vwo, vho = out:getDimensions() end)
                 vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
-                if vwo > 16 and vho > 16 then
-                  if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
-                  if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
+                local offscreen = vwo > 16 and vho > 16 and
+                  (ox < -50 or ox > vwo + 50 or oy < -50 or oy > vho + 50)
+                if not offscreen then
+                  drawCollisionBubble(npc, ox, oy - 150, 1)
                 end
-                -- Draw in display pixels directly. Bubble 150px above
-                -- the projected foot. (Scale math was unreliable.)
-                drawCollisionBubble(npc, ox, oy - 150, 1)
               end
               end  -- end if ghOk else
             end
