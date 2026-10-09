@@ -3840,9 +3840,13 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- Voxel bubbles: match engine/Battle Art approach.
-        -- Project FOOT position (world coords), then offset in screen space.
-        -- Battle Art: Voxel3D.project(wx, 0, wy) — height handled in 2D.
+        -- Voxel bubbles: engine-faithful projection (research-backed fix).
+        -- ROOT CAUSES FIXED:
+        -- 1. Voxel3D.project returns supersampled coords (x AA factor);
+        --    out is the downsampled display canvas. Divide by AA.
+        -- 2. Old clamp used window points (3x smaller on iOS), pinning bubbles.
+        --    Now clamps in out's canvas pixels.
+        -- 3. Old drew at scale=1 (tiny). Now uses ctx.scale like the engine.
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -3938,21 +3942,38 @@ function putToSleep(npc)
               -- scale so 12px = 12 world units (matches NPC scale).
               -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
               -- Match engine/Battle Art: project FOOT (ground level),
-              -- then offset bubble in screen space above.
-              -- Battle Art: Voxel3D.project(wx, 0, wy)
+              -- ENGINE-FAITHFUL VOXEL BUBBLE PROJECTION (research-backed)
+              -- Voxel3D.project returns 3D-pass canvas px (supersampled by
+              -- AntiAlias.factor()); `out` is the AntiAlias-resolved canvas
+              -- (display px). Convert, then draw under engine-equivalent scale.
+              local aa = 1
+              pcall(function()
+                local AALib = lib.require("AntiAlias")
+                if AALib and type(AALib.factor) == "function" then
+                  aa = tonumber(AALib.factor()) or 1
+                end
+              end)
+              if not (aa >= 1) then aa = 1 end
+              local wscale = tonumber(ctx and ctx.scale) or 1
+              if not (wscale > 0) then wscale = 1 end
               local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
-              if okP and type(sx) == "number" and type(sy) == "number"
-                 and math.abs(sx) < 10000 and math.abs(sy) < 10000 then
-                -- Screen-space: bubble sits above the foot position
-                -- (engine fxEmote draws at ey = py - 20)
-                local bx, by = sx, sy - 28
-                -- Viewport clamp
-                local vw, vh = G.getDimensions()
-                if bx < 8 then bx = 8 end
-                if bx > vw - 8 then bx = vw - 8 end
-                if by < 8 then by = 8 end
-                if by > vh - 8 then by = vh - 8 end
-                drawCollisionBubble(npc, bx, by, 1)
+              if okP and type(sx) == "number" and type(sy) == "number" then
+                -- Foot anchor in `out` canvas px:
+                local ox, oy = sx / aa, sy / aa
+                -- Viewport clamp in OUT's pixel space (not window points!)
+                local vwo, vho = nil, nil
+                pcall(function() vwo, vho = out:getDimensions() end)
+                vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
+                if vwo > 16 and vho > 16 then
+                  if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
+                  if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
+                end
+                -- Draw in world-px units under engine-equivalent scale;
+                -- bubble tail ~26 world px above the foot (matches 2D).
+                G.push()
+                G.scale(wscale, wscale)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 100, 1)
+                G.pop()
               end
               end  -- end if ghOk else
             end
