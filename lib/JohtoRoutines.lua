@@ -571,9 +571,8 @@ return function(ctx)
         if not okCan or not can then goto next_dir end
       end
       if type(h.stepNow) == "function" then
-        -- Gold routine NPCs were left at an overly slow 86-frame step.
-        -- Use ~57 frames (86 / 1.5) for a 50% speed increase.
-        npc.stepFrames = 57
+        -- Normal walking speed: 18 was sprinting, 57 was slow motion.
+        npc.stepFrames = 32
         local okStep = pcall(h.stepNow, h, dir)
         if okStep then
           if c and c.path and #c.path > 0 then table.remove(c.path, 1) end
@@ -700,13 +699,13 @@ return function(ctx)
     return nil
   end
 
-  local function spawnReplacement(world, npc, door)
+  local function spawnReplacement(world, npc, door, exitedDoor) -- exitedDoor[4] is the warp destMap
     if not world or not world.map or not door or not mod or not mod.world then return false end
     -- Gen 3 behavior: the actor that reaches a doorway leaves the population,
     -- and the replacement enters from a DIFFERENT available doorway when one
     -- exists.  The previous Gen 1/2 implementation respawned at `door`, which
     -- made the same NPC appear to teleport back into the same threshold.
-    local replacementDoor = destinationFor(world, npc, door, "door")
+    local _isExit = exitedDoor and tostring(exitedDoor[4] or "") ~= "" and tostring(exitedDoor[4]):upper() ~= tostring(world.map.id or ""):upper(); if _isExit then local _id = npc.id; pcall(function() if _id then mod.world:removeNpc(_id) end end); if world.npcs then for _i = #world.npcs, 1, -1 do local _n = world.npcs[_i]; if _n == npc or (_id and _n and _n.id == _id) then table.remove(world.npcs, _i) end end end; if world.entities then for _i = #world.entities, 1, -1 do local _e = world.entities[_i]; if _e == npc or (_id and _e and _e.id == _id) then table.remove(world.entities, _i) end end end; npc.hidden = true; npc.visible = false; local _ed, _doors, _any = exitedDoor, {}, {}; for _, _d in ipairs(destinations or {}) do if not (tonumber(_d[1]) == tonumber(_ed[1]) and tonumber(_d[2]) == tonumber(_ed[2])) then _any[#_any + 1] = _d; if _d[3] == "door" then _doors[#_doors + 1] = _d end end end; local _pool = #_doors > 0 and _doors or _any; if #_pool > 0 then door = _pool[math.random(#_pool)] end end; local replacementDoor = _isExit and door or destinationFor(world, npc, door, "door")
     if not replacementDoor then return false end
     local d = npc.def or {}
     local poke = npc["johtoLifePokeAmbient"] == true or d["johtoLifePokeAmbient"] == true
@@ -1043,7 +1042,7 @@ return function(ctx)
           if ok and replaced then states[key] = nil; stateKeys[key] = nil; goto continue end
         end
         local replacement = destinationFor(world, npc, old, st.travelKind)
-        if replacement and spawnReplacement(world, npc, replacement) then
+        if replacement and spawnReplacement(world, npc, replacement, old) then
           states[key] = nil; stateKeys[key] = nil; goto continue
         end
         -- If a replacement cannot be created, keep the actor alive and send it
@@ -1069,7 +1068,7 @@ return function(ctx)
               -- primitive as a doorway exit (despawn here, a replacement pops
               -- at another exit), so the population stays stable.
               local replacement = destinationFor(world, npc, st.target, st.travelKind)
-              if replacement and spawnReplacement(world, npc, replacement) then
+              if replacement and spawnReplacement(world, npc, replacement, st.target) then
                 states[key] = nil; stateKeys[key] = nil; goto continue
               end
               st.phase = "wander"

@@ -1,4 +1,5 @@
 -- Kanto Life custom routines controller 0.8.96
+
 -- Controls only Kanto Life ambient actors. It uses Gen1Recomp's public NPC
 -- handle API and does not modify Battle Art, Porygonal, HGSS_SPRITES, or Terrarium.
 return function(ctx)
@@ -81,24 +82,243 @@ return function(ctx)
   -- Visual departure effect markers. The main controller's draw wrappers can
   -- use these for fancier effects; the routines themselves just need the
   -- timing. Fail-open: if nothing reads them, the NPC still despawns.
+  -- Forward declarations: startDepartEffect/startArriveEffect/teleportUnstick
+  -- (above) trigger the travel-animation functions defined further down.
+  -- Without these, Lua would resolve the names as nil globals: the pcall
+  -- animation triggers would silently never fire, and teleportUnstick's
+  -- direct startArriveEffect call would raise "attempt to call a nil value".
+  local npcTeleportOut, npcTeleportIn, npcFlyOut, npcFlyIn
+  local startArriveEffect
+
   local function startDepartEffect(npc, method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeDepartMethod = method
     npc._kantoLifeDepartUntil = now + 1.2
+    -- Trigger real animation (in addition to bubble cue).
+    if method == "teleport" then
+      pcall(npcTeleportOut, npc)
+    elseif method == "fly" then
+      pcall(npcFlyOut, npc)
+    end
     -- Show a cue bubble so the departure doesn't look like a pop.
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
-  local function startArriveEffect(npc, method)
+  -- Stuck recovery: teleport NPC to nearest walkable cell.
+  -- Called when blockedCount >= 3. Keeps the same NPC (no despawn/pop).
+  local function teleportUnstick(world, npc)
+    local map = world and world.map
+    if not map or type(map.isWalkableCell) ~= "function" then return false end
+    local cx, cy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    -- Spiral search: 5-15 cells away, find walkable unoccupied cell
+    for radius = 5, 15 do
+      for angle = 0, 7 do
+        local tx = cx + math.floor(radius * math.cos(angle * math.pi / 4) + 0.5)
+        local ty = cy + math.floor(radius * math.sin(angle * math.pi / 4) + 0.5)
+        if tx ~= cx or ty ~= cy then
+          local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
+          if ok and walk then
+            -- Check not occupied (simple: no other NPC at target)
+            local occupied = false
+            if world.npcs then
+              for _, other in ipairs(world.npcs) do
+                if other ~= npc and tonumber(other.cellX) == tx and tonumber(other.cellY) == ty then
+                  occupied = true
+                  break
+                end
+              end
+            end
+            if not occupied then
+              -- Teleport with visual cue
+              startDepartEffect(npc, "teleport")
+              npc.cellX, npc.cellY = tx, ty
+              if type(npc.px) == "number" then npc.px, npc.py = tx * 16, ty * 16 end
+              npc.targetX, npc.targetY = nil, nil
+              npc.moving = false
+              startArriveEffect(npc, "teleport")
+              return true
+            end
+          end
+        end
+      end
+    end
+    return false
+  end
+
+  startArriveEffect = function(npc, method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeArriveMethod = method
     npc._kantoLifeArriveUntil = now + 1.2
+    -- Trigger real animation (in addition to bubble cue).
+    if method == "teleport" then
+      pcall(npcTeleportIn, npc)
+    elseif method == "fly" then
+      pcall(npcFlyIn, npc)
+    end
     -- Show a cue bubble so the arrival doesn't look like a pop.
     local cue = method == "fly" and "vv" or method == "teleport" and "**" or "!"
-    npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
+
+  -- Random flying Pokémon species for fly animation.
+  -- User requirement: real bird/flying Pokémon (legendaries OK), not SPRITE_BIRD.
+  local flyingSpeciesCache = nil
+  local function randomFlyingSpecies()
+    if flyingSpeciesCache and #flyingSpeciesCache > 0 then
+      return flyingSpeciesCache[math.random(#flyingSpeciesCache)]
+    end
+    -- Try to get game data (set by KantoMain)
+    local gd = _G._kantoLifeGameData
+    local data = gd and gd.pokemon
+    if type(data) ~= "table" then return nil end
+    local flyers = {}
+    for name, pdef in pairs(data) do
+      if type(pdef) == "table" and type(pdef.types) == "table" then
+        for _, ty in ipairs(pdef.types) do
+          if tostring(ty):upper() == "FLYING" then
+            flyers[#flyers + 1] = name
+            break
+          end
+        end
+      end
+    end
+    flyingSpeciesCache = flyers
+    if #flyers == 0 then return nil end
+    return flyers[math.random(#flyers)]
+  end
+
+  -- NPC Teleport OUT animation.
+  -- Gen 2: uses built-in npc:scriptTeleport("from").
+  -- Gen 1/3: custom spin + rise (mirrors Player:pose logic).
+  npcTeleportOut = function(npc)
+    -- Play sound
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
+    end)
+    -- Gen 2 built-in (verified: src/world/gen2/Npc.lua:391)
+    if type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "from")
+      return true
+    end
+    -- Gen 1/3 custom: spin + rise with random Psychic-type Pokemon
+    -- (GBC: player spins; we show Abra/Kadabra/Alakazam/etc.)
+    local psychicTypes = {"ABRA", "KADABRA", "ALAKAZAM", "DROWZEE", "HYPNO",
+                          "MIME_JR", "MR_MIME", "JYNX", "MEW", "MEWTWO"}
+    local psySpecies = psychicTypes[math.random(#psychicTypes)]
+    npc.kantoLifeTeleport = {
+      frame = 0,
+      total = 90,  -- 1.5s at 60fps (snappier than player's 135)
+      mode = "out",
+      origFacing = npc.facing or "down",
+      psySpecies = psySpecies,  -- Used by pose wrapper (never mutates npc.sprite)
+    }
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Teleport IN animation (arrival).
+  npcTeleportIn = function(npc)
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
+    end)
+    if type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "to")
+      return true
+    end
+    npc.kantoLifeTeleport = {
+      frame = 0,
+      total = 90,
+      mode = "in",
+      origFacing = npc.facing or "down",
+    }
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Fly OUT animation.
+  -- Hides NPC, shows random flying Pokémon sprite flying up and away.
+  npcFlyOut = function(npc)
+    local species = randomFlyingSpecies()
+    if not species then return false end
+    -- Play sound
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Fly") end
+    end)
+    -- Store fly state; KantoMain draw hook will render the bird
+    npc.kantoLifeFly = {
+      species = species,
+      frame = 0,
+      total = 90,  -- 1.5s
+      mode = "out",
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
+    }
+    npc.kantoLifeFlyHidden = true  -- Draw hook skips NPC, draws bird instead
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Fly IN animation (arrival).
+  npcFlyIn = function(npc)
+    local species = randomFlyingSpecies()
+    if not species then return false end
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Fly") end
+    end)
+    npc.kantoLifeFly = {
+      species = species,
+      frame = 0,
+      total = 90,
+      mode = "in",
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
+    }
+    npc.kantoLifeFlyHidden = true
+    npc.frozen = true
+    return true
+  end
+
+  -- Update teleport/fly animations. Called every frame before the frozen check.
+  -- Returns true if the NPC is currently animating (skip normal routine).
+  local function updateTravelAnimation(npc, dt)
+    -- Travel animations render at POSE TIME (NPC:pose wrapper in KantoMain).
+    -- This function ONLY advances frame counters. It never mutates
+    -- npc.sprite, npc.py, npc.px, or npc.facing. The pose wrapper reads
+    -- tp.frame/fl.frame and returns substituted sprite + Y offset.
+    local tp = npc.kantoLifeTeleport
+    if tp then
+      tp.frame = (tp.frame or 0) + 1
+      if tp.frame >= (tp.total or 90) then
+        npc.kantoLifeTeleport = nil
+        npc.kantoLifeTeleportY = nil  -- Clear legacy side-channel
+        npc.frozen = false
+        if tp.mode == "out" then
+          npc._kantoLifeTravelHidden = true
+        end
+      end
+      return true  -- Animating, skip normal routine
+    end
+
+    local fl = npc.kantoLifeFly
+    if fl then
+      fl.frame = (fl.frame or 0) + 1
+      if fl.frame >= (fl.total or 90) then
+        npc.kantoLifeFly = nil
+        npc.frozen = false
+        if fl.mode == "out" then
+          npc._kantoLifeTravelHidden = true
+        end
+      end
+      return true  -- Animating, skip normal routine
+    end
+
+    return false  -- Not animating
   end
 
   local DIRS = {
@@ -232,7 +452,9 @@ return function(ctx)
 
   local function eligible(npc)
     if not isKantoSpawn(npc) then return false end
-    if npc.hidden or npc.frozen or npc.nightlifeSleeping or npc.dsShelter
+    -- RESEARCH FIX: Don't exclude frozen NPCs (they're just talking).
+    -- The update loop skips stepping for frozen NPCs, preserving routine state.
+    if npc.hidden or npc.nightlifeSleeping or npc.dsShelter
        or npc.kantoLifeSleeping or npc.johtoLifeSleeping or npc.sleeping then return false end
     if npc._kantoServiceTraffic then return false end
     if npc.kantoLifeWaterBound or (npc.def and npc.def.kantoLifeWaterBound) then return false end
@@ -464,7 +686,13 @@ return function(ctx)
     st.wanderTarget = nil
     st.localTarget = nil
     st.localWait = 0
-    st.localRoamRadius = 18
+    st.localRoamRadius = 70  -- 3x area (was 40)
+    -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
+    -- They use wanderTarget() but never despawn at doors.
+    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area)
+    local d2 = npc.def or {}
+    local isPoke2 = npc.kantoLifePokeAmbient or d2.kantoLifePokeAmbient
+    st.roamFar = isPoke2 or ((not traveling) and (math.random() < 0.3))
     st.blockedTime = 0
     st.blockedCount = 0
     st.travelKind = pickTravelKind(npc, world or lastWorld)
@@ -522,9 +750,23 @@ return function(ctx)
            and not seen[k] and not occupied[k] then
           local ok, walkable = pcall(map.isWalkableCell, map, nx, ny)
           if ok and walkable then
-            seen[k] = true
-            parent[k] = {x=x, y=y, dir=d[3]}
-            qx[#qx+1], qy[#qy+1] = nx, ny
+            -- Don't path THROUGH doors (unless the door is the target).
+            -- Prevents NPCs from blocking doorways.
+            local isDoor = false
+            if nx ~= tx or ny ~= ty then
+              if type(map.warpAtCell) == "function" then
+                local wok, wv = pcall(map.warpAtCell, map, nx, ny)
+                isDoor = wok and wv ~= nil
+              elseif type(map.warpAt) == "function" then
+                local wok, wv = pcall(map.warpAt, map, nx, ny)
+                isDoor = wok and wv ~= nil
+              end
+            end
+            if not isDoor then
+              seen[k] = true
+              parent[k] = {x=x, y=y, dir=d[3]}
+              qx[#qx+1], qy[#qy+1] = nx, ny
+            end
           else
             -- The neighbor may be a ledge tile: the traversable node is the
             -- 2-away landing cell when the hop pattern matches.
@@ -540,7 +782,8 @@ return function(ctx)
           end
         end
       end
-      if #qx > 5000 then break end
+      -- Raised for 3x area: covers ~d=63 in open terrain (was 5000)
+      if #qx > 20000 then break end  -- Increased for Pokemon long-range (was 8000)
     end
     if not seen[goalKey] then return nil end
     local rev, k = {}, goalKey
@@ -621,7 +864,9 @@ return function(ctx)
         -- stepNow uses the actor's current step timing; set it before the
         -- step, never after. The old post-step 43-frame override made Gen1
         -- appear to take a few steps and then stall.
-        npc.stepFrames = 16
+        
+        -- Match Gold's normal walking speed (32). 16 was sprinting.
+        npc.stepFrames = 32
         local okStep = pcall(h.stepNow, h, dir)
         if okStep then
           local okMoving, moving = false, false
@@ -799,9 +1044,9 @@ return function(ctx)
     npc.hidden = true; npc.visible = false
   end
 
-  local function spawnReplacement(world, npc, door)
+  local function spawnReplacement(world, npc, door, exitedDoor) -- exitedDoor[4] is the warp destMap
     if not world or not world.map or not door or not mod or not mod.world then return false end
-    local spawn = replacementSpawnCell(world, door)
+    local _isExit = exitedDoor and tostring(exitedDoor[4] or "") ~= "" and tostring(exitedDoor[4]):upper() ~= tostring(world.map.id or ""):upper(); if _isExit then removeAmbient(world, npc); local _rd = destinationFor(world, npc, exitedDoor, "door"); if _rd then door = _rd end end; local spawn = replacementSpawnCell(world, door)
     if not spawn then return false end
     local d = npc.def or {}
     local poke = npc.kantoLifePokeAmbient == true or d.kantoLifePokeAmbient == true
@@ -851,9 +1096,19 @@ return function(ctx)
     -- Move in a broad local area, but never use the original anchor as a
     -- destination. The next target is selected from the actor's current cell,
     -- so successful movement naturally carries the actor away from spawn.
-    for _ = 1, 40 do
-      local tx = cx + math.random(-18, 18)
-      local ty = cy + math.random(-18, 18)
+    -- RESEARCH FIX: Expanded from ±18 to ±40 for far-distance travel
+    -- (user requirement: routines should travel far, not small squares)
+    -- 3x AREA: ±70 (140x140=19,600 cells vs 80x80=6,400)
+    -- User requirement: routines cover 3x as much area
+    -- POKEMON: ±200 (400x400=160,000 cells, ~8x human range)
+    local d = npc.def or {}
+    local isPoke = npc.kantoLifePokeAmbient or d.kantoLifePokeAmbient
+    local pokeRadius = 200
+    local attempts = isPoke and 60 or 40
+    for _ = 1, attempts do
+      local radius = isPoke and pokeRadius or ((st and st.localRoamRadius) or 70)
+      local tx = cx + math.random(-radius, radius)
+      local ty = cy + math.random(-radius, radius)
       if tx ~= cx or ty ~= cy then
         local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
         local warp = false
@@ -875,7 +1130,15 @@ return function(ctx)
   local function refresh(world, force)
     -- pcall: wild mods may modify map structure, breaking destination building.
     local ok, dests = pcall(buildDestinations, world)
-    destinations = ok and dests or {}
+    if not ok then
+      -- Log the error so we can diagnose Wilds incompatibility
+      if mod and mod.log then
+        pcall(function() mod.log:warn("Kanto Life routines: buildDestinations failed: %s", tostring(dests)) end)
+      end
+      destinations = {}
+    else
+      destinations = dests
+    end
     lastWorld = world
     local pct = optionPct()
     local candidates = {}
@@ -885,12 +1148,17 @@ return function(ctx)
       if ok and isEligible then candidates[#candidates + 1] = npc end
     end
     table.sort(candidates, function(a,b)
-      local ha, hb = hash(a), hash(b)
-      if ha == hb then return actorKey(a) < actorKey(b) end
+      local okA, ha = pcall(hash, a)
+      local okB, hb = pcall(hash, b)
+      ha, hb = okA and ha or 0, okB and hb or 0
+      if ha == hb then
+        local okKa, ka = pcall(actorKey, a)
+        local okKb, kb = pcall(actorKey, b)
+        return (okKa and ka or "") < (okKb and kb or "")
+      end
       return ha < hb
     end)
-    local wmap = world and world.map
-    local indoorNow = isIndoor(wmap and tostring(wmap.id or "") or "", wmap)
+    local indoorNow = isIndoor(tostring(world.map and world.map.id or ""), world.map)
     local desired = indoorNow and #candidates or math.ceil(#candidates * pct / 100)
     if not indoorNow then
       if pct <= 0 then desired = 0 elseif pct >= 100 then desired = #candidates end
@@ -998,18 +1266,31 @@ return function(ctx)
           if npc.cellX == st.target[1] and npc.cellY == st.target[2] then
             st.wait = (st.wait or 0) - (dt or 0)
             if st.wait <= 0 then
-              if st.phase == "out" then
-                local ax, ay = anchor(npc); st.phase = "home"; st.target = {ax, ay}; st.wait = 3
+              -- No anchor: pick new random destination (user: not anchored to a point)
+              -- Routines still run; NPCs just don't return to spawn.
+              -- Sleep is unaffected (separate system via scheduleWalker).
+              local t = agendaTarget(world, npc)
+              if t then
+                st.phase = "out"; st.target = {t[1],t[2]}; st.wait = 0
               else
-                local t = agendaTarget(world, npc)
-                if t then st.phase = "out"; st.target = {t[1],t[2]}; st.wait = 0 else st.phase = "home"; st.target = {anchor(npc)} end
+                local wx, wy = localWanderTarget(world, npc)
+                if wx and wy then
+                  st.phase = "out"; st.target = {wx, wy}; st.wait = 0
+                else
+                  -- No valid target: wait and retry (don't break routine)
+                  st.wait = 5
+                end
               end
             end
           else
             local bx, by = npc.cellX, npc.cellY
             if not npc.moving then stepToward(world, npc, st.target[1], st.target[2]) end
             if bx == npc.cellX and by == npc.cellY then st.stuck = (st.stuck or 0) + 1 else st.stuck = 0 end
-            if st.stuck > 45 then st.target = {anchor(npc)}; st.phase = "home"; st.stuck = 0 end
+            if st.stuck > 45 then
+              local wx, wy = localWanderTarget(world, npc)
+              if wx and wy then st.target = {wx, wy} end
+              st.phase = "out"; st.stuck = 0
+            end
           end
         end
       end
@@ -1087,6 +1368,16 @@ return function(ctx)
 
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
+      -- Update travel animations (teleport/fly) before frozen check.
+      -- Animating NPCs have frozen=true but need their animation updated.
+      if npc then
+        local animating = false
+        pcall(function() animating = updateTravelAnimation(npc, dt) end)
+        if animating then goto continue end
+      end
+      -- RESEARCH FIX: Skip frozen NPCs (talking) without deleting state.
+      -- They'll resume their routine when unfrozen.
+      if npc and npc.frozen then goto continue end
       -- pcall: the NPC may have been removed/modified by another mod.
       local ok, isEligible = pcall(eligible, npc)
       if not npc or not ok or not isEligible then
@@ -1102,11 +1393,18 @@ return function(ctx)
           st.localWait = 0
         end
         if not st.localTarget then
-          local tx, ty = localWanderTarget(world, npc)
+          -- RESEARCH FIX: roamFar NPCs use map-wide wanderTarget()
+          local tx, ty
+          if st.roamFar then
+            local wt = wanderTarget(world, npc)
+            if wt then tx, ty = wt[1], wt[2] end
+          else
+            tx, ty = localWanderTarget(world, npc)
+          end
           if tx and ty then st.localTarget = {tx, ty} end
         end
         if st.localTarget and not npc.moving then
-          if not stepToward(world, npc, st.localTarget[1], st.localTarget[2]) then
+          if not stepToward(world, npc, st.localTarget[1], st.localTarget[2]) then          
             st.localTarget = nil
             st.localWait = 0
           end
@@ -1123,7 +1421,13 @@ return function(ctx)
         if st.wait <= 0 then
           -- Fly/teleport/surf NPCs depart in place with a visual effect
           -- instead of walking to a door or route exit.
+          -- Fallback: if travelKind was never set (e.g., state from before
+          -- the travel feature), pick it now.
           local kind = st.travelKind
+          if not kind then
+            kind = pickTravelKind(npc, world)
+            st.travelKind = kind
+          end
           if kind == "fly" or kind == "teleport" or kind == "surf" then
             st.phase = "special_depart"
             st.wait = 1.2
@@ -1186,8 +1490,9 @@ return function(ctx)
         if blocked then
           st.phase = "blocked_return"
           st.blockedDoor = {t[1], t[2], t[3], t[4]}
-          local ax, ay = anchor(npc)
-          st.target = {ax, ay}
+          -- No anchor: pick new wander target instead of returning to spawn
+          local wx, wy = localWanderTarget(world, npc)
+          if wx and wy then st.target = {wx, wy} end
           st.wait = 0
           st.repath = 0
           goto continue
@@ -1195,7 +1500,7 @@ return function(ctx)
         local old = {t[1], t[2], t[3], t[4]}
         if st.phase == "blocked_return" then
           local replacement = destinationFor(world, npc, st.blockedDoor, st.travelKind)
-          if replacement and spawnReplacement(world, npc, replacement) then
+          if replacement and spawnReplacement(world, npc, replacement, st.blockedDoor) then
             states[key] = nil; stateKeys[key] = nil; goto continue
           end
           st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil; st.target = nil; st.blockedDoor = nil
@@ -1206,7 +1511,7 @@ return function(ctx)
           if ok and replaced then states[key] = nil; stateKeys[key] = nil; goto continue end
         end
         local replacement = destinationFor(world, npc, old, st.travelKind)
-        if replacement and spawnReplacement(world, npc, replacement) then
+        if replacement and spawnReplacement(world, npc, replacement, old) then
           states[key] = nil; stateKeys[key] = nil; goto continue
         end
         -- If a replacement cannot be created, keep the actor alive and send it
@@ -1228,17 +1533,27 @@ return function(ctx)
             st.target = destinationFor(world, npc, st.target, st.travelKind)
             if st.blockedCount >= 3 then
               st.blockedCount = 0
-              -- Last resort: the NPC leaves by surf/fly. Uses the same paired
-              -- primitive as a doorway exit (despawn here, a replacement pops
-              -- at another exit), so the population stays stable.
-              local replacement = destinationFor(world, npc, st.target, st.travelKind)
-              if replacement and spawnReplacement(world, npc, replacement) then
-                states[key] = nil; stateKeys[key] = nil; goto continue
+              -- Stuck recovery: try teleport to nearby cell first (keeps same NPC).
+              -- Falls back to despawn/replacement if teleport fails.
+              if teleportUnstick(world, npc) then
+                st.phase = "wander"
+                st.wait = 1.0
+                st.wanderTarget = nil
+                st.target = nil
+                st.localTarget = nil
+              else
+                -- Last resort: the NPC leaves by surf/fly. Uses the same paired
+                -- primitive as a doorway exit (despawn here, a replacement pops
+                -- at another exit), so the population stays stable.
+                local replacement = destinationFor(world, npc, st.target, st.travelKind)
+                if replacement and spawnReplacement(world, npc, replacement, st.target) then
+                  states[key] = nil; stateKeys[key] = nil; goto continue
+                end
+                st.phase = "wander"
+                st.wait = 1.0
+                st.wanderTarget = nil
+                st.target = nil
               end
-              st.phase = "wander"
-              st.wait = 1.0
-              st.wanderTarget = nil
-              st.target = nil
             end
           elseif st.repath > 1.0 then
             st.repath = 0

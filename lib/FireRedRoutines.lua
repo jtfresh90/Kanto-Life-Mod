@@ -96,6 +96,13 @@ return function(ctx)
     else return "route" end
   end
 
+  -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)
+  local FLY_BIRD_GFX = { 116, 110, 133, 132, 114, 138, 136, 137, 144, 145 }
+  -- Psychic Pokemon for teleport (can learn Teleport): MEW=140, MEWTWO=139
+  local TELEPORT_PSYCHIC_GFX = { 140, 139 }
+  -- Spin order for teleport animation (matches engine SPIN_NEXT)
+  local SPIN_ORDER = { "down", "left", "up", "right" }
+
   local function startDepartEffect(npc, method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeFRDepartMethod = method
@@ -103,6 +110,96 @@ return function(ctx)
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+    -- Initialize travel animation state
+    npc._kantoLifeFRAnimT = 0
+    npc._kantoLifeFRAnimPhase = "spin"
+    if method == "teleport" then
+      -- Save original sprite for restoration (in case NPC returns)
+      npc._kantoLifeFROrigGfx = npc.graphicsId
+      npc._kantoLifeFROrigSprite = npc.sprite
+      -- Switch to Psychic Pokemon sprite (Abra-like: Mew/Mewtwo can Teleport)
+      local gfx = TELEPORT_PSYCHIC_GFX[math.random(#TELEPORT_PSYCHIC_GFX)]
+      pcall(function()
+        local GfxIds = require("src.core.game3.scripting.gfx_ids")
+        npc.graphicsId = gfx
+        npc.sprite = GfxIds.spriteFor(gfx)
+      end)
+      -- Play warp sound
+      pcall(function()
+        local Audio = require("src.core.game3.audio")
+        if Audio and Audio.playSe then Audio.playSe("SE_WARP_IN") end
+      end)
+    elseif method == "fly" then
+      -- Save original sprite
+      npc._kantoLifeFROrigGfx = npc.graphicsId
+      npc._kantoLifeFROrigSprite = npc.sprite
+      -- Switch to random bird Pokemon sprite
+      local gfx = FLY_BIRD_GFX[math.random(#FLY_BIRD_GFX)]
+      pcall(function()
+        local GfxIds = require("src.core.game3.scripting.gfx_ids")
+        npc.graphicsId = gfx
+        npc.sprite = GfxIds.spriteFor(gfx)
+      end)
+      -- Play fly sound
+      pcall(function()
+        local Audio = require("src.core.game3.audio")
+        if Audio and Audio.playSe then Audio.playSe("SE_M_FLY") end
+      end)
+    end
+  end
+
+  -- Per-frame animation update for departing NPCs.
+  -- Returns true when animation is complete.
+  local function updateDepartAnimation(npc, dt)
+    local method = npc._kantoLifeFRDepartMethod
+    if not method then return true end
+    npc._kantoLifeFRAnimT = (npc._kantoLifeFRAnimT or 0) + dt
+    local t = npc._kantoLifeFRAnimT
+
+    if method == "teleport" then
+      -- Phase 1 (0-0.6s): spin (cycle facing)
+      -- Phase 2 (0.6-1.2s): rise up and fade
+      if t < 0.6 then
+        local idx = math.floor(t / 0.15) % 4 + 1
+        npc.facing = SPIN_ORDER[idx]
+      else
+        local riseT = (t - 0.6) / 0.6
+        -- Rise: spriteYOffset goes negative (up on screen)
+        npc.spriteYOffset = -math.floor(riseT * riseT * 40)
+        -- Spin faster during rise
+        local idx = math.floor(t / 0.08) % 4 + 1
+        npc.facing = SPIN_ORDER[idx]
+      end
+    elseif method == "fly" then
+      -- Phase 1 (0-0.4s): crouch/hop (brief pause as bird appears)
+      -- Phase 2 (0.4-1.2s): rise up into sky
+      if t >= 0.4 then
+        local riseT = (t - 0.4) / 0.8
+        -- Accelerating rise
+        npc.spriteYOffset = -math.floor(riseT * riseT * 60)
+      end
+    elseif method == "surf" then
+      -- Surf: no special animation, bubble cue is sufficient
+      -- (NPC walks to water in a future enhancement)
+    end
+    return t >= 1.2
+  end
+
+  -- Restore original NPC sprite after travel animation (if NPC persists)
+  local function restoreDepartSprite(npc)
+    if npc._kantoLifeFROrigGfx then
+      pcall(function()
+        npc.graphicsId = npc._kantoLifeFROrigGfx
+        if npc._kantoLifeFROrigSprite then
+          npc.sprite = npc._kantoLifeFROrigSprite
+        end
+      end)
+      npc._kantoLifeFROrigGfx = nil
+      npc._kantoLifeFROrigSprite = nil
+    end
+    npc.spriteYOffset = 0
+    npc._kantoLifeFRAnimT = nil
+    npc._kantoLifeFRAnimPhase = nil
   end
 
   local function actorKey(npc)
@@ -667,9 +764,10 @@ return function(ctx)
       return st
     end
 
-    -- forcedRoutine is true or nil (see callers); keep nil (not false) so the
-    -- branch below can apply the force flag or the travel-percentage roll.
-    local travel = ambient and forcedRoutine or nil
+    -- forcedRoutine is true (explicit) or nil (roll it). Never default to
+    -- false here: ambient NPCs spawned after the per-map rebuild() would
+    -- otherwise never receive a routine and would wander forever.
+    local travel = ambient and forcedRoutine
     if ambient and travel == nil then
       if npc._kantoLifeFRForceRoutine then
         travel = true
@@ -690,6 +788,7 @@ return function(ctx)
     st.ambientRoutine = ambient and st.routine
     if st.routine then
       npc._kantoLifeFRTravelKind = pickTravelKind(npc, world)
+      st.travelKind = npc._kantoLifeFRTravelKind
       npc.movement = "STAY"
       npc.range = "DOWN"
       if npc.def then npc.def.movement = "STAY"; npc.def.range = "DOWN" end
@@ -830,11 +929,21 @@ return function(ctx)
           startDepartEffect(npc, kind)
           return
         end
+        -- Update travel animation each frame (spin/rise for teleport, rise for fly)
+        pcall(updateDepartAnimation, npc, dt)
         st.specialDepartWait = (st.specialDepartWait or 0) - dt
         if st.specialDepartWait <= 0 then
           npc._kantoLifeFRRoutinePhase = "exit_special"
+          -- Hide NPC during final fade (teleport/fly rise off-screen)
+          if kind == "teleport" or kind == "fly" then
+            npc.visible = false
+            npc.hidden = true
+          end
           if exitAmbient(world, npc, st) then return end
-          -- Fallback: exit failed, resume wandering.
+          -- Fallback: exit failed, restore NPC and resume wandering.
+          npc.visible = true
+          npc.hidden = false
+          pcall(restoreDepartSprite, npc)
           st.specialDepartStarted = nil
           st.wanderTime = 0
           npc._kantoLifeFRDepartMethod = nil

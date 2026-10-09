@@ -334,7 +334,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 }, { "Natural", 5 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -352,6 +352,7 @@ return function(mod)
     { key = "exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
     { key = "exp_companions", type = "toggle", label = "COMPANIONS", default = true },
     { key = "exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
+    { key = "debug_log", type = "toggle", label = "VIEW DEBUG LOG", default = false },
   })
 
   local function opt(key)
@@ -582,6 +583,25 @@ return function(mod)
     return nil
   end
 
+  -- Get a Pokemon sprite OBJECT (for pose-time travel animations).
+  -- Returns cached sprite table, or nil. Never assigns to npc.sprite.
+  local pokeSpriteCache = {}
+  local function getPokeSpriteObject(species)
+    if not species then return nil end
+    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    local spriteId = resolvePokeSprite(species)
+    if not spriteId then return nil end
+    local sprites = game and game.data and game.data.sprites
+    local spriteDef = sprites and sprites[spriteId]
+    if not spriteDef then return nil end
+    local ok, SR = pcall(require, "src.render.SpriteRenderer")
+    if not (ok and SR and SR.new) then return nil end
+    local ok2, spriteObj = pcall(SR.new, spriteDef)
+    if not (ok2 and spriteObj) then return nil end
+    pokeSpriteCache[species] = spriteObj
+    return spriteObj
+  end
+
   local function playSpeciesCry(species)
     pcall(function()
       if not species then return end
@@ -752,11 +772,29 @@ return function(mod)
     return n
   end
 
-  -- Pokemon ambient NPCs use their OWN count; human EXTRA NPC COUNT never drives them.
+  local function wildSpawnModActive() if not mod then return false end; local knownIds = { "overworld_wild_spawns", "wilds_of_kanto", "wilds_of_kanto_revival", "wild_skies", "untamed_hoenn", "untamed_tohoj", "untamed_advance", "wild_followers", } if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); for _, known in ipairs(knownIds) do if string.find(id, known, 1, true) then return true end end end end end return false end -- Pokemon ambient NPCs use their OWN count; human EXTRA NPC COUNT never drives them.
+  -- Celadon Living District (by 1Jamie) has its own ambient NPC system for Celadon City.
+  -- When active, Kanto Life skips spawning in Celadon to avoid conflicts.
+  local function celadonLivingDistrictActive() if not mod then return false end; if mod.list and type(mod.list) == "function" then local ok, list = pcall(mod.list); if ok and type(list) == "table" then for _, m in ipairs(list) do local id = (type(m) == "table" and (m.id or m.name)) or tostring(m); id = string.lower(tostring(id)); if string.find(id, "celadon", 1, true) and string.find(id, "living", 1, true) then return true end end end end return false end
+  local function isCeladonMap(mapId) if not mapId then return false end; local id = string.upper(tostring(mapId)); return id:find("CELADON", 1, true) ~= nil end
   local function pokeTargetCount(mapId, map)
     if not opt("poke_npcs") then return 0 end
-    if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map)) then return 0 end
-    local n = math.floor(tonumber(opt("poke_npc_count")) or 0)
+    local isOutdoor = isTown(mapId) or isRoute(mapId)
+    local indoor = isIndoor(mapId, map)
+    -- Fallback: small maps (<30x30) are likely building interiors
+    -- (isIndoor misses some like POWER_PLANT or custom interiors)
+    if not isOutdoor and not indoor then
+      local w = map and (map.widthCells or map.width or 0) or 0
+      local h = map and (map.heightCells or map.height or 0) or 0
+      if w > 0 and h > 0 and w < 30 and h < 30 then
+        indoor = true
+      else
+        return 0
+      end
+    end
+    local n = math.floor(tonumber(opt("poke_npc_count")) or 0); if wildSpawnModActive() then n = math.floor(n / 2) end
+    -- Indoors: cap at 3 (houses are small)
+    if indoor and not isOutdoor then n = math.min(n, 3) end
     if n < 0 then n = 0 end
     if n > 50 then n = 50 end
     return n
@@ -850,11 +888,21 @@ return function(mod)
   end
 
   local function nearWarp(map, x, y)
+    -- 5-cell exclusion zone around doors (user: don't block doors).
+    -- In small interiors (<30x30), only check the exact cell:
+    -- a 5-cell radius would cover the entire house, blocking all sleep.
     if not map then return false end
-    if map:warpAtCell(x, y) then return true end
-    for dx = -1, 1 do
-      for dy = -1, 1 do
-        if not (dx == 0 and dy == 0) and map:warpAtCell(x + dx, y + dy) then
+    local w = map.widthCells or map.width or 0
+    local h = map.heightCells or map.height or 0
+    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
+    if isSmallInterior then
+      local ok, isWarp = pcall(function() return map:warpAtCell(x, y) end)
+      return ok and isWarp or false
+    end
+    for dx = -5, 5 do
+      for dy = -5, 5 do
+        local ok, isWarp = pcall(function() return map:warpAtCell(x + dx, y + dy) end)
+        if ok and isWarp then
           return true
         end
       end
@@ -894,7 +942,14 @@ return function(mod)
     local ok, walk = pcall(function() return map:isWalkableCell(x, y) end)
     if not ok or not walk then return false end
     if isWaterCell(map, x, y) then return false end
-    if nearWarp(map, x, y) then return false end
+    -- Never spawn ON a warp, but allow NEAR warps in small interiors
+    -- (houses are tiny; the exclusion zone covers too much)
+    local warpOk, isWarp = pcall(function() return map:warpAtCell(x, y) end)
+    if warpOk and isWarp then return false end
+    local w = map.widthCells or map.width or 0
+    local h = map.heightCells or map.height or 0
+    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
+    if not isSmallInterior and nearWarp(map, x, y) then return false end
     return true
   end
 
@@ -1188,6 +1243,9 @@ return function(mod)
     if not map or (map.id and map.id ~= mapId) then
       if ow.map and ow.map.id == mapId then map = ow.map else return end
     end
+    -- Note: Celadon Living District compatibility is handled via NPC flag isolation.
+    -- Kanto Life only affects NPCs with kantoLifeAmbient flags; Celadon Living
+    -- District's NPCs are untouched. Both mods can spawn in Celadon City.
 
     local function syncKind(kind, want, spawnOne)
       local have = collectLiveAmbient(ow, kind)
@@ -1538,6 +1596,38 @@ return function(mod)
 
   mod.events:on("mod.options_changed", function(payload)
     if not payload or payload.mod ~= mod.id then return end
+    -- DEBUG LOG: Show log in text box when user selects "View Log"
+    if payload.key == "debug_log" and tonumber(payload.value) == 1 then
+      pcall(function()
+        local text = table.concat(debugLogBuffer, "\n")
+        if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
+        -- Show in text box (user can screenshot)
+        local ow = mod.world and mod.world:overworld()
+        if ow then
+          -- Use pushText to display (truncate to fit)
+          local lines = {}
+          for line in text:gmatch("[^\n]+") do
+            table.insert(lines, line)
+            if #lines >= 15 then break end
+          end
+          local shortText = table.concat(lines, "\n")
+          if #lines == 15 then shortText = shortText .. "\n...(truncated)" end
+          -- Find pushText function
+          if type(pushText) == "function" then
+            local g = nil
+            pcall(function() g = G() end)
+            if g and ow then
+              pushText(g, ow, shortText, nil)
+            end
+          end
+        end
+        -- Reset the option back to Off
+        if mod.options and mod.options.set then
+          mod.options:set("debug_log", 0)
+        end
+      end)
+      return
+    end
     local ow = mod.world and mod.world:overworld()
     if not ow or not ow.map then return end
     local mapId = ow.map.id
@@ -1567,6 +1657,13 @@ return function(mod)
 
   -- Keep the large gameplay/menu implementation in its own function scope.
   -- Gen1Recomp/LuaJIT caps a single function at 200 local variables.
+  -- Expose game data for KantoRoutines (flying species lookup)
+  pcall(function()
+    if game and game.data then
+      _G._kantoLifeGameData = game.data
+    end
+  end)
+
   local function setupGameplay()
 
   -- ------- Native OPTIONS submenu (same pattern as Wilds of Kanto / overworld-spawn-mod)
@@ -1627,7 +1724,32 @@ return function(mod)
       elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
         -- true wilds only
       elseif shouldSleepNow(npc, isNight) then
-        pcall(putToSleep, npc)
+        -- Don't fall asleep in doorways/warps (blocks player)
+        local cx, cy = npc.cellX, npc.cellY
+        local blocking = false
+        if type(cx) == "number" and type(cy) == "number" and ow and ow.map then
+          pcall(function()
+            blocking = nearWarp(ow.map, math.floor(cx), math.floor(cy))
+          end)
+        end
+        if not blocking then
+          pcall(function()
+            if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and ow and ow.map then
+              local mapId = tostring(ow.map.id or "")
+              local nr
+              if not isIndoor(mapId, ow.map) then nr = 1
+              elseif string.upper(mapId):find("HOUSE", 1, true) then nr = 3
+              else
+                local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                local h = 0
+                for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                nr = (h < 80) and 2 or 0
+              end
+              npc.kantoLifeNaturalSleepStyle = nr
+            end
+          end)
+          pcall(putToSleep, npc)
+        end
       end
     end
   end
@@ -1909,11 +2031,11 @@ return function(mod)
           label = "SLEEP STYLE",
           stepper = true,
           kind = "number",
-          min = 0, max = 4, step = 1, stepFast = 1,
+          min = 0, max = 5, step = 1, stepFast = 1,
           current = math.floor(tonumber(opt("sleep_style")) or 0),
-          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(v) or 0)] or "Default" end,
-          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
-          apply = function(v) setOpt("sleep_style", math.max(0, math.min(4, math.floor(tonumber(v) or 0)))) end,
+          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(v) or 0)] or "Default" end,
+          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
+          apply = function(v) setOpt("sleep_style", math.max(0, math.min(5, math.floor(tonumber(v) or 0)))) end,
         },
         {
           label = "NPC TALK BUBBLES",
@@ -2159,8 +2281,9 @@ return function(mod)
         end
       end
       lastTalkNpc = nil
-      if isAmbientNpc(talker) then return baseTB(gameArg, text, onDone, opts) end
-      -- Ambient spawns already format their own text; skip re-prefix.
+      -- Ambient NPCs DO need name injection (they show raw internal IDs like
+      -- "VIRIDIAN CITY obj" without it). The textAlreadyNamed check above
+      -- prevents double-prefixing if they already formatted their own text.
       -- Pokemon-like with a real species field still get a name via storyDisplayName.
             if talker and isPokemonLike(talker) and not isPokeAmbient(talker) then
         return baseTB(gameArg, text, onDone, opts)
@@ -2330,7 +2453,16 @@ local nm = storyDisplayName(talker)
     local name = tostring(d.name or ""):upper()
     local text = tostring(d.text or ""):upper()
     if sprite:find("NURSE", 1, true) or name:find("NURSE", 1, true) then return true end
-    if sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true) then return true end
+    -- FIX: Only exclude STATIONARY clerks (behind counters). Wandering
+    -- clerk-sprite NPCs (ambient glasses guys) can sleep.
+    -- (npc.wanders is unreliable: engine sets it for turn-in-place NPCs,
+    -- mod never sets it true, and putToSleep mutates it to false.)
+    if sprite:find("CLERK", 1, true) or sprite:find("MART", 1, true) then
+      local d2 = npc.def or {}
+      local isAmbient = d2.kantoLifeAmbient or npc.kantoLifeAmbient
+      local isWalker = npc.steps == true
+      if not isAmbient and not isWalker then return true end
+    end
     if sprite:find("OAK", 1, true) or name:find("OAK", 1, true) then return true end
     if sprite:find("ELM", 1, true) or name:find("ELM", 1, true) then return true end
     if sprite:find("BILL", 1, true) or name:find("BILL", 1, true) then return true end
@@ -2346,8 +2478,10 @@ local nm = storyDisplayName(talker)
       end
     end
     if npc.pikachuFollower then return true end
-    if sprite:find("PIKACHU", 1, true) or sprite:find("POKEMON", 1, true)
-       or sprite:find("BALL", 1, true) or sprite:find("FOSSIL", 1, true) then
+    -- FIX: Allow ambient Pikachu to sleep. Follower already excluded above.
+    if (sprite:find("PIKACHU", 1, true) or sprite:find("POKEMON", 1, true)
+       or sprite:find("BALL", 1, true) or sprite:find("FOSSIL", 1, true))
+       and not isPokeAmbient(npc) then
       return true
     end
     if d.item or d.pokemon then return true end
@@ -2394,17 +2528,20 @@ local nm = storyDisplayName(talker)
     npc.kantoLifeSleepSchedule = (h < 3) and "day" or "night"
   end
   local function npcSleepHash(npc, isNight)
+    -- Use stable ID only (NOT position). NPCs wander, and including cellX/cellY
+    -- meant their hash changed as they moved, causing more than sleep_pct%
+    -- to fall asleep over time.
     local s = tostring(npc.id or "")
     if s == "" and npc.def then s = tostring(npc.def.name or npc.def.sprite or "") end
     if s == "" then
-      s = tostring(npc.cellX or npc.x or 0) .. "," .. tostring(npc.cellY or npc.y or 0)
+      -- Fallback: use spawn position (stable) not current position
+      s = tostring(npc.spawnX or npc.cellX or npc.x or 0) .. "," .. tostring(npc.spawnY or npc.cellY or npc.y or 0)
     end
     -- Include spawn index / ambient flag so mod NPCs distribute across the band
     if npc.kantoLifeAmbient then s = s .. ":amb" end
     if npc.kantoLifeName then s = s .. ":" .. tostring(npc.kantoLifeName) end
     local idn = 0
     for i = 1, #s do idn = idn + s:byte(i) * (i + 3) end
-    idn = idn + (tonumber(npc.cellX) or 0) * 7 + (tonumber(npc.cellY) or 0) * 13
     return (idn + (isNight and 0 or 97)) % 100
   end
   local function shouldSleepNow(npc, isNight)
@@ -3664,41 +3801,104 @@ local nm = storyDisplayName(talker)
   local function bakeSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
-    local curStyle = math.floor(tonumber(opt("sleep_style")) or 0)
-    if sprite._kantoSleepBaked then
-      -- Rebake if the sleep style changed (e.g. tent vs bed rotation).
-      if sprite._kantoSleepBakedStyle == curStyle then return true end
-      restoreSleepSprite(npc)
+    -- Fix shared sprite: each NPC gets its OWN sprite clone.
+    -- (Guys with glasses / Pokemon were sharing baked sprites.)
+    if sprite._kantoSleepBaked and sprite._kantoBakedFor ~= npc then
+      -- Sprite is shared and baked for someone else: clone it for this NPC
+      pcall(function()
+        fileLog(string.format("2D BAKE CLONE (shared, was for %s, now %s)",
+          tostring(sprite._kantoBakedForName or "?"), tostring(npc.name or "?")))
+      end)
+      -- Restore the shared sprite to original (for the other NPC)
+      if sprite._kantoOrigImage ~= nil then
+        sprite.image = sprite._kantoOrigImage
+        sprite.frames = sprite._kantoOrigFrames
+        sprite.frameCount = sprite._kantoOrigFrameCount
+        sprite.def = sprite._kantoOrigDef
+      end
+      sprite._kantoSleepBaked = nil
+      sprite._kantoBakedFor = nil
+      -- Clone sprite for this NPC
+      local cloneOk, clone = pcall(function()
+        local c = {}
+        for k, v in pairs(sprite) do c[k] = v end
+        return c
+      end)
+      if cloneOk and clone then
+        npc.sprite = clone
+        sprite = clone
+        -- Mark clone as owned by this NPC (will be baked below)
+      end
+    elseif sprite._kantoSleepBaked then
+      return true  -- Already baked for this NPC
     end
-    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
-    -- Tent style (1): NPC stays upright inside the tent; the tent prop is
-    -- drawn upright, so a 90-degree baked rotation would look wrong.
-    if curStyle == 1 then
-      angle = 0
-    end
-    local fw = tonumber(sprite.frameWidth) or 16
-    local fh = tonumber(sprite.frameHeight) or 16
+    -- Log bake attempt
+    pcall(function()
+      local fw = tonumber(sprite.frameWidth) or -1
+      fileLog(string.format("2D BAKE npc=%s fw=%d", tostring(npc.name or "?"), fw))
+    end)
+    -- HGSS: bake normally (early return broke 2D - sprite never baked).
+    -- The bake code below handles HGSS native images.
+    -- Find the sprite image via all known methods.
+    -- Log which sprite this is (for glasses/Pikachu identification).
     local ok, canvas = pcall(function()
       local img = sprite.image
+      local srcMethod = "sprite.image"
       if not img and type(sprite.resolveImage) == "function" then
         local ok2, r = pcall(function() return sprite:resolveImage() end)
-        if ok2 then img = r end
+        if ok2 and r then img = r; srcMethod = "resolveImage" end
       end
+      -- HGSS native image path
+      local isHgss = sprite.def and type(sprite.def.hgssNativeImage) == "string"
+        and sprite.def.hgssNativeImage ~= ""
+      if not img and isHgss then
+        local ok3, r3 = pcall(love.graphics.newImage, sprite.def.hgssNativeImage)
+        if ok3 and r3 then img = r3; srcMethod = "hgssNativeImage" end
+      end
+      -- Standard def.image via Assets
+      if not img and sprite.def and sprite.def.image and type(Assets) == "table"
+        and type(Assets.imageData) == "function" then
+        local ok4, r4 = pcall(function()
+          local d = Assets.imageData(sprite.def.image)
+          return d and love.graphics.newImage(d) or nil
+        end)
+        if ok4 and r4 then img = r4; srcMethod = "def.image" end
+      end
+      -- Log sprite identity for diagnosis
+      pcall(function()
+        local defName = "?"
+        if sprite.def then
+          defName = tostring(sprite.def.name or sprite.def.id or sprite.def.image or "?")
+        end
+        fileLog(string.format("2D BAKE ID npc=%s def=%s method=%s",
+          tostring(npc.name or "?"), defName, srcMethod))
+      end)
       if not img then return nil end
+      -- Use the NPC's current frame quad if available (not just frame 0)
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
-      local c = love.graphics.newCanvas(fw, fh)
+      local fw = tonumber(sprite.frameWidth) or 16
+      local fh = tonumber(sprite.frameHeight) or 16
+      local useFw, useFh = fw, fh
+      if isHgss then
+        useFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
+        useFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or useFw
+        quad = nil
+      end
+      local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
-      love.graphics.setBlendMode("alpha")
-      love.graphics.setColor(1, 1, 1, 1)
-      love.graphics.push()
-      love.graphics.translate(fw / 2, fh / 2)
+      love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray
+      -- Rotate 90 degrees (lying down)
+      local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+      love.graphics.push("all")
+      love.graphics.translate(useFw / 2, useFh / 2)
       love.graphics.rotate(angle)
-      love.graphics.translate(-fw / 2, -fh / 2)
+      love.graphics.translate(-useFw / 2, -useFh / 2)
       if quad then love.graphics.draw(img, quad, 0, 0)
       else love.graphics.draw(img, 0, 0) end
       love.graphics.pop()
+      love.graphics.setColor(1, 1, 1, 1)
       love.graphics.setCanvas(prev)
       return c
     end)
@@ -3708,7 +3908,9 @@ local nm = storyDisplayName(talker)
     sprite._kantoOrigFrameCount = sprite.frameCount
     sprite._kantoOrigDef = sprite.def
     sprite.image = canvas
-    local qok, q = pcall(love.graphics.newQuad, 0, 0, fw, fh, fw, fh)
+    -- Use canvas dimensions for quad (simplified)
+    local cw, ch = canvas:getDimensions()
+    local qok, q = pcall(love.graphics.newQuad, 0, 0, cw, ch, cw, ch)
     if qok then
       sprite.frames = { [0] = q }
       sprite.frameCount = 1
@@ -3722,7 +3924,8 @@ local nm = storyDisplayName(talker)
     newDef.walker = false
     sprite.def = newDef
     sprite._kantoSleepBaked = true
-    sprite._kantoSleepBakedStyle = math.floor(tonumber(opt("sleep_style")) or 0)
+    sprite._kantoBakedFor = npc
+    sprite._kantoBakedForName = npc and npc.name or "?"
     return true
   end
 
@@ -3954,45 +4157,240 @@ function putToSleep(npc)
   end
 
   local sleepAccessoryCache = {}
+  -- File-based logging for iOS (no console access)
+  -- In-memory debug log buffer (max 200 lines). User can copy via
+  -- Pause > Mods > Kanto Life > DEBUG LOG > Copy to Clipboard.
+  local debugLogBuffer = {}
+  local function fileLog(msg)
+    -- Always append to in-memory buffer
+    pcall(function()
+      local line = os.date("%H:%M:%S") .. " " .. tostring(msg)
+      table.insert(debugLogBuffer, line)
+      if #debugLogBuffer > 200 then
+        table.remove(debugLogBuffer, 1)
+      end
+    end)
+    pcall(function()
+      local line = os.date("%H:%M:%S") .. " " .. tostring(msg) .. "\n"
+      -- Write to lib/ folder of the installed mod (user-visible in Files app)
+      if mod and mod.path then
+        pcall(function()
+          local f = io.open(mod.path .. "/lib/kanto_debug.log", "a")
+          if f then f:write(line) f:close() return end
+        end)
+      end
+      -- Try mod_compat/kanto_life/ (engine-persisted, user-visible in Files app)
+      pcall(function()
+        local f = io.open("mod_compat/kanto_life/kanto_debug.log", "a")
+        if f then f:write(line) f:close() return end
+      end)
+      -- Fallback: LÖVE filesystem (iOS Documents/)
+      if love and love.filesystem then
+        pcall(function()
+          local f = love.filesystem.newFile("kanto_debug.log")
+          if f then
+            local ok = pcall(function() f:open("a") end)
+            if ok then
+              pcall(function() f:write(line) end)
+              pcall(function() f:close() end)
+              return
+            end
+          end
+        end)
+        -- Also try append mode directly
+        pcall(function() love.filesystem.append("kanto_debug.log", line) end)
+      end
+      -- Fallback: io.open in current directory
+      pcall(function()
+        local f = io.open("kanto_debug.log", "a")
+        if f then f:write(line) f:close() end
+      end)
+    end)
+  end
   local function sleepAccessoryImage(style)
     style = math.floor(tonumber(style) or 0)
     if style == 0 then return nil end
     local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
     local rel = names[style]; if not rel then return nil end
     if sleepAccessoryCache[rel] then return sleepAccessoryCache[rel] end
-    local path = rel
     local ok, img = false, nil
-    -- Prefer the mod asset cache API. This is the engine-supported way to
-    -- resolve bundled art and avoids a generation-specific 2D/voxel path
-    -- mismatch. Keep the old path fallback for older runtimes.
+    -- Try mod.assets.image first (engine-supported)
     if mod.assets and type(mod.assets.image) == "function" then
       ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
     end
+    -- Try multiple path formats for iOS compatibility
+    if (not ok or not img) and mod.assets and type(mod.assets.path) == "function" then
+      for _, p in ipairs({
+        mod.assets:path("assets/" .. rel),
+        mod.assets:path(rel),
+        "assets/" .. rel,
+        rel,
+      }) do
+        if p then
+          ok, img = pcall(love.graphics.newImage, p)
+          if ok and img then break end
+        end
+      end
+    end
+    -- Last resort: try direct paths
     if not ok or not img then
-      if mod.assets and type(mod.assets.path) == "function" then path = mod.assets:path("assets/" .. rel) end
-      ok, img = pcall(love.graphics.newImage, path)
+      for _, p in ipairs({"assets/" .. rel, rel, mod.path .. "/assets/" .. rel}) do
+        ok, img = pcall(love.graphics.newImage, p)
+        if ok and img then break end
+      end
     end
     if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
     return nil
   end
-  local function drawSleepAccessory(npc, sx, sy)
-    -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
-    -- Bed/tent/sleeping bag caused worse visuals; reverting to pre-accessory behavior.
-    do return end
+  -- Base (opaque) image for 3-layer rendering: drawn UNDER the NPC
+  local function sleepAccessoryBaseImage(style)
+    style = math.floor(tonumber(style) or 0)
+    if style == 0 or style == 1 then return nil end  -- No base for Default or Tent
+    local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
+    local rel = names[style]; if not rel then return nil end
+    if sleepAccessoryCache[rel] then return sleepAccessoryCache[rel] end
+    local ok, img = false, nil
+    if mod.assets and type(mod.assets.image) == "function" then
+      ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
+    end
+    if (not ok or not img) and mod.assets and type(mod.assets.path) == "function" then
+      for _, p in ipairs({mod.assets:path("assets/" .. rel), mod.assets:path(rel)}) do
+        if p then ok, img = pcall(love.graphics.newImage, p); if ok and img then break end end
+      end
+    end
+    if not ok or not img then
+      for _, p in ipairs({"assets/" .. rel, rel}) do
+        ok, img = pcall(love.graphics.newImage, p)
+        if ok and img then break end
+      end
+    end
+    if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
+    return nil
+  end
+  -- Resolve sleep style, handling Random (4) and Natural (5).
+  -- Natural: outdoor->tent, house->bed, other indoor->80% bag / 20% default.
+  local function resolveSleepStyle(npc)
+    -- Accessories re-enabled (1.4.45)
     local style = math.floor(tonumber(opt("sleep_style")) or 0)
-    if style == 0 then return end
-    local img = sleepAccessoryImage(style); if not img then return end
+    if style == 4 then
+      local cached = npc.kantoLifeRandomSleepStyle
+      if cached == nil then
+        cached = math.random(0, 3)
+        npc.kantoLifeRandomSleepStyle = cached
+      end
+      return cached
+    end
+    if style == 5 then
+      -- Natural: computed at sleep time (see putToSleep call site).
+      -- Falls back to tent if not yet computed.
+      local cached = npc.kantoLifeNaturalSleepStyle
+      if cached ~= nil then return cached end
+      return 1  -- Fallback: tent
+    end
+    return style
+  end
+  -- FRESH 2D accessory: single image drawn under NPC (simple, reliable).
+  -- (Old 3-layer base/overlay never worked in 2D; scratched.)
+  local function drawSleepAccessoryBase(npc, sx, sy)
+    if not npc.nightlifeSleeping then return end
+    local style = 0
+    pcall(function() style = resolveSleepStyle(npc) end)
+    if style == 0 or style == 1 then return end  -- No base for Default/Tent
+    local img = sleepAccessoryBaseImage(style)
+    if not img then return end
+    if sx == 0 and sy == 0 then return end
+    local iw, ih = img:getDimensions()
+    -- Draw centered on NPC, rotated to match lying-down sprite
+    -- CORRECTED: use angle (not hardcoded PI/2) to match overlay orientation.
+    -- (User: overlay was correct, base was flipped 180)
+    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+    -- RESEARCH FIX: Base and overlay share the SAME rotation (no +PI).
+    -- They are authored with identical layout, so identical transforms align them.
+    local cx, cy = sx + 8, sy + 8
+    love.graphics.push("all")
+    love.graphics.setColor(1,1,1,1)
+    love.graphics.translate(cx, cy)
+    love.graphics.rotate(angle)
+    love.graphics.translate(-iw/2, -ih/2)
+    love.graphics.draw(img, 0, 0)
+    love.graphics.pop()
+  end
+  -- Legacy 3-layer base (kept for reference, not used)
+  local function drawSleepAccessoryBase_OLD(npc, sx, sy)
+    if not npc.nightlifeSleeping then return end
+    -- Debug: show base coordinates
+    pcall(function()
+      if love and love.graphics then
+        love.graphics.push("all")
+        love.graphics.setColor(1, 1, 0, 1)
+        love.graphics.print(string.format("B:%.0f,%.0f", sx or 0, sy or 0), (sx or 0), (sy or 0) - 20)
+        love.graphics.pop()
+      end
+    end)
+    local style = resolveSleepStyle(npc)
+    if style == 0 or style == 1 then
+      fileLog("BASE skip: style=" .. tostring(style))
+      return
+    end
+    local img = sleepAccessoryBaseImage(style)
+    if not img then
+      fileLog("BASE skip: image nil for style=" .. tostring(style))
+      return
+    end
+    fileLog("BASE drawing: style=" .. tostring(style) .. " at " .. tostring(sx) .. "," .. tostring(sy))
+    if sx == 0 and sy == 0 then return end
     local iw, ih = img:getDimensions()
     local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
     local cx, cy = sx + 8, sy + 8
     love.graphics.push("all")
     love.graphics.setColor(1,1,1,1)
-    local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
-    love.graphics.translate(cx + shiftX, cy)
+    -- Center on NPC (no X shift). Head opening on same side as NPC head,
+    -- shifted slightly up (Joshua: "a little higher up on the NPC").
+    local shiftY = -4
+    love.graphics.translate(cx, cy + shiftY)
+    love.graphics.rotate(angle)
+    love.graphics.translate(-iw/2, -ih/2)
+    love.graphics.draw(img, 0, 0)
+    love.graphics.pop()
+  end
+  local function drawSleepAccessory(npc, sx, sy)
+    -- Accessories re-enabled (1.4.45): user requested sleeping sprites back
+    -- Only draw for sleeping NPCs
+    if not npc.nightlifeSleeping then
+      if mod.log then mod.log:warn("Kanto Life: drawSleepAccessory skipped, not sleeping") end
+      return
+    end
+    local style = 0
+    pcall(function() style = resolveSleepStyle(npc) end)
+    if style == 0 then return end
+    local img = sleepAccessoryImage(style)
+    if not img then return end
+    -- Use getScreenOrigin for accurate positioning (same as Zzz).
+    -- Falls back to sx, sy if not available.
+    local px = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
+    local py = npc.py or npc.y or ((npc.cellY or 0) * 16) or 0
+    -- sx, sy are already screen coords; but verify with getScreenOrigin if possible
+    -- (the caller passes psx, psy which may be 0,0 if position fields are missing)
+    if npc.sprite and type(npc.sprite.getScreenOrigin) == "function" then
+      -- We need camX, camY to call getScreenOrigin, but they're not passed.
+      -- For now, trust sx, sy but guard against (0,0).
+    end
+    -- Guard: if position is (0,0), the NPC position is unknown; skip to avoid
+    -- drawing at top-left corner.
+    if sx == 0 and sy == 0 then return end
+    local iw, ih = img:getDimensions()
+    local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+    local cx, cy = sx + 8, sy + 8
+    love.graphics.push("all")
+    love.graphics.setColor(1,1,1,1)
+    -- RESEARCH FIX: Same center as base (cx, cy). Head hole moved down 4px
+    -- in the asset itself, not via draw offset.
+    love.graphics.translate(cx, cy)
     if style ~= 1 then love.graphics.rotate(angle) end
     love.graphics.translate(-iw/2, -ih/2)
     love.graphics.draw(img, 0, 0)
     love.graphics.pop()
+    -- End accessory code
   end
   local function drawSleepTentOverlay(npc, sx, sy) return end
 
@@ -4025,7 +4423,7 @@ function putToSleep(npc)
     love.graphics.pop()
   end
 
-  local function drawCollisionBubble(npc, sx, sy)
+  local function drawCollisionBubble(npc, sx, sy, scale)
     if opt("npc_collision_bubbles") == false then return end
     local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
@@ -4033,10 +4431,14 @@ function putToSleep(npc)
     local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
     local G = love.graphics
     G.push("all")
+    scale = tonumber(scale) or 1
+    if scale ~= 1 then G.scale(scale, scale) sx, sy = sx / scale, sy / scale end
     local font = G.getFont and G.getFont() or nil
     local tw = font and font:getWidth(text) or (#text * 6)
-    local w, h = math.max(18, tw + 8), 12
-    local x, y = math.floor(sx - w/2), math.floor(sy - 14)
+    local th = font and font:getHeight() or 8
+    -- Dynamic height: fit text with padding (fixes overflow)
+    local w, h = math.max(18, tw + 10), math.max(14, th + 6)
+    local x, y = math.floor(sx - w/2), math.floor(sy - h - 4)
     G.setColor(1,1,1,1); G.rectangle("fill", x, y, w, h, 2, 2)
     G.setColor(0.1,0.1,0.1,1); G.rectangle("line", x, y, w, h, 2, 2)
     G.polygon("fill", x + w/2 - 2, y + h, x + w/2 + 2, y + h, x + w/2, y + h + 3)
@@ -4046,60 +4448,141 @@ function putToSleep(npc)
   end
 
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
-  -- we only add Zzz above the head in screen space.
+  local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
-    local NPCMod = NPC or safeRequire("src.world.NPC")
+    -- Try multiple paths for platform compatibility.
+    local NPCMod = NPC
+    if not (NPCMod and type(NPCMod.draw) == "function") then
+      for _, path in ipairs({"src.world.NPC", "src.world.npc", "world.NPC"}) do
+        local m = safeRequire(path)
+        if m and type(m.draw) == "function" then NPCMod = m; break end
+      end
+    end
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
+        -- Teleport animation: apply vertical offset (rise/descend)
+        local tpY = self.kantoLifeTeleportY
+        if tpY then
+          -- Temporarily offset py for the draw, restore after
+          local origPy = self.py
+          if type(self.py) == "number" then self.py = self.py + tpY end
+          local ok, res = pcall(baseNpcDraw, self, camX, camY)
+          if type(origPy) == "number" then self.py = origPy end
+          if not ok then error(res) end
+          return
+        end
+        -- Fly animation: hide NPC, draw bird instead
+        if self.kantoLifeFlyHidden and self.kantoLifeFly then
+          local fl = self.kantoLifeFly
+          -- Draw bird sprite at fly position (simplified: use NPC draw with offset)
+          -- TODO: Draw actual flying Pokémon sprite. For now, skip NPC draw
+          -- (bird visual coming in next iteration).
+          return  -- Skip NPC draw; bird drawn separately
+        end
         if self.nightlifeSleeping then
-          if self.sprite and not self.sprite._kantoSleepBaked then
-            pcall(bakeSleepSprite, self)
+          fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
+          -- UNIFORM: Skip bake. Draw with rotation+tint at draw time.
+          -- Uses game's own sprite rendering, works for all sprites.
+          -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
+          local style = 0
+          pcall(function() style = resolveSleepStyle(self) end)
+          local tentStyle = style == 1
+          if not tentStyle and style ~= 0 then
+            -- Draw base layer before NPC
+            local basePx = self.px or self.x or ((self.cellX or 0) * 16) or 0
+            local basePy = self.py or self.y or ((self.cellY or 0) * 16) or 0
+            local baseSx, baseSy = basePx - (camX or 0), basePy - (camY or 0)
+            if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+              local ok, ox, oy = pcall(function()
+                return self.sprite:getScreenOrigin(basePx, basePy, camX or 0, camY or 0)
+              end)
+              if ok and ox then baseSx, baseSy = ox, oy end
+            end
+            pcall(drawSleepAccessoryBase, self, baseSx, baseSy)
           end
-          -- HGSS fix (1.4.36): baseNpcDraw doesn't render sleeping HGSS NPCs.
-          -- Draw the native image directly with 90° rotation.
-          local isHgss = self._kantoSleepIsHgss == true or
-            (self.sprite and self.sprite.def and self.sprite.def.hgssNativeImage)
-          local hgssDrawn = false
-          if isHgss then
-            local okDraw, drew = pcall(function()
-              local def = self.sprite and self.sprite.def or {}
-              local nativePath = def.hgssNativeImage
-              if not nativePath or nativePath == "" then return false end
-              local img = nil
-              if love and love.graphics then
-                local ok, result = pcall(love.graphics.newImage, nativePath)
-                if ok then img = result end
-              end
-              if not img then return false end
+          local accImgOk = true
+          -- Uniform sleeping draw: rotate 90deg (lying down) + gray tint.
+          -- Uses game's own draw, so ALL sprites (glasses, Pikachu, etc.) work.
+          -- Uniform sleeping sprite: capture NPC appearance once via
+          -- baseNpcDraw to a canvas, rotate 90deg (lying down), tint gray.
+          -- Same code for ALL non-story NPCs and ALL Pokemon NPCs.
+          -- Cached per-NPC, so it runs once, not every frame.
+          local function getSleepingCanvas(npc)
+            if npc._kantoSleepCanvas then return npc._kantoSleepCanvas end
+            local G = love.graphics
+            -- Capture: draw NPC to 32x32 canvas (enough for 16x16 sprite)
+            local capOk, canvas = pcall(function()
+              local c = G.newCanvas(32, 32)
+              local prev = G.getCanvas()
+              G.setCanvas(c)
+              G.clear(0, 0, 0, 0)
+              -- Draw NPC at canvas center: camX = px-8 gives sx=8
+              local npx = npc.px or npc.x or ((npc.cellX or 0) * 16) or 0
+              local npy = npc.py or npc.y or ((npc.cellY or 0) * 16) or 0
+              baseNpcDraw(npc, npx - 8, npy - 8)
+              G.setCanvas(prev)
+              return c
+            end)
+            if not (capOk and canvas) then return nil end
+            -- Rotate 90deg and tint gray into final canvas
+            local finOk, final = pcall(function()
+              local f = G.newCanvas(32, 32)
+              local prev = G.getCanvas()
+              G.setCanvas(f)
+              G.clear(0, 0, 0, 0)
+              G.push("all")
+              G.translate(16, 16)
+              G.rotate(math.pi / 2)
+              G.translate(-16, -16)
+              G.setColor(0.55, 0.55, 0.60, 1)
+              G.draw(canvas, 0, 0)
+              G.pop()
+              G.setColor(1, 1, 1, 1)
+              G.setCanvas(prev)
+              return f
+            end)
+            if finOk and final then
+              npc._kantoSleepCanvas = final
+              return final
+            end
+            return nil
+          end
+          local function drawSleepingNPC()
+            local canvas = getSleepingCanvas(self)
+            if canvas then
+              -- Draw the captured sleeping sprite at NPC position.
+              -- Aligned with base/overlay (shiftY=-4 for 3-layer).
               local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
               local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
               local sx, sy = px - (camX or 0), py - (camY or 0)
-              if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
-                local ok2, ox, oy = pcall(function()
-                  return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
-                end)
-                if ok2 and ox then sx, sy = ox, oy end
-              end
-              local fw = tonumber(def.hgssFrameWidth or def.frameWidth) or 32
-              local fh = tonumber(def.hgssFrameHeight or def.frameHeight) or 32
-              local angle = self.kantoLifeSleepAngle or (math.pi / 2)
-              love.graphics.push("all")
-              love.graphics.setColor(0.55, 0.55, 0.60, 1)  -- Gray out
-              love.graphics.translate(sx + 8, sy + 8)
-              love.graphics.rotate(angle)
-              love.graphics.translate(-fw/2, -fh/2)
-              local quad = love.graphics.newQuad(0, 0, fw, fh, img:getDimensions())
-              love.graphics.draw(img, quad, 0, 0)
-              love.graphics.pop()
-              return true
+              love.graphics.draw(canvas, sx - 8, sy - 8 - 4)
+            else
+              -- Capture failed (e.g., glasses/ambient Pikachu): HIDE the NPC.
+              -- (Scratch the bake for these - bed + Zzz still show, no blob.)
+              -- Do not draw anything.
+            end
+          end
+          if tentStyle then
+            -- Tent: ALWAYS hide NPC (tent replaces it). Do not draw NPC even
+            -- if tent image fails (user reported NPCs visible with tents).
+            accImgOk = true
+          else
+            drawSleepingNPC()
+          end
+          -- Draw sleep accessory (bed/tent/sleeping bag) if style != Default
+          local accPx = self.px or self.x or ((self.cellX or 0) * 16) or 0
+          local accPy = self.py or self.y or ((self.cellY or 0) * 16) or 0
+          local accSx, accSy = accPx - (camX or 0), accPy - (camY or 0)
+          if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+            local ok, ox, oy = pcall(function()
+              return self.sprite:getScreenOrigin(accPx, accPy, camX or 0, camY or 0)
             end)
-            hgssDrawn = okDraw and drew == true
+            if ok and ox then accSx, accSy = ox, oy end
           end
-          if not hgssDrawn then
-            baseNpcDraw(self, camX, camY)
+          if accImgOk then
+            pcall(drawSleepAccessory, self, accSx, accSy)
           end
-          -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite + Zzzs only.
           local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
           local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
           local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
@@ -4112,18 +4595,214 @@ function putToSleep(npc)
           drawSleepZzz(sx, sy, sleepZzzSeed(self))
           return
         end
-        local r = baseNpcDraw(self, camX, camY)
-        local px = self.px or self.x or ((self.cellX or 0) * 16)
-        local py = self.py or self.y or ((self.cellY or 0) * 16)
-        drawCollisionBubble(self, px - (camX or 0) + 8, py - (camY or 0))
-        return r
+        -- Draw collision bubble for awake NPCs in 2D
+        local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
+        local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        if cbUntil > cbNow then
+          local px = self.px or self.x or ((self.cellX or 0) * 16) or 0
+          local py = self.py or self.y or ((self.cellY or 0) * 16) or 0
+          local sx, sy = px - (camX or 0) + 8, py - (camY or 0) - 6
+          if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
+            local ok, ox, oy = pcall(function()
+              return self.sprite:getScreenOrigin(px, py, camX or 0, camY or 0)
+            end)
+            if ok and ox then sx, sy = ox + 8, oy - 4 end
+          end
+          pcall(drawCollisionBubble, self, sx, sy, 1)
+        end
+        return baseNpcDraw(self, camX, camY)
       end
       NPC = NPCMod
       NPCMod._kantoLifeSleepWrapped = true
     end
   end
+  -- Voxel/Battle Art mode: NPCs render via NPC:pose(), never NPC:draw(), so
+  -- the 2D draw wrapper above never runs there. Mirror the FireRed
+  -- FieldView-level hook at the world-view stage instead: after the voxel
+  -- world is presented, draw active collision bubbles in screen space using
+  -- Battle Art projection (same Pipelines.worldPresent pattern as the
+  -- FireRed voxel sleep props and the Johto voxel sleep overlay).
+  do
+    local Pipelines = safeRequire("src.render.Pipelines")
+    if Pipelines and type(Pipelines.worldPresent) == "function" and not Pipelines._kantoLifeCollisionBubbleWrapped then
+      local battleLib = nil
+      local function battleVoxelLib()
+        if battleLib ~= nil then
+          return battleLib
+        end
+        if type(mod.find) == "function" then
+          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL" }) do
+            local ok, m = pcall(mod.find, id)
+            local lib = ok and m and m.exports and m.exports.lib or nil
+            if lib and type(lib.require) == "function" then
+              local okV, V3 = pcall(lib.require, "Voxel3D")
+              if okV and V3 and type(V3.project) == "function" then
+                battleLib = lib
+                return battleLib
+              end
+            end
+          end
+        end
+        battleLib = false
+        return nil
+      end
+      local baseWorldPresent = Pipelines.worldPresent
+      Pipelines.worldPresent = function(canvas, ctx)
+        local out = baseWorldPresent(canvas, ctx)
+        if not out then
+          return out
+        end
+        -- Voxel bubbles: engine-faithful projection (research-backed fix).
+        -- ROOT CAUSES FIXED:
+        -- 1. Voxel3D.project returns supersampled coords (x AA factor);
+        --    out is the downsampled display canvas. Divide by AA.
+        -- 2. Old clamp used window points (3x smaller on iOS), pinning bubbles.
+        --    Now clamps in out's canvas pixels.
+        -- 3. Old drew at scale=1 (tiny). Now uses ctx.scale like the engine.
+        local pipelineId = nil
+        if type(Pipelines.worldPipeline) == "function" then
+          local ok, v = pcall(Pipelines.worldPipeline)
+          if ok then
+            pipelineId = v
+          end
+        end
+        if pipelineId ~= "voxel" then
+          return out
+        end
+        pcall(function()
+          if opt("npc_collision_bubbles") == false then
+            return
+          end
+          local lib = battleVoxelLib()
+          if not lib then
+            return
+          end
+          local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+          if not (okV and Voxel3D and type(Voxel3D.project) == "function") then
+            return
+          end
+          local okS, VS = pcall(lib.require, "VoxelScene")
+          local VoxelScene = (okS and VS) or nil
+          local state = ctx and ctx.state
+          if state and state.firstPerson and state.firstPerson.active then
+            return
+          end
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          local actors, seen = {}, {}
+          local function addActor(n)
+            if n and not seen[n] then
+              seen[n] = true
+              actors[#actors + 1] = n
+            end
+          end
+          local ow = liveWorld()
+          if ow then
+            for _, n in ipairs(ow.npcs or {}) do
+              addActor(n)
+            end
+            for _, e in ipairs(ow.entities or {}) do
+              addActor(e)
+            end
+          end
+          if state then
+            for _, n in ipairs(state.npcs or {}) do
+              addActor(n)
+            end
+            for _, e in ipairs(state.entities or {}) do
+              addActor(e)
+            end
+          end
+          if #actors == 0 then
+            return
+          end
+          local sxRatio, syRatio = 1, 1
+          if type(Voxel3D.size) == "function" then
+            local a, b = Voxel3D.size()
+            if tonumber(a) and a > 0 and tonumber(b) and b > 0 then
+              local cw = (out.getWidth and out:getWidth()) or a
+              local ch = (out.getHeight and out:getHeight()) or b
+              sxRatio, syRatio = cw / a, ch / b
+            end
+          end
+          local G = love.graphics
+          local prev = G.getCanvas()
+          if not pcall(G.setCanvas, out) then
+            return
+          end
+          for _, npc in ipairs(actors) do
+            local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+            if untilAt > now and npc.visible ~= false and not npc.hidden then
+              local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
+              local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
+              local gh = 0
+              local ghOk = false
+              if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
+                local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
+                if okH and type(h) == "number" and h ~= 0 then
+                  gh = h
+                  ghOk = true
+                end
+              end
+              -- FIX: Always draw bubbles. gh=0 is correct for flat maps
+              -- (outdoors and indoors). Skipping broke all flat-map bubbles.
+              -- (Research: groundAt==0 does NOT mean indoors.)
+              if true then
+              -- Measure true pixel scale by projecting two points 12 world
+              -- units apart vertically. The raw perspective scale `s` from
+              -- project() is relative, not pixels — using it directly made
+              -- bubbles pin-sized. Bubble base height is 12px at scale=1;
+              -- scale so 12px = 12 world units (matches NPC scale).
+              -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
+              -- Match engine/Battle Art: project FOOT (ground level),
+              -- ENGINE-FAITHFUL VOXEL BUBBLE PROJECTION (research-backed)
+              -- Voxel3D.project returns 3D-pass canvas px (supersampled by
+              -- AntiAlias.factor()); `out` is the AntiAlias-resolved canvas
+              -- (display px). Convert, then draw under engine-equivalent scale.
+              local aa = 1
+              pcall(function()
+                local AALib = lib.require("AntiAlias")
+                if AALib and type(AALib.factor) == "function" then
+                  aa = tonumber(AALib.factor()) or 1
+                end
+              end)
+              if not (aa >= 1) then aa = 1 end
+              local wscale = tonumber(ctx and ctx.scale) or 1
+              if not (wscale > 0) then wscale = 1 end
+              local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
+              if okP and type(sx) == "number" and type(sy) == "number" then
+                -- Foot anchor in `out` canvas px:
+                local ox, oy = sx / aa, sy / aa
+                -- Viewport clamp in OUT's pixel space (not window points!)
+                local vwo, vho = nil, nil
+                pcall(function() vwo, vho = out:getDimensions() end)
+                vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
+                if vwo > 16 and vho > 16 then
+                  if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
+                  if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
+                end
+                -- Draw in world-px units under engine-equivalent scale;
+                -- bubble tail ~26 world px above the foot (matches 2D).
+                G.push()
+                G.scale(wscale, wscale)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 100, 1)
+                G.pop()
+              end
+              end  -- end if ghOk else
+            end
+          end
+          pcall(G.setCanvas, prev)
+        end)
+        return out
+      end
+      Pipelines._kantoLifeCollisionBubbleWrapped = true
+    end
+  end
 
-  local function courtesyOnWarp(world, warpDef)
+  
+
+
+
+local function courtesyOnWarp(world, warpDef)
     local g = G()
     if not opt("common_courtesy") then return false end
     if not warpDef then return false end
@@ -5074,6 +5753,9 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     local route = name:match("^KANTO_ROUTE") or name:match("^JOHTO_")
     -- Unique dialogue: combinatorial generator with per-NPC history.
     -- Falls back to the static pool if the generator is unavailable.
+    -- The pool fallback keeps main's per-NPC recent-line history (skip
+    -- last 5 lines per pool) in a separate field so it never clobbers
+    -- DialogueGen's own history.
     local text
     if DialogueGen and type(DialogueGen.generate) == "function" then
       local genOk, genLine, genHistory = pcall(DialogueGen.generate, {
@@ -5091,8 +5773,29 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       end
     end
     if not text then
+      -- Per-NPC dialogue history: skip last 5 lines per NPC per pool;
+      -- resets when all used.
       local pool = route and routeLines or lines
-      text = pool[love.math.random(1, #pool)]
+      local rh = st.recentPoolLines
+      if type(rh) ~= "table" then rh = {}; st.recentPoolLines = rh end
+      local rk = route and "route" or "town"
+      local hst = rh[rk]
+      if type(hst) ~= "table" then hst = {}; rh[rk] = hst end
+      local avail = {}
+      for i = 1, #pool do
+        local used = false
+        for _, v in ipairs(hst) do if v == i then used = true; break end end
+        if not used then avail[#avail + 1] = i end
+      end
+      if #avail == 0 then
+        hst = {}; rh[rk] = hst
+        for i = 1, #pool do avail[i] = i end
+      end
+      local pi = avail[love.math.random(1, #avail)]
+      hst[#hst + 1] = pi
+      while #hst > 5 do table.remove(hst, 1) end
+      putTalkState(key, st, all)
+      text = pool[pi]
     end
     local ref = eventRefLine(st, false)
     if ref and st.count > 5 and love.math.random() < 0.5 then
@@ -5108,7 +5811,9 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     if not d then return false end
     if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
     local isNight = night(world)
-    local asleep = opt("sleeping_npcs") and shouldSleepNow(npc, isNight)
+    -- RESEARCH FIX: Include nightlifeSleeping (shouldSleepNow can mismatch
+    -- for visually-sleeping NPCs)
+    local asleep = opt("sleeping_npcs") and (npc.nightlifeSleeping or shouldSleepNow(npc, isNight))
 
     if isPokeAmbient(npc) and not asleep then
       return progressiveAmbientTalk(g, world, npc, true)
@@ -5123,7 +5828,14 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
       return true
     end
     npc.frozen = true
-    pushText(g, world, string.format("%s is fast\nasleep.", tostring(d.name or "This person"):gsub("_", " ")))
+    -- RESEARCH FIX: Unfreeze when text closes (prevents permanent frozen state)
+    local sleepName
+    if isPokemonLike(npc) or isPokeAmbient(npc) then
+      sleepName = speciesLabelFromNpc(npc) or tostring(d.name or "Pokemon"):gsub("_", " ")
+    else
+      sleepName = npc.kantoLifeStoryName or stableNameFor(npc) or tostring(d.name or "This person"):gsub("_", " ")
+    end
+  pushText(g, world, string.format("%s is fast\nasleep.", sleepName), function() npc.frozen = false end)
     return true
   end
 
@@ -5216,7 +5928,38 @@ local function nightlifeTick(world, dt)
         elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
           if npc.nightlifeSleeping then wakeNpc(npc) end
         elseif shouldSleepNow(npc, isNight) then
-          putToSleep(npc)
+          -- Don't fall asleep in doorways/warps (blocks player)
+          local cx, cy = npc.cellX, npc.cellY
+          local blocking = false
+          if type(cx) == "number" and type(cy) == "number" and world and world.map then
+            pcall(function()
+              blocking = nearWarp(world.map, math.floor(cx), math.floor(cy))
+            end)
+          end
+          if not blocking then
+            -- Natural sleep style (5): compute at sleep time when world/map is available.
+            -- Outdoor->tent, house->bed, other indoor->80% bag / 20% default.
+            pcall(function()
+              if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                local mapId = tostring(world.map.id or "")
+                local naturalResult
+                if not isIndoor(mapId, world.map) then
+                  naturalResult = 1  -- Outdoor: tent
+                elseif string.upper(mapId):find("HOUSE", 1, true) then
+                  naturalResult = 3  -- House: bed
+                else
+                  local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "")
+                               .. ":" .. tostring(npc.cellY or "")
+                  local h = 0
+                  for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                  naturalResult = (h < 80) and 2 or 0  -- 80% bag, 20% default
+                end
+                npc.kantoLifeNaturalSleepStyle = naturalResult
+                npc.kantoLifeNaturalSleepMap = mapId
+              end
+            end)
+            putToSleep(npc)
+          end
         elseif npc.nightlifeSleeping then
           wakeNpc(npc)
         end
@@ -5296,6 +6039,59 @@ local function nightlifeTick(world, dt)
       return false
     end
 
+    -- Allow talking to NPCs that are mid-step. The engine's OverworldState:interact
+    -- only calls world.talk when `not npc.moving` (mid-step flag, not wander behavior).
+    -- If the player presses A facing a mid-step ambient NPC, stop it briefly so the
+    -- talk proceeds. (Corrected: engine gates on mid-step, not on wandering.)
+    pcall(function()
+      local OWS = safeRequire("src.world.OverworldController")
+      -- OverworldController returns the OverworldState class
+      -- NEW: Wrap npcAtCell to find mid-step NPCs by target cell.
+      -- Engine only checks cellX/cellY, missing NPCs walking INTO the faced cell.
+      if OWS and type(OWS.npcAtCell) == "function" and not OWS._kantoLifeNpcAtCellWrapped then
+        local baseNpcAtCell = OWS.npcAtCell
+        OWS._kantoLifeNpcAtCellWrapped = true
+        OWS.npcAtCell = function(self, fx, fy)
+          local npc = baseNpcAtCell(self, fx, fy)
+          if npc then return npc end
+          -- Check target cells for mid-step NPCs
+          local npcs = self.npcs or (self.world and self.world.npcs)
+          if type(npcs) == "table" then
+            for _, n in pairs(npcs) do
+              if type(n) == "table" and n.targetX == fx and n.targetY == fy then
+                return n
+              end
+            end
+          end
+          return nil
+        end
+      end
+      if OWS and type(OWS.interact) == "function" and not OWS._kantoLifeInteractWrapped then
+        local baseOWSInteract = OWS.interact
+        OWS._kantoLifeInteractWrapped = true
+        OWS.interact = function(self)
+          -- Pre-check: is there a moving Kanto Life NPC in front?
+          pcall(function()
+            if self and self.player and type(self.player.facingCell) == "function" then
+              local fx, fy = self.player:facingCell()
+              if fx and type(self.npcAtCell) == "function" then
+                local npc = self:npcAtCell(fx, fy)
+                -- NEW APPROACH: Handle ANY moving NPC, not just ambient.
+                -- User: "press A next to any sprites whether they walk or not"
+                if npc and npc.moving then
+                  -- NEW APPROACH: Freeze in place. Don't touch cellX/cellY,
+                  -- targets, or px/py. NPC stays visually mid-step; talk
+                  -- proceeds; routine resumes naturally after (targets intact).
+                  npc.moving = false
+                end
+              end
+            end
+          end)
+          return baseOWSInteract(self)
+        end
+      end
+    end)
+
     local baseWarp = Overworld.takeWarp
     Overworld.takeWarp = function(warpDef)
       local world = liveWorld()
@@ -5325,10 +6121,30 @@ local function nightlifeTick(world, dt)
       Assets._kantoSleepHook = true
     end
 
-    local function bakeGrayLie(npc)
+    local function bakeGrayLie(npc, voxelOnly)
       if npc and isViridianSleepyOldMan(npc) then
         return false
       end
+      -- FIX: Restore original sprite image if previously mutated (clear contamination).
+      -- Prevents corrupted sprites (glasses/Pikachu) from using mutated image.
+      local spr0 = npc and npc.sprite
+      if spr0 and spr0._kantoOrigImage ~= nil then
+        spr0.image = spr0._kantoOrigImage
+      end
+      -- Log sprite info for diagnosis (crowd NPC issue)
+      pcall(function()
+        local spr = npc and npc.sprite
+        if spr then
+          local fw = tonumber(spr.frameWidth) or -1
+          local fh = tonumber(spr.frameHeight) or -1
+          local defName = "?"
+          if spr.def then
+            defName = tostring(spr.def.name or spr.def.id or spr.def.image or "?")
+          end
+          fileLog(string.format("BAKE npc=%s def=%s fw=%d fh=%d",
+            tostring(npc.name or "?"), defName, fw, fh))
+        end
+      end)
       if not npc or not npc.sprite or npc._kantoSleepSpriteActive then
         return npc and npc._kantoSleepSpriteActive
       end
@@ -5361,14 +6177,31 @@ local function nightlifeTick(world, dt)
           pcall(function()
             if type(sprite.resolveImage) == "function" then img = sprite:resolveImage() end
           end)
-          if not img then img = sprite.image end
+          -- RESEARCH FIX: Do NOT fall back to sprite.image (raw DMG sheet, opaque white bg).
+          -- If resolveImage fails, img stays nil and bake fails (NPC hidden, no blob).
+          -- if not img then img = sprite.image end
           if img and type(img.getData) == "function" then
             pcall(function() src = img:getData() end)
           end
         end
-        if not src then return nil end
+        if not src then
+          pcall(function()
+            local defName = "?"
+            if sprite.def then
+              defName = tostring(sprite.def.name or sprite.def.id or sprite.def.image or "?")
+            end
+            local hasImage = sprite.image ~= nil
+            local hasResolve = type(sprite.resolveImage) == "function"
+            fileLog(string.format("VOXEL BAKE FAIL npc=%s def=%s hasImage=%s hasResolve=%s",
+              tostring(npc.name or "?"), defName, tostring(hasImage), tostring(hasResolve)))
+          end)
+          return nil
+        end
         local iw, ih = src:getDimensions()
-        local sourceFW, sourceFH, sourceY = 16, 16, 0
+        -- Use actual sprite frame dimensions (Pokémon may differ from 16x16 humans)
+        local actualFW = tonumber(sprite.frameWidth) or 16
+        local actualFH = tonumber(sprite.frameHeight) or 16
+        local sourceFW, sourceFH, sourceY = actualFW, actualFH, 0
         if srcIsHgss then
           sourceFW = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
           sourceFH = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or sourceFW
@@ -5383,8 +6216,9 @@ local function nightlifeTick(world, dt)
         local out = {}
         -- IMPORTANT: keep the exact proven 0.8.77 16x32 path for ordinary
         -- Gen-1 sprites. Only HGSS gets the larger native 32px voxel card.
-        local bodyW = srcIsHgss and 32 or 16
-        local bodyH = srcIsHgss and 32 or 16
+        -- Use actual frame dimensions for Pokémon (may differ from 16x16).
+        local bodyW = srcIsHgss and 32 or sourceFW
+        local bodyH = srcIsHgss and 32 or sourceFH
         local zBand = 16
         local cardW = bodyW
         local cardH = bodyH + zBand
@@ -5445,7 +6279,8 @@ local function nightlifeTick(world, dt)
       -- Each animation state is a separate cached image. The sprite itself
       -- remains a normal single-frame SpriteRenderer from the engine's point
       -- of view; voxel simply receives the currently selected texture.
-      local baseRel = string.format("kanto_life_exp_sleep/%s",
+      -- v2: cache-busting version to avoid stale mod_compat sprites
+      local baseRel = string.format("kanto_life_sleep_v2/%s",
         tostring(npc.id or "x"):gsub("[^%w%-_]", "_"))
       local rels = {}
       for i = 1, 3 do
@@ -5455,11 +6290,20 @@ local function nightlifeTick(world, dt)
       end
       ensureAssetHook()
 
+      -- VOXEL-ONLY MODE: For Pokemon and 3-frame sprites. Creates voxel
+      -- frames without replacing the 2D sprite (avoids 2D corruption).
+      if voxelOnly then
+        npc._kantoSleepVoxelFrames = variants
+        npc._kantoSleepVoxelPaths = rels
+        npc._kantoSleepVoxelFrame = 1
+        return true
+      end
+
       local okR, SR = pcall(require, "src.render.SpriteRenderer")
       if not (okR and SR and SR.new) then return false end
       local sleepIsHgss = npc._kantoSleepIsHgss == true
       local proxyW = sleepIsHgss and 32 or 16
-      local proxyH = sleepIsHgss and 48 or 32
+      local proxyH = sleepIsHgss and 32 or 16
       local def = {
         id = "KANTO_SLEEP_" .. tostring(npc.id or baseRel),
         image = rels[1],
@@ -5569,7 +6413,10 @@ local function nightlifeTick(world, dt)
       end)
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
-      if not api or type(api.register) ~= "function" then return end
+      if not api or type(api.register) ~= "function" then
+        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
+        return
+      end
 
       local lib = battle.exports.lib
       if not lib or type(lib.require) ~= "function" then return end
@@ -5630,7 +6477,10 @@ local function nightlifeTick(world, dt)
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc")
-        local key = sourceKey .. "#" .. tostring(frameIndex)
+        -- FIX: Include sign in cache key. The bake pre-rotates 90° by sign;
+        -- without it, NPCs with different signs share the wrong rotation (180° bug).
+        local bakeSign = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+        local key = sourceKey .. "#" .. tostring(frameIndex) .. "#s" .. tostring(bakeSign)
         if imageCache[key .. ":body"] and imageCache[key .. ":z"] then
           return imageCache[key .. ":body"], imageCache[key .. ":z"], bodyW, bodyH
         end
@@ -5679,6 +6529,7 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
+        -- RESEARCH FIX: centered anchor (h/2) so rotation pivots at mesh center
         local mesh = SpriteBillboards.mesh(def, 0, h / 2)
         imageCache[imagePath] = old or image
         if mesh then meshCache[key] = mesh end
@@ -5707,22 +6558,61 @@ local function nightlifeTick(world, dt)
         local prop = sleepPropImage(style)
         if not prop then return nil end
         local pw, ph = prop:getDimensions()
-        local path = "kanto_life_exp_sleep_prop_" .. tostring(style) .. ".png"
+        local path = "kanto_life_sleep_prop_" .. tostring(style) .. ".png"
         sleepImgCache[path] = prop
         ensureAssetHook()
         local def = { id="KANTO_LIFE_SLEEP_PROP_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
-        local mesh = SpriteBillboards.mesh(def, pw/2, ph/2)
+        -- RESEARCH FIX: Use default anchor for 3-layer alignment.
+        -- Tent (1) is upright: bottom-anchor (ph) so it sits on the ground.
+        -- Bed/bag (2,3) lie flat: default anchor (nil) for consistency with body.
+        local anchorY = ph / 2
+        if style == 1 then anchorY = ph end
+        local mesh = SpriteBillboards.mesh(def, 0, anchorY)
         if mesh then propMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
         return propMeshCache[style]
+      end
+      -- Base mesh for 3-layer voxel beds: opaque version under the NPC.
+      local propBaseMeshCache = {}
+      local function sleepPropBaseMesh(style)
+        style = math.floor(tonumber(style) or 0)
+        if style <= 1 then return nil end  -- No base for Default(0) or Tent(1)
+        if propBaseMeshCache[style] then return propBaseMeshCache[style] end
+        local prop = sleepAccessoryBaseImage(style)
+        if not prop then return nil end
+        local pw, ph = prop:getDimensions()
+        local path = "kanto_life_sleep_prop_base_" .. tostring(style) .. ".png"
+        sleepImgCache[path] = prop
+        ensureAssetHook()
+        local def = { id="KANTO_LIFE_SLEEP_PROP_BASE_"..tostring(style), image=path, frames=1, frameWidth=pw, frameHeight=ph, trueColor=true, walker=false }
+        -- Use same anchor as body (ph/2) for 3-layer alignment
+        -- RESEARCH FIX: centered anchor (ph/2) for 3-layer alignment
+        local mesh = SpriteBillboards.mesh(def, 0, ph / 2)
+        if mesh then propBaseMeshCache[style] = {mesh=mesh, image=prop, w=pw, h=ph} end
+        return propBaseMeshCache[style]
       end
 
       local function drawSleep3D(ctx)
         local npc = ctx and ctx.actor
         if not npc or not npc.nightlifeSleeping then return false end
-        if isPokemonFollower(npc) or isPokemonLike(npc) then return false end
+        -- Followers never sleep; non-ambient Pokémon-like excluded.
+        -- Ambient Pokémon (isPokeAmbient) use the same 3-layer voxel renderer.
+        if isPokemonFollower(npc) then return false end
+        if isPokemonLike(npc) and not isPokeAmbient(npc) then return false end
         if isViridianSleepyOldMan(npc) then return false end
+        -- (On-screen voxel debug removed: mirrored by camera transform)
+        -- CONSISTENT SKIP: Pokemon-like and 3-frame skip the bake everywhere
+        -- (matches the other three call sites from 1.4.131).
+        -- VOXEL-ONLY BAKE for Pokemon/3-frame: creates voxel frames without
+        -- touching the 2D sprite. (1.4.134 skipped entirely, breaking voxel
+        -- Pokemon; this restores voxel while keeping the 2D corruption fix.)
         if not npc._kantoSleepVoxelFrames then
-          pcall(bakeGrayLie, npc)
+          local srcSpr = npc._kantoOrigSprite or npc.sprite
+          local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+          if isPokemonLike(npc) or fc == 3 then
+            pcall(bakeGrayLie, npc, true)  -- voxelOnly=true
+          else
+            pcall(bakeGrayLie, npc)
+          end
         end
         -- Battle Art can reuse a pose without calling NPC:update every render
         -- pass. Advance the Z frame from the same monotonic clock here as a
@@ -5732,21 +6622,68 @@ local function nightlifeTick(world, dt)
         local idx = (math.floor(now * 2.2) % 3) + 1
         if npc._kantoSleepVoxelFrame ~= idx then
           npc._kantoSleepVoxelFrame = idx
-          local frames = npc._kantoSleepVoxelFrames
-          local sleepSprite = npc._kantoSleepIsHgss and npc._kantoSleepProxySprite or npc.sprite
-          if frames and frames[idx] and sleepSprite then
-            sleepSprite.image = frames[idx].image
-            sleepSprite._kantoSleepVoxelIndex = idx
+          -- Only mutate sprite image for full bakes (proxy). Voxel-only bakes
+          -- keep the original intact; voxel body comes from bodyAndZ directly.
+          if npc._kantoSleepSpriteActive then
+            local frames = npc._kantoSleepVoxelFrames
+            local sleepSprite = npc._kantoSleepIsHgss and npc._kantoSleepProxySprite or npc.sprite
+            if frames and frames[idx] and sleepSprite then
+              sleepSprite.image = frames[idx].image
+              sleepSprite._kantoSleepVoxelIndex = idx
+            end
           end
         end
         local body, z, w, h = bodyAndZ(npc, idx)
-        if not body then return false end
+        if not body then
+          -- Bake failed (e.g., Pikachu follower): draw simple gray billboard
+          -- instead of invisible. Better than nothing.
+          pcall(function()
+            fileLog("VOXEL bake failed for npc=" .. tostring(npc.name or "?") .. ", using fallback")
+          end)
+          -- Fallback: use original sprite as billboard (not baked, but visible).
+          -- Try all image sources (uniform with 2D bake).
+          local fbSprite = npc._kantoOrigSprite or npc.sprite
+          local fbImg = fbSprite and fbSprite.image or nil
+          if not fbImg and fbSprite and type(fbSprite.resolveImage) == "function" then
+            pcall(function() fbImg = fbSprite:resolveImage() end)
+          end
+          if not fbImg and fbSprite and fbSprite.def and fbSprite.def.image
+            and type(Assets) == "table" and type(Assets.imageData) == "function" then
+            pcall(function()
+              local d = Assets.imageData(fbSprite.def.image)
+              if d then fbImg = love.graphics.newImage(d) end
+            end)
+          end
+          if fbImg then
+            local fbDef = { image = fbImg, w = 16, h = 16 }
+            local fbMesh = nil
+            pcall(function()
+              if type(SpriteBillboards.mesh) == "function" then
+                fbMesh = SpriteBillboards.mesh(fbDef, 0)
+              end
+            end)
+            if fbMesh then
+              local fbModel = Mat4.mul(
+                Mat4.translate(px + 8, gh + 8, py + 8),
+                Mat4.rotateY(yaw)
+              )
+              pcall(function()
+                Voxel3D.draw(fbMesh, fbImg, fbModel, 0.1, fbModel)
+              end)
+              return true  -- Drew fallback, not invisible
+            end
+          end
+          return false
+        end
 
         local source = npc._kantoOrigSprite or npc.sprite
         local sourceDef = source and source.def or {}
         local sourceKey = tostring(sourceDef.id or sourceDef.image or source.image or sourceDef.sprite or "npc"):gsub("[^%w%-_]", "_")
-        local bodyPath = "kanto_life_exp_sleep_3d/" .. sourceKey .. "_body_" .. idx .. ".png"
-        local zPath = "kanto_life_exp_sleep_3d/" .. sourceKey .. "_z_" .. idx .. ".png"
+        -- FIX: Include sign in path (matches bake cache key fix).
+        local pathSign = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+        local signSuffix = "_s" .. tostring(pathSign)
+        local bodyPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_body_" .. idx .. signSuffix .. ".png"
+        local zPath = "kanto_life_sleep_3d_v2/" .. sourceKey .. "_z_" .. idx .. signSuffix .. ".png"
         -- The normal sleep asset hook already exists for the generated cards.
         -- Publish these two derived images through that same hook so
         -- SpriteBillboards.mesh can resolve them without touching Assets.
@@ -5760,51 +6697,110 @@ local function nightlifeTick(world, dt)
         local px = tonumber(ctx.px) or tonumber(npc.px) or 0
         local py = tonumber(ctx.py) or tonumber(npc.py) or 0
         local gh = tonumber(ctx.groundHeight) or 0
-        local sign = (tonumber(npc.kantoLifeSleepSide) or 1) >= 0 and 1 or -1
-        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
-        -- Tent style mirrors the 2D path: the NPC stands upright inside the
-        -- upright tent instead of lying flat. The baked voxel frames carry a
-        -- 90-degree lying pixel rotation, so undo it in the card plane
-        -- (rotateZ) rather than laying the card flat (rotateX), and lift the
-        -- card so the sleeper's feet rest on the ground. Other styles keep the
-        -- proven lying transform untouched.
-        local isTent = (propStyle == 1) and type(Mat4.rotateZ) == "function"
+        -- Voxel body: per-NPC yaw (different directions, as Joshua requested).
         local yaw = facingYaw(npc.kantoLifeSleepFacing or npc.facing)
-        if not isTent then yaw = yaw + sign * math.pi / 2 end
+        -- Fixed flat rotation: rotateX(-PI/2) lays card flat, sprite-up -> world -Z (north)
+        -- Bed/bag: rotated 90deg from body (yaw + PI/2), SAME center.
+        -- (Joshua: "rotated 90 degrees on the sprite they are tied to without changing the center")
+        -- RESEARCH FIX: The bake pre-rotates the body 90° (direction by
+    -- kantoLifeSleepSide = ±1). The bed is NOT pre-rotated, so it must
+    -- compensate: bedYaw = yaw - sign*PI/2. Aligns head-hole with head.
+    local sleepSide = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+    local bedYaw = yaw - sleepSide * (math.pi / 2)
+        local flatRot = Mat4.mul(Mat4.rotateY(bedYaw), Mat4.rotateX(-math.pi / 2))
+        -- Body keeps original yaw (no extra rotation) to match sprite orientation.
+        local bodyRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+        -- RESEARCH FIX: Rotate about mesh center (8,0,0), translate to tile center.
+        -- T(-8,0,0) before rotation ensures the card spins in place for any yaw.
+        local bodyModel = Mat4.mul(
+          Mat4.translate(px + 8, gh + 0.25, py + 8),
+          Mat4.mul(bodyRot, Mat4.translate(-8, 0, 0))
+        )
 
-        -- SpriteBillboards' local card is centred by using anchorX/anchorY;
-        -- rotate that plane onto the ground and keep its centre over the NPC.
-        -- (Tent: keep the card vertical; the in-plane rotateZ below cancels
-        -- the baked lying rotation so the sleeper stands upright.)
-        local bodyModel
-        if isTent then
-          bodyModel = Mat4.mul(
-            Mat4.translate(px, gh + 8.25, py + 8),
-            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateZ(sign * math.pi / 2))
-          )
-        else
-          bodyModel = Mat4.mul(
-            Mat4.translate(px, gh + 0.25, py + 8),
-            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(sign * math.pi / 2))
-          )
-        end
-        Voxel3D.draw(bodyMesh, body, bodyModel, 0, bodyModel)
-
-        -- FALLBACK (1.4.31): Accessories disabled. Default sleeping sprite only.
-        --[[ Disabled prop drawing
+        -- Use resolveSleepStyle (handles Random and Natural)
+        local propStyle = 0
+        pcall(function() propStyle = resolveSleepStyle(npc) end)
+        -- 3-layer voxel beds: opaque base UNDER body, overlay (with head
+        -- hole) ABOVE body. Tent (1) stays a single upright billboard.
+        -- Accessories re-enabled (1.4.45)
         local pm = sleepPropMesh(propStyle)
-        if pm and pm.mesh then
-          -- Tent style: prop stays upright like the standing NPC body, with
-          -- the tent's base on the ground (24px tall card, centred anchor).
-          local propRotX = isTent and 0 or (sign * math.pi / 2)
-          local propLift = isTent and 12.05 or 0.05
-          local propModel = Mat4.mul(
-            Mat4.translate(px, gh + propLift, py + 8),
-            Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(propRotX))
-          )
-          Voxel3D.draw(pm.mesh, pm.image, propModel, 0, propModel)
+        -- Use shared flatRot and (bcx, bcz) for all layers; vary only Y.
+        -- (On-screen 3-layer debug removed: mirrored by camera transform)
+        -- Base first (opaque, under the body)
+        -- Beds (3): offset left a little, towards feet (feet covered, head out).
+        -- Sleeping bags (2): centered (no offset).
+        -- (Joshua: bags were off-center in voxel)
+        -- RESEARCH FIX: No offset. User wants everything centered on the cell.
+        -- The (-2,+3) was world-space, pointing different directions per facing.
+        local bedDx, bedDz = 0, 0
+        if propStyle == 2 or propStyle == 3 then
+          local pbm = sleepPropBaseMesh(propStyle)
+          if pbm and pbm.mesh then
+            -- FIX: Center bag on BODY's center (bcx, bcz).
+            -- Mesh extends ph north from origin (default anchor). To center:
+            -- origin = body_center + ph/2 (so span is centered at body_center).
+            local ph = pbm.h or 24
+            local pw = pbm.w or 20
+            -- X: body center bcx is tile center. Prop width pw, center at bcx.
+            -- Mesh X spans (8-pw/2) to (8+pw/2) in local (anchorX=pw/2, visual center at 8).
+            -- After rotateY, X stays X. To center at bcx: origin X = bcx - 8.
+            -- RESEARCH FIX: Tile center + offsets, pivot at mesh center
+            local baseModel = Mat4.mul(
+              Mat4.translate(px + 8 + bedDx, gh + 0.03, py + 8 + bedDz),
+              Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
+            )
+            local okD, errD = pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
+            if not okD then fileLog("VOXEL base draw FAILED: " .. tostring(errD)) end
+          else
+            fileLog("VOXEL base mesh nil for style=" .. tostring(propStyle))
+          end
         end
-        -- End disabled prop drawing ]]
+        -- Body: hidden for tent (style 1 replaces NPC), visible for bed/bag
+        -- sandwiched between base and overlay.
+        if propStyle ~= 1 then
+          -- pull=0.1 biases body toward camera in depth vs base
+          local okD, errD = pcall(Voxel3D.draw, bodyMesh, body, bodyModel, 0.1, bodyModel)
+          if not okD then fileLog("VOXEL body draw FAILED: " .. tostring(errD)) end
+        end
+        -- Overlay on top (or tent upright)
+        if pm and pm.mesh then
+          -- Tent (style 1) stays upright; bed (3) and sleeping bag (2) lie flat.
+          -- Tent: fixed yaw (all tents face same direction, per Joshua).
+          local tentYaw = 0
+          local propRotation = Mat4.rotateY(tentYaw)
+          local propY = gh + 0.05
+          -- Tent (upright, bottom-anchored): center on tile (px+8, py+8).
+          -- Mesh local center x=8, so translate by px to place at px+8.
+          local propCx, propCz = px, py + 8
+          if propStyle ~= 1 then
+            -- Bed/bag: center on BODY's center (bcx, bcz).
+            -- RESEARCH FIX: Tile center + offsets (bcx/bcz removed)
+            propCx = px + 8 + bedDx
+            propCz = py + 8 + bedDz
+            propRotation = flatRot
+            propY = gh + 0.45  -- Overlay above body; head shows through hole
+          end
+          -- Tent (style 1): 2D billboard, single, all face same way (reverted pyramid).
+          -- Bed/bag: single flat draw.
+          if propStyle == 1 then
+            -- Single billboard, upright, facing yaw (not 4-sided, not pyramid).
+            local tentModel = Mat4.mul(
+              Mat4.translate(propCx, propY, propCz),
+              Mat4.rotateY(tentYaw)
+            )
+            local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, tentModel, 0.2, tentModel)
+            if not okD then fileLog("VOXEL tent draw FAILED: " .. tostring(errD)) end
+          else
+            -- RESEARCH FIX: Pivot at mesh center
+            local propModel = Mat4.mul(
+              Mat4.translate(propCx, propY, propCz),
+              Mat4.mul(propRotation, Mat4.translate(-8, 0, 0))
+            )
+            -- pull=0.2 biases overlay toward camera in depth vs body
+            local okD, errD = pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
+            if not okD then fileLog("VOXEL overlay draw FAILED: " .. tostring(errD)) end
+          end
+        end
 
         -- One Z, upright and camera-facing like the native voxel billboard.
         local host = ctx.host or {}
@@ -5825,19 +6821,18 @@ local function nightlifeTick(world, dt)
             end
           end
         end
-        local headOffsetX = sign * -5
-        local zx, zz = px + headOffsetX, py + 8
-        if isTent then
-          -- Above the standing sleeper's head (card top-centre, yawed).
-          zx = px + 8 * math.cos(yaw)
-          zz = py + 8 - 8 * math.sin(yaw)
-        end
-        local zModel = Mat4.mul(
-          Mat4.translate(zx, gh + 17, zz),
+        local headOffsetX, zt = sleepSide * -5, ((love and love.timer and love.timer.getTime and love.timer.getTime()) or 0)
+        local rise = ((zt * 0.75) % 2.0) * 8; local zModel = Mat4.mul(
+          Mat4.translate(px + headOffsetX, gh + 17 + rise, py + 8),
           Mat4.rotateY(zyaw)
         )
         if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
-        Voxel3D.draw(zMesh, z, zModel, 0, zModel)
+        -- Small pull (camera-ward bias) so the Z doesn't z-fight the upright
+        -- tent billboard (both sit at z=py+8). Pull has zero screen drift.
+        -- WRAPPED: If Zzz throws, we still return true (bed/body already drawn).
+        -- Without this, CharacterRenderers.first continues to Porygonal which
+        -- draws a duplicate standing sprite.
+        pcall(Voxel3D.draw, zMesh, z, zModel, 0.5, zModel)
         return true
       end
 
@@ -5855,6 +6850,201 @@ local function nightlifeTick(world, dt)
 
     installPublicVoxelSleepRenderer()
 
+    ----------------------------------------------------------------
+    -- 3D Billboard Speech Bubbles (voxel mode)
+    --
+    -- Previous 2D-projection bubbles failed (wrong canvas target, camera
+    -- pitch distortion, offscreen at scene edges). This draws bubbles as
+    -- 3D billboard quads like the Zzz -- positioned in world space above
+    -- the NPC's head, facing the camera. No projection needed; the bubble
+    -- moves with the camera automatically and can't go offscreen due to
+    -- canvas/projection issues.
+    --
+    -- Registered via the same CharacterRenderers API as the sleep renderer.
+    -- Returns false (does not claim the actor) so normal NPC rendering
+    -- continues; we only ADD the bubble quad.
+    ----------------------------------------------------------------
+    -- REVERTED TO v2 (1.4.142) + fixes: v3 pre-render didn't work.
+    -- v2 provably shows bubbles (screenshot). Fixed: center anchor + 1.5x scale.
+    -- The hand-rolled mesh + Canvas texture failed. This uses:
+    --   Canvas -> Image (via newImageData) -> sleepImgCache + ensureAssetHook
+    --   -> SpriteBillboards.mesh (same as Zzz) -> Voxel3D.draw (no scale)
+    -- Every component is proven by the working Zzz.
+    local bubbleImageCache = {}  -- text -> {path, image, w, h}
+
+    local function getBubbleImage(text)
+      text = tostring(text or ":)")
+      local cached = bubbleImageCache[text]
+      if cached then return cached end
+      local G = love.graphics
+      local font = nil
+      pcall(function() font = G.getFont() end)
+      local tw = 12
+      local th = 8
+      pcall(function()
+        if font then
+          tw = font:getWidth(text)
+          th = font:getHeight()
+        else
+          tw = #text * 6
+        end
+      end)
+      local w = math.max(24, math.ceil(tw + 10))
+      local h = 16
+      -- Render to canvas (2D, safe)
+      local okC, canvas = pcall(G.newCanvas, w, h)
+      if not okC or not canvas then return nil end
+      local okDraw = pcall(function()
+        G.push("all")
+        G.setCanvas(canvas)
+        G.clear(0, 0, 0, 0)
+        -- White rounded background
+        G.setColor(1, 1, 1, 1)
+        G.rectangle("fill", 0, 0, w, h, 3, 3)
+        -- Dark border
+        G.setColor(0.1, 0.1, 0.1, 1)
+        G.setLineWidth(1)
+        G.rectangle("line", 0.5, 0.5, w - 1, h - 1, 3, 3)
+        -- Tail triangle pointing down
+        G.polygon("fill", w/2 - 3, h - 1, w/2 + 3, h - 1, w/2, h + 4)
+        -- Centered dark text
+        if font then pcall(G.setFont, font) end
+        G.setColor(0.1, 0.1, 0.1, 1)
+        G.print(text, (w - tw) / 2, (h - th) / 2 - 1)
+        G.setCanvas()
+        G.pop()
+      end)
+      if not okDraw then return nil end
+      -- Convert Canvas -> Image (proven: Zzz uses Image, not Canvas)
+      local okImg, img = pcall(function()
+        local data = canvas:newImageData()
+        local image = G.newImage(data)
+        image:setFilter("nearest", "nearest")
+        return image
+      end)
+      if not okImg or not img then return nil end
+      -- Register via asset hook (proven: Zzz uses sleepImgCache + ensureAssetHook)
+      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_") .. ".png"
+      sleepImgCache[path] = img
+      ensureAssetHook()
+      local entry = {path = path, image = img, w = w, h = h}
+      bubbleImageCache[text] = entry
+      return entry
+    end
+
+    local function installPublicVoxelBubbleRenderer()
+      if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
+      pcall(function() fileLog("BUBBLE: attempting registration") end)
+      local okFind, battle = pcall(function()
+        return mod.find("BATTLE_ART_VOXEL_FORK")
+      end)
+      if not okFind or not battle then
+        okFind, battle = pcall(function()
+          return mod.find("BATTLE_ART_VOXEL")
+        end)
+      end
+      local api = okFind and battle and battle.exports
+        and battle.exports.characterRenderers or nil
+      if not api or type(api.register) ~= "function" then
+        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
+        return
+      end
+      local lib = battle.exports.lib
+      if not lib or type(lib.require) ~= "function" then return end
+      local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+      local okM, Mat4 = pcall(lib.require, "Mat4")
+      local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
+      if not (okV and okM and okB and Voxel3D and type(Voxel3D.draw) == "function"
+              and Mat4 and type(Mat4.mul) == "function"
+              and type(Mat4.translate) == "function"
+              and type(Mat4.rotateY) == "function"
+              and SpriteBillboards and type(SpriteBillboards.mesh) == "function") then
+        return
+      end
+      -- NOTE: Mesh is now built per-bubble via SpriteBillboards.mesh (proven
+      -- Zzz pipeline). No hand-rolled mesh, no scale in model matrix.
+
+      local function drawBubble3D(ctx)
+        local npc = ctx and (ctx.actor or ctx.entity)
+        if not npc then return false end
+        if opt("npc_collision_bubbles") == false then return false end
+        if npc.visible == false or npc.hidden then return false end
+        -- Skip in first-person mode (matches 2D bubble behavior).
+        local state = ctx and ctx.state
+        if state and state.firstPerson and state.firstPerson.active then
+          return false
+        end
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+        if untilAt <= now then return false end
+        local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+
+        -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
+        local entry = getBubbleImage(text)
+        if not entry or not entry.image then return false end
+        local def = {
+          id = "KANTO_LIFE_BUBBLE",
+          image = entry.path,
+          frames = 1,
+          frameWidth = entry.w,
+          frameHeight = entry.h,
+          trueColor = true,
+          walker = false,
+        }
+        -- Center anchor (entry.h / 2) like Zzz and accessories — fixes off-center placement
+        local mesh = SpriteBillboards.mesh(def, 0, entry.h / 2)
+        if not mesh then return false end
+
+        local px = tonumber(ctx.px) or tonumber(npc.px)
+          or tonumber((npc.cellX or 0) * 16) or 0
+        local py = tonumber(ctx.py) or tonumber(npc.py)
+          or tonumber((npc.cellY or 0) * 16) or 0
+        local gh = tonumber(ctx.groundHeight) or 0
+
+        -- Billboard yaw: face the camera (same approach as the Zzz).
+        local zyaw = 0
+        local host = ctx.host or {}
+        local fp = host.FirstPerson
+        if fp and type(fp.cardYaw) == "function" then
+          local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
+          if okYaw and tonumber(v) then zyaw = v end
+        end
+
+        -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
+        -- overlap (gh+26). World-space position: no projection needed.
+        -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
+        -- (same as Zzz). This was a key difference from the failed approach.
+        -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
+        -- then rotate, then translate.
+        local bubbleScale = 1.5
+        local model = Mat4.mul(
+          Mat4.translate(px + 8, gh + 26, py + 8),
+          Mat4.mul(
+            Mat4.rotateY(zyaw),
+            Mat4.scale(bubbleScale, bubbleScale, 1)
+          )
+        )
+        -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
+        pcall(Voxel3D.draw, mesh, entry.image, model, 0.5, model)
+        -- Return false: do NOT claim the actor; normal NPC rendering continues.
+        return false
+      end
+
+      local handle = api.register({
+        apiVersion = 1,
+        id = "KANTO_LIFE_BUBBLE_3D",
+        name = "Kanto Life Speech Bubbles",
+        priority = 5000,
+        drawEntity = drawBubble3D,
+      })
+      if handle and NPCMod then
+        NPCMod._kantoLifePublicBubbleRenderer = handle
+        pcall(function() fileLog("BUBBLE: renderer registered successfully") end)
+      end
+    end
+
+    installPublicVoxelBubbleRenderer()
+
     -- IMPORTANT: voxel/Battle Art consumes NPC:pose(), not NPC:draw().
     -- Keep the working 2D draw path untouched; only make pose expose the
     -- already-baked sleeping sprite to alternate render pipelines.
@@ -5868,12 +7058,76 @@ local function nightlifeTick(world, dt)
         if not NPCMod._kantoLifePublicSleepRenderer then
           pcall(installPublicVoxelSleepRenderer)
         end
+        -- Bubble renderer: same lazy retry (was missing — root cause of no bubbles)
+        if not NPCMod._kantoLifePublicBubbleRenderer then
+          pcall(installPublicVoxelBubbleRenderer)
+        end
+        -- TRAVEL ANIMATIONS (pose-time, per engine/Free Fly/Wild Skies/Razor).
+        -- Never mutate npc.sprite/npc.py; return substituted sprite + Y offset.
+        -- This works in both 2D (NPC:draw via pose) and voxel (posesOf via pose).
+        if self then
+          local tp = self.kantoLifeTeleport
+          if tp and tp.frame ~= nil then
+            -- Teleport: spin + rise, showing a psychic Pokemon.
+            -- Uses SPRITE_MONSTER (generic, exists in base game) as the
+            -- teleport creature. GBC spins the player; we show the mon
+            -- doing the teleporting. Never mutate npc fields; pose-time only.
+            local sprite, px, py, facing, phase, flip = basePose(self, ...)
+            local monSprite = nil
+            pcall(function() monSprite = getPokeSpriteObject("SPRITE_MONSTER") end)
+            local spinOrder = {"down", "left", "up", "right"}
+            local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
+            -- GBC: spin in place first, then rise (mirror engine spinRise)
+            local rise = 0
+            if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
+            if rise > 60 then rise = 60 end
+            return monSprite or sprite, px, py - rise, spinFacing, 0, false, false
+          end
+          local fl = self.kantoLifeFly
+          if fl and fl.frame ~= nil then
+            -- Fly: use SPRITE_BIRD (engine's fly sprite, guaranteed to exist).
+            -- GBC fxBird does exactly this while the player hides.
+            local sprite, px, py, facing, phase, flip = basePose(self, ...)
+            local bird = nil
+            -- Try direct sprite ID first (most reliable)
+            pcall(function()
+              local sprites = game and game.data and game.data.sprites
+              local birdId = "SPRITE_BIRD"
+              local def = sprites and sprites[birdId]
+              if def then
+                local ok, SR = pcall(require, "src.render.SpriteRenderer")
+                if ok and SR and SR.new then
+                  local ok2, obj = pcall(SR.new, def)
+                  if ok2 and obj then bird = obj end
+                end
+              end
+            end)
+            -- Fallback via helper
+            if not bird then
+              pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
+            end
+            local total = fl.total or 90
+            local progress = fl.frame / total
+            if progress > 1 then progress = 1 end
+            if progress < 0 then progress = 0 end
+            local lift = progress * 120
+            local dx = progress * 80
+            local flapPhase = math.floor(fl.frame / 3) % 2
+            return bird or sprite, px + dx, py - lift, facing, flapPhase, false, false
+          end
+        end
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
             return basePose(self, ...)
           end
-          if not self._kantoSleepSpriteActive then
-            pcall(bakeGrayLie, self)
+          -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
+          -- everywhere, not just in Hook 2. Prevents split-brain sprite state.
+          if not self._kantoSleepSpriteActive and not isPokemonLike(self) then
+            local srcSpr = self._kantoOrigSprite or self.sprite
+            local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+            if fc ~= 3 then
+              pcall(bakeGrayLie, self)
+            end
           end
           local frames = self._kantoSleepVoxelFrames
           local paths = self._kantoSleepVoxelPaths
@@ -5883,11 +7137,16 @@ local function nightlifeTick(world, dt)
             local idx = (math.floor(t * 2.2) % 3) + 1
             if self._kantoSleepVoxelFrame ~= idx then
               self._kantoSleepVoxelFrame = idx
-              spr.image = frames[idx].image
-              spr._kantoSleepVoxelIndex = idx
+              -- GUARD: Only mutate for full bakes. Voxel-only (Pokemon) keeps original intact.
+              if self._kantoSleepSpriteActive then
+                spr.image = frames[idx].image
+                spr._kantoSleepVoxelIndex = idx
+              end
             end
           end
-          if self._kantoSleepIsHgss and frames and #frames == 3 and spr then
+          -- FIX: Sleeping pose for ALL sprites (not just HGSS).
+          -- Prevents duplicate standing sprite in voxel.
+          if frames and #frames == 3 and spr then
             return spr, self.px, self.py, self.facing, 0, false
           end
         end
@@ -5899,6 +7158,33 @@ local function nightlifeTick(world, dt)
     if NPCMod and type(NPCMod.update) == "function" then
       local baseUpdate = NPCMod.update
       function NPCMod:update(map, entities)
+        -- DEBUG LOG polling: show once per toggle-ON with 10s cooldown.
+        -- Uses setOpt (not mod.options:set) so opt() sees the reset.
+        pcall(function()
+          local nowT = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          if opt("debug_log") == true and (nowT - (_kantoDebugLogLast or 0)) > 10 then
+            _kantoDebugLogLast = nowT
+            local text = table.concat(debugLogBuffer, "\n")
+            if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
+            local lines = {}
+            for line in text:gmatch("[^\n]+") do
+              table.insert(lines, line)
+              if #lines >= 10 then break end
+            end
+            local shortText = table.concat(lines, "\n")
+            -- Show via pushText if available (modal, press A to dismiss)
+            if type(pushText) == "function" then
+              local ow = mod.world and mod.world:overworld()
+              if ow then
+                local g = nil
+                pcall(function() g = G() end)
+                if g then pushText(g, ow, shortText, nil) end
+              end
+            end
+            -- Reset toggle via setOpt so opt() sees it immediately
+            pcall(function() setOpt("debug_log", false) end)
+          end
+        end)
         -- Enforce sleep every frame (source of truth)
         if opt("sleeping_npcs") and type(shouldSleepNow) == "function" then
           local isNight = false
@@ -5915,11 +7201,32 @@ local function nightlifeTick(world, dt)
           end
           if shouldSleepNow(self, isNight) then
             if not self.nightlifeSleeping then
+              pcall(function()
+                if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then
+                  local mapId = tostring(map.id or "")
+                  local nr
+                  if not isIndoor(mapId, map) then nr = 1
+                  elseif string.upper(mapId):find("HOUSE", 1, true) then nr = 3
+                  else
+                    local seed = tostring(self.id or "") .. ":" .. tostring(self.cellX or "") .. ":" .. tostring(self.cellY or "")
+                    local h = 0
+                    for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                    nr = (h < 80) and 2 or 0
+                  end
+                  self.kantoLifeNaturalSleepStyle = nr
+                end
+              end)
               pcall(putToSleep, self)
             end
             hardFreeze(self)
-            if not self._kantoSleepSpriteActive then
-              pcall(bakeGrayLie, self)
+            -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
+            -- everywhere. Prevents split-brain sprite state.
+            if not self._kantoSleepSpriteActive and not isPokemonLike(self) then
+              local srcSpr = self._kantoOrigSprite or self.sprite
+              local fc = srcSpr and tonumber(srcSpr.frameCount) or 6
+              if fc ~= 3 then
+                pcall(bakeGrayLie, self)
+              end
             end
             -- Drive the voxel ZZZ animation from NPC.update(), which is
             -- guaranteed to run even when the voxel scene reuses poses.
@@ -5954,7 +7261,14 @@ local function nightlifeTick(world, dt)
         end
         hardFreeze(self)
         -- Always try bake once (helps voxel / true sprite path)
-        if not self._kantoSleepSpriteActive and not isPokemonLike(self) and not isViridianSleepyOldMan(self) then
+        -- RESEARCH FIX: Skip bake for 3-frame sprites (clerk). The bake's proxy
+        -- corrupts them. They use the original sprite directly via getPoseGeometry,
+        -- same code path as Pokemon NPCs.
+        -- Use ORIGINAL sprite's frame count (proxy has frameCount=1)
+        local srcSpr = self._kantoOrigSprite or self.sprite
+        local frameCount = srcSpr and tonumber(srcSpr.frameCount) or 6
+        local isThreeFrame = (frameCount == 3)
+        if not self._kantoSleepSpriteActive and not isPokemonLike(self) and not isViridianSleepyOldMan(self) and not isThreeFrame then
           pcall(bakeGrayLie, self)
         end
         local G = love.graphics
@@ -5978,6 +7292,30 @@ local function nightlifeTick(world, dt)
           end
           if okAuthored then return end
         end
+        -- 2D accessories: draw base (opaque) UNDER the NPC
+        -- (Research: Hook 1 had this but was overwritten by Hook 2)
+        local accStyle = 0
+        pcall(function() accStyle = resolveSleepStyle(self) end)
+        if accStyle == 2 or accStyle == 3 then
+          pcall(drawSleepAccessoryBase, self, sx, sy)
+        elseif accStyle == 1 then
+          -- Tent: hide NPC, draw tent instead (replacement, not overlay)
+          local tentImg = sleepAccessoryImage(1)
+          if tentImg then
+            local tiw, tih = tentImg:getDimensions()
+            love.graphics.push("all")
+            love.graphics.setColor(1,1,1,1)
+            -- Tent is upright (not rotated), centered on NPC, bottom at feet
+            love.graphics.draw(tentImg, sx + 8 - tiw/2, sy + 16 - tih)
+            love.graphics.pop()
+          end
+          -- Draw Zzz and return (skip NPC drawing)
+          if type(drawSleepZzz) == "function" and opt("sleep_bubbles") ~= false then
+            drawSleepZzz(sx + 8, sy - 6,
+              type(sleepZzzSeed) == "function" and sleepZzzSeed(self) or 0)
+          end
+          return
+        end
         -- 2D: geometric ±90° + gray on the ORIGINAL sprite (readable characters)
         -- Use orig sprite for this path so we don't draw a failed black bake
         local drawn = false
@@ -5987,39 +7325,40 @@ local function nightlifeTick(world, dt)
           G.push("all")
           G.translate(sx + 8, sy + 8)
           G.rotate(angle)
+          -- RESEARCH FIX: G.draw(img, quad, -fw/2, -fh/2) already centers.
+          -- The extra translate(-8,-4) caused 8px left / 4px up offset.
           G.setColor(0.55, 0.55, 0.60, 1)
           -- Draw stand-down frame at local origin
           local ok = pcall(function()
-            spr:draw(0, 0, 0, 0, "down", 0, false, nil, nil, nil)
+            -- RESEARCH FIX: Use getPoseGeometry + resolveImage directly.
+            -- Bypasses spr:draw's palette/cell branches that throw for
+            -- clerk (3-frame) and Pikachu. Same frame the engine would pick.
+            local geo = spr:getPoseGeometry("down", 0, false)
+            if not (geo and geo.quad) then error("no quad") end
+            local img = spr:resolveImage()
+            if not img then error("no image") end
+            local fw, fh = geo.width, geo.height
+            G.draw(img, geo.quad, -fw/2, -fh/2)
           end)
           if not ok then
-            -- sprite:draw wants world coords — use transform around baseDraw with orig
+            -- FIX: Do NOT call baseDraw (Hook 1 canvas capture produces noise for
+            -- clerk/Pikachu). Hide NPC instead (bed + Zzz still show).
+            -- (Research: baseDraw = Hook 1 = getSleepingCanvas noise source)
             G.pop()
             G.push("all")
-            G.translate(sx + 8, sy + 8)
-            G.rotate(angle)
-            G.translate(-(sx + 8), -(sy + 8))
-            G.setColor(0.55, 0.55, 0.60, 1)
-            local save = self.sprite
-            if self._kantoOrigSprite then self.sprite = self._kantoOrigSprite end
-            baseDraw(self, camX, camY)
-            self.sprite = save
+            -- No draw (hidden)
           end
           G.setColor(1, 1, 1, 1)
           G.pop()
           drawn = true
         end)
         if not drawn then
-          pcall(function()
-            G.push("all")
-            G.translate(sx + 8, sy + 8)
-            G.rotate(angle)
-            G.translate(-(sx + 8), -(sy + 8))
-            G.setColor(0.55, 0.55, 0.60, 1)
-            baseDraw(self, camX, camY)
-            G.setColor(1, 1, 1, 1)
-            G.pop()
-          end)
+          -- FIX: Do NOT call baseDraw (Hook 1 noise). Hide NPC instead.
+          -- (Bed + Zzz still show; consistent with 1.4.115 hide-on-fail)
+        end
+        -- 2D accessories: draw overlay (transparent with head hole) OVER the NPC
+        if accStyle == 2 or accStyle == 3 then
+          pcall(drawSleepAccessory, self, sx, sy)
         end
         if type(drawSleepZzz) == "function" and opt("sleep_bubbles") ~= false then
           drawSleepZzz(sx + 8, sy - 6,

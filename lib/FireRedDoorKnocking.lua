@@ -3,6 +3,8 @@
 -- through that exact door is allowed once.  Walking through without knocking
 -- still lets FireRed perform the normal door transition; immediately after
 -- arrival the visitor is told to knock and is sent back outside.
+-- Knocking applies to houses only: marts, Poke Centers, gyms and other
+-- non-house buildings always allow free entry without knocking.
 return function(ctx)
   local mod = ctx.mod
   local getOption = ctx.getOption
@@ -15,6 +17,8 @@ return function(ctx)
   local installed = false
   local modalActive = false
   local suppressAUntilRelease = false
+  local warpInProgress = false
+  local warpStartMap = nil
 
   local function opt(key, default)
     if type(getOption) == "function" then
@@ -33,17 +37,33 @@ return function(ctx)
     return ok and value or nil
   end
 
+  -- House-only classification for door knocking.  Known service/non-house
+  -- interiors (marts, Poke Centers, gyms, dept stores, labs, ...) are excluded
+  -- by name first; only actual house names ("HOUSE", "HOME", "PLAYERS_HOUSE",
+  -- ...) count as houses.  This mirrors Yellow's name-based resident() in
+  -- lib/KantoMain.lua.  The old "every indoor map is a house" isOutdoors
+  -- fallback is intentionally gone: it made every mart, center and gym
+  -- require knocking.
+  local NON_HOUSE_PATTERNS = {
+    "MART", "POKECENTER", "POKE_CENTER", "POKEMON_CENTER", "CENTER",
+    "GYM", "DEPT", "LAB", "MUSEUM", "GAME_CORNER", "HOTEL",
+    "RESTAURANT", "SCHOOL", "DAYCARE", "POWER_PLANT", "SAFARI",
+    "SILPH", "ROCKET", "MANSION", "SHIP", "DOCK", "GATE",
+    "TOWER", "CAVE", "TUNNEL",
+  }
+  local HOUSE_PATTERNS = {
+    "PLAYERS_HOUSE", "RIVALS_HOUSE", "HOUSE", "_HOME", "HOME_",
+  }
   local function houseMap(id)
     local s = string.upper(tostring(id or ""))
-    if s:find("HOUSE", 1, true) ~= nil or s:find("PLAYERS_HOUSE", 1, true) ~= nil then return true end
-    -- Emerald/RSE does not use FireRed's HOUSE-only naming for every interior.
-    -- Use the active map's actual field-family classification when available.
-    local Map = engine("src.core.game3.map")
-    local FieldMoves = engine("src.core.game3.field_moves")
-    local def = Map and Map.currentDef and Map.currentDef()
-    if def and FieldMoves and type(FieldMoves.isOutdoors) == "function" then
-      local ok, out = pcall(FieldMoves.isOutdoors, def.mapType)
-      if ok then return not out end
+    if s == "" then return false end
+    -- Service and non-residential interiors never count as houses, even if a
+    -- map id happens to combine a service word with a house-like word.
+    for _, pattern in ipairs(NON_HOUSE_PATTERNS) do
+      if s:find(pattern, 1, true) ~= nil then return false end
+    end
+    for _, pattern in ipairs(HOUSE_PATTERNS) do
+      if s:find(pattern, 1, true) ~= nil then return true end
     end
     return false
   end
@@ -92,6 +112,9 @@ return function(ctx)
     if modalActive then return true end
     local info = doorInfo(game)
     if not info then return false end
+    -- Knocking is for houses only.  Marts, Poke Centers, gyms and other
+    -- non-house buildings keep FireRed's normal free entry.
+    if not houseMap(info.destMap) then return false end
     modalActive = true
     suppressAUntilRelease = true
     local doorKey = key(game, info)
@@ -119,6 +142,12 @@ return function(ctx)
             local Runtime = engine("src.core.game3.runtime")
             local g = game or (Runtime and Runtime._game)
             local m = Runtime and Runtime._mod
+            -- Mark warp in progress BEFORE starting it, so the A press that
+            -- dismissed this message can't re-trigger knock during transition.
+            warpInProgress = true
+            local Map = engine("src.core.game3.map")
+            warpStartMap = (Map and Map.current) or (g and g.currentMap)
+            suppressAUntilRelease = true
             if Warp and type(Warp.startDoorEntrance) == "function" then
               pcall(Warp.startDoorEntrance, m, g, info.destMap, info.destX, info.destY, info.x, info.y)
             end
@@ -174,7 +203,7 @@ return function(ctx)
         local input = game and game.input
         local isA = input and input.keyBindings and ev
           and ev.phase == "pressed" and input.keyBindings[ev.key] == "a"
-        if isA and not modalActive and not suppressAUntilRelease
+        if isA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" and knock(game) then
           return true
@@ -189,7 +218,7 @@ return function(ctx)
         local input = game and game.input
         local isA = input and input.padBindings and ev
           and ev.phase == "pressed" and input.padBindings[ev.button] == "a"
-        if isA and not modalActive and not suppressAUntilRelease
+        if isA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" and knock(game) then
           return true
@@ -220,7 +249,7 @@ return function(ctx)
             if btn == "a" then queuedA = true; break end
           end
         end
-        if queuedA and not modalActive and not suppressAUntilRelease
+        if queuedA and not modalActive and not suppressAUntilRelease and not warpInProgress
             and opt("firered_common_courtesy", true) ~= false
             and game and game.phase == "field" then
           if knock(game) then
@@ -302,6 +331,11 @@ return function(ctx)
           end
         end
         lastMap = current
+        -- Warp completed (map changed), clear the knock suppression.
+        if warpInProgress and warpStartMap ~= nil and tostring(current) ~= tostring(warpStartMap) then
+          warpInProgress = false
+          warpStartMap = nil
+        end
       end)
     end)
     installed = ok

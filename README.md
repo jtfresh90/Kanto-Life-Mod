@@ -55,7 +55,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - **Sleeping NPCs** with adjustable sleep rates in 10% steps.
 - **Day Sleepers** option for occasional daytime sleepers.
 - **Sleep ZZZs** that can be enabled or disabled.
-- **Multiple sleep styles:** Default, Tent, Sleeping Bag, and Bed.
+- **Sleeping NPCs:** Default sleeping sprites only (grayscale, lying down). Tent/Sleeping Bag/Bed accessories disabled as of 1.4.31 — they caused visual regressions.
 - **Grayscale sleeping characters** with stationary sleep poses.
 - **Voxel-safe sleeping visuals**, designed to work alongside supported 3D/voxel sprite systems without replacing their core rendering behavior.
 - **FireRed/Gen 3 ambient dialogue** with large, varied pools of contextual lines.
@@ -74,7 +74,11 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 
 ## 🎮 Generation Support
 
-### Gen 1 — Kanto / Yellow
+### Gen 1 — Kanto / Yellow (v1.4.36)
+
+**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. HGSS sprite support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
+**Travel:** 25% fly / 25% teleport / 25% door / 25% route.
+**Wild mods:** Compatible with Wilds of Kanto, Wilds of Kanto Revival, Untamed Tohjo via pcall protections.
 
 - Extra human NPCs for towns and routes.
 - Adjustable indoor NPC population.
@@ -89,14 +93,17 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - Sleeping NPCs with adjustable rate.
 - Daytime sleeper option.
 - Sleep ZZZs.
-- Default/Tent/Sleeping Bag/Bed sleep styles.
+- Default sleeping sprites only (1.0.0 behavior; accessories disabled in 1.4.31).
 - Grayscale, stationary sleeping presentation.
 - NPC talk/collision bubbles.
 - Door Knocking.
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
 
-### Gen 2 — Gold / Johto
+### Gen 2 — Gold / Johto (v1.4.36)
+
+**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. 2D and voxel support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
+**Travel:** 25% fly / 25% teleport / 25% door / 25% route.
 
 - Extra human NPCs for towns, routes, and interiors.
 - Adjustable indoor NPC population.
@@ -110,7 +117,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - Sleeping NPCs with adjustable rate.
 - Daytime sleepers.
 - Sleep ZZZs.
-- Default/Tent/Sleeping Bag/Bed sleep styles.
+- Default sleeping sprites only (1.0.0 behavior; accessories disabled in 1.4.31).
 - Grayscale/stationary sleeping presentation.
 - Sleep props that can be rendered safely with supported voxel/3D sprite setups.
 - NPC talk/collision bubbles.

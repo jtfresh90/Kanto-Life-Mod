@@ -423,7 +423,7 @@ return function(mod)
           { key="firered_sleep_pct", label="SLEEP RATE %", kind="number", default=10, min=0, max=100, step=10 },
           { key="firered_day_sleepers", label="DAY SLEEPERS", kind="bool", default=true },
           { key="firered_sleep_bubbles", label="SLEEP ZZZ", kind="bool", default=true },
-          { key="firered_sleep_style", label="SLEEP STYLE", kind="sleepstyle", default=0, min=0, max=3, step=1 },
+          { key="firered_sleep_style", label="SLEEP STYLE", kind="sleepstyle", default=0, min=0, max=4, step=1 },
           { key="firered_npc_collision_bubbles", label="NPC TALK BUBBLES", kind="bool", default=true },
           { key="firered_common_courtesy", label="DOOR KNOCKING", kind="bool", default=true },
           { key="firered_npc_routines", label="NPC ROUTINES", kind="bool", default=true },
@@ -440,7 +440,7 @@ return function(mod)
           return r.names[tonumber(v) or 0] or "OFF"
         end
         if r.kind == "sleepstyle" then
-          return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed"})[tonumber(v) or 0] or "Default"
+          return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[tonumber(v) or 0] or "Default"
         end
         return tostring(tonumber(v) or r.default)
       end

@@ -16,6 +16,30 @@ return function(mod)
     if type(value) ~= "function" then error("Kanto Life: " .. rel .. " must return an installer function", 0) end
     return value
   end
+  -- Install hygiene: clear the mod's persisted data (mod.save bucket +
+  -- mod.cache files) on fresh install, update, or reinstall-after-removal,
+  -- before any generation code reads it. The engine already clears the
+  -- mod's files on update/remove; this covers the data the engine leaves.
+  -- Fail-open: hygiene must never break mod load.
+  --
+  -- NOTE: mod.save is not populated with the slot's real data until the
+  -- save is adopted (save.loaded/save.created), which happens AFTER mod
+  -- entry. So the check runs now (harmless on the pre-save bucket) and is
+  -- re-run when the real save data arrives -- that is when update/reinstall
+  -- wipes actually take effect.
+  pcall(function()
+    local hygiene = loadLocal("lib/InstallHygiene.lua")
+    hygiene(mod)
+    -- Re-run when the slot's real save data is adopted (save.loaded for
+    -- Continue, save.created for New Game). The entry-time check above runs
+    -- on the pre-save bucket; the event-time check sees the real data, so
+    -- update/reinstall wipes actually take effect. Colon-call syntax is
+    -- required by the events API.
+    if mod.events and type(mod.events.on) == "function" then
+      mod.events:on("save.loaded", function() pcall(hygiene, mod) end)
+      mod.events:on("save.created", function() pcall(hygiene, mod) end)
+    end
+  end)
 
   -- Install hygiene: clear the mod's persisted data (mod.save bucket +
   -- mod.cache files) on fresh install, update, or reinstall-after-removal,
