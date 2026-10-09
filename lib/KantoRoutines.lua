@@ -1106,12 +1106,37 @@ return function(ctx)
     -- 3x AREA: ±70 (140x140=19,600 cells vs 80x80=6,400)
     -- User requirement: routines cover 3x as much area
     -- POKEMON: ±200 (400x400=160,000 cells, ~8x human range)
+    -- HUMANS: ±200 outdoors/caves, ±70 in buildings (user request)
+    -- Note: isIndoor() returns false for caves (they use outdoor tilesets),
+    -- so "not indoor" covers both outdoor and caves.
     local d = npc.def or {}
     local isPoke = npc.kantoLifePokeAmbient or d.kantoLifePokeAmbient
-    local pokeRadius = 200
-    local attempts = isPoke and 60 or 40
+    local mapId = map and tostring(map.id or "") or ""
+    -- isIndoor is defined in KantoMain; use pcall-safe check
+    local indoor = false
+    pcall(function()
+      -- KantoRoutines doesn't have isIndoor; mirror KantoMain's logic.
+      -- Towns/routes/caves/overworld are NOT indoor (large radius).
+      -- Buildings (houses, Marts, Centers, etc.) ARE indoor (small radius).
+      local id = mapId:upper()
+      -- Towns and routes are outdoor
+      if id:match("^ROUTE_") or id:match("^TOWN_") then indoor = false; return end
+      -- Building indicators (from KantoMain's isIndoor)
+      indoor = id:find("HOUSE", 1, true) ~= nil
+        or id:find("GATE", 1, true) ~= nil
+        or id:find("_1F", 1, true) ~= nil or id:find("_2F", 1, true) ~= nil
+        or id:find("_3F", 1, true) ~= nil or id:find("_B1F", 1, true) ~= nil
+        or id:find("MART", 1, true) ~= nil or id:find("POKECENTER", 1, true) ~= nil
+        or id:find("POKEMON_CENTER", 1, true) ~= nil or id:find("GYM", 1, true) ~= nil
+        or id:find("LAB", 1, true) ~= nil or id:find("SILPH", 1, true) ~= nil
+        or id:find("DEPT", 1, true) ~= nil or id:find("MUSEUM", 1, true) ~= nil
+        or id:find("GAME_CORNER", 1, true) ~= nil or id:find("HOTEL", 1, true) ~= nil
+    end)
+    local useLargeRadius = isPoke or (not indoor)
+    local radiusVal = useLargeRadius and 200 or 70
+    local attempts = useLargeRadius and 60 or 40
     for _ = 1, attempts do
-      local radius = isPoke and pokeRadius or ((st and st.localRoamRadius) or 70)
+      local radius = useLargeRadius and radiusVal or ((st and st.localRoamRadius) or 70)
       local tx = cx + math.random(-radius, radius)
       local ty = cy + math.random(-radius, radius)
       if tx ~= cx or ty ~= cy then
