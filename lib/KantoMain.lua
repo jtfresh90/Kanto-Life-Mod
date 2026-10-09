@@ -5892,16 +5892,17 @@ local function nightlifeTick(world, dt)
     -- Returns false (does not claim the actor) so normal NPC rendering
     -- continues; we only ADD the bubble quad.
     ----------------------------------------------------------------
-    -- BRAND NEW APPROACH (v2): Use the 100% proven Zzz pipeline.
-    -- The hand-rolled mesh + Canvas texture failed. This uses:
-    --   Canvas -> Image (via newImageData) -> sleepImgCache + ensureAssetHook
-    --   -> SpriteBillboards.mesh (same as Zzz) -> Voxel3D.draw (no scale)
-    -- Every component is proven by the working Zzz.
-    local bubbleImageCache = {}  -- text -> {path, image, w, h}
+    -- BRAND NEW APPROACH (v3): Pre-render at SETUP (2D context, safe).
+    -- v2 failed because it created Canvas DURING the 3D render pass.
+    -- Accessories work because they load PNGs (safe anytime).
+    -- This pre-renders all bubble texts at setup, caches meshes like
+    -- propMeshCache. The 3D pass only does Voxel3D.draw (no Canvas).
+    local bubbleMeshCache = {}  -- text -> {mesh, image, w, h}
+    local BUBBLE_TEXTS = { ":)", "!", "?", "!!", "^^", "**", "~~", "vv" }
 
-    local function getBubbleImage(text)
+    local function getBubbleMesh(text)
       text = tostring(text or ":)")
-      local cached = bubbleImageCache[text]
+      local cached = bubbleMeshCache[text]
       if cached then return cached end
       local G = love.graphics
       local font = nil
@@ -5955,8 +5956,14 @@ local function nightlifeTick(world, dt)
       sleepImgCache[path] = img
       ensureAssetHook()
       local entry = {path = path, image = img, w = w, h = h}
-      bubbleImageCache[text] = entry
+      bubbleMeshCache[text] = entry
       return entry
+    end
+
+    -- Pre-render all bubble texts at SETUP (2D context, safe).
+    -- This is the key fix: no Canvas creation during the 3D pass.
+    for _, bt in ipairs(BUBBLE_TEXTS) do
+      pcall(getBubbleMesh, bt)
     end
 
     local function installPublicVoxelBubbleRenderer()
@@ -6003,7 +6010,7 @@ local function nightlifeTick(world, dt)
         local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
 
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
-        local entry = getBubbleImage(text)
+        local entry = getBubbleMesh(text)
         if not entry or not entry.image then return false end
         local def = {
           id = "KANTO_LIFE_BUBBLE",
