@@ -1,7 +1,7 @@
 {
   "id": "kanto_life_experimental",
   "name": "Kanto Life Experimental",
-  "version": "1.4.186-exp1",
+  "version": "1.4.192-exp1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",

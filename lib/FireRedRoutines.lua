@@ -97,9 +97,70 @@ return function(ctx)
   end
 
   -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)
-  local FLY_BIRD_GFX = { 116, 110, 133, 132, 114, 138, 136, 137, 144, 145 }
-  -- Psychic Pokemon for teleport (can learn Teleport): MEW=140, MEWTWO=139
-  local TELEPORT_PSYCHIC_GFX = { 140, 139 }
+  local FLY_BIRD_GFX = { 116, 110, 133, 132, 138, 136, 137 } -- PIDGEY SPEAROW FEAROW DODUO ARTICUNO ZAPDOS MOLTRES
+  -- All Psychic-type species; resolved to OBJ_EVENT_GFX_* ids at runtime.
+  local TELEPORT_PSYCHIC_SPECIES = {
+    "ABRA","KADABRA","ALAKAZAM",
+    "SLOWPOKE","SLOWBRO","SLOWKING",
+    "DROWZEE","HYPNO",
+    "EXEGGCUTE","EXEGGUTOR",
+    "STARYU","STARMIE",
+    "MR_MIME","JYNX","SMOOCHUM",
+    "ESPEON","UNOWN","WOBBUFFET","WYNAUT",
+    "NATU","XATU","GIRAFARIG",
+    "RALTS","KIRLIA","GARDEVOIR",
+    "MEDITITE","MEDICHAM",
+    "SPOINK","GRUMPIG",
+    "LUNATONE","SOLROCK",
+    "BALTOY","CLAYDOL","CHIMECHO",
+    "BELDUM","METANG","METAGROSS",
+    "LATIAS","LATIOS","JIRACHI","DEOXYS",
+    "MEWTWO","MEW",
+  }
+  local TELEPORT_PSYCHIC_GFX = nil
+  local function resolveTeleportPsychicGfx()
+    if TELEPORT_PSYCHIC_GFX and #TELEPORT_PSYCHIC_GFX > 0 then
+      return TELEPORT_PSYCHIC_GFX
+    end
+    local found, seen = {}, {}
+    pcall(function()
+      local Constants = require("src.core.game3.constants")
+      local C = nil
+      pcall(function()
+        local Field = require("src.core.game3.field")
+        local session = Field and Field._session
+        if session and Constants.of and Constants.versionOf then
+          C = Constants.of(Constants.versionOf(session))
+        end
+      end)
+      if type(C) ~= "table" and Constants.of then
+        pcall(function() C = Constants.of() end)
+      end
+      local eo = C and C.event_objects
+      local byName = eo and eo.byName
+      local want = {}
+      for _, sp in ipairs(TELEPORT_PSYCHIC_SPECIES) do want[sp] = true end
+      if type(byName) == "table" then
+        for _, sp in ipairs(TELEPORT_PSYCHIC_SPECIES) do
+          local id = tonumber(byName["OBJ_EVENT_GFX_" .. sp] or byName[sp])
+          if id and not seen[id] then seen[id] = true; found[#found + 1] = id end
+        end
+      end
+      if eo and type(eo.OBJ_EVENT_GFX_) == "table" then
+        for id, name in pairs(eo.OBJ_EVENT_GFX_) do
+          local n = tostring(name or ""):gsub("^OBJ_EVENT_GFX_", "")
+          if want[n] then
+            id = tonumber(id)
+            if id and not seen[id] then seen[id] = true; found[#found + 1] = id end
+          end
+        end
+      end
+    end)
+    -- FireRed only ships MEW/MEWTWO as psychic OW gfx; keep them as fallback.
+    if #found == 0 then found = { 140, 139 } end
+    TELEPORT_PSYCHIC_GFX = found
+    return found
+  end
   -- Spin order for teleport animation (matches engine SPIN_NEXT)
   local SPIN_ORDER = { "down", "left", "up", "right" }
 
@@ -122,33 +183,27 @@ return function(ctx)
     npc._kantoLifeFRAnimPhase = "spin"
     npc.spriteYOffset = 0
     if method == "teleport" then
-      -- Save original sprite for restoration (in case NPC returns)
+      -- Save original for restoration. OwSprites draws by graphicsId;
+      -- GfxIds.spriteFor only maps human IDs and would force SPRITE_YOUNGSTER.
       npc._kantoLifeFROrigGfx = npc.graphicsId
       npc._kantoLifeFROrigSprite = npc.sprite
-      -- Switch to Psychic Pokemon sprite (Abra-like: Mew/Mewtwo can Teleport)
-      local gfx = TELEPORT_PSYCHIC_GFX[math.random(#TELEPORT_PSYCHIC_GFX)]
-      pcall(function()
-        local GfxIds = require("src.core.game3.scripting.gfx_ids")
-        npc.graphicsId = gfx
-        npc.sprite = GfxIds.spriteFor(gfx)
-      end)
-      -- Play warp sound
+      local pool = resolveTeleportPsychicGfx()
+      local gfx = pool[math.random(#pool)]
+      npc.graphicsId = gfx
+      if npc.def then npc.def.graphicsId = gfx end
+      -- Clear host sprite name so field_view prefers OwSprites.draw(graphicsId).
+      npc.sprite = nil
       pcall(function()
         local Audio = require("src.core.game3.audio")
         if Audio and Audio.playSe then Audio.playSe("SE_WARP_IN") end
       end)
     elseif method == "fly" then
-      -- Save original sprite
       npc._kantoLifeFROrigGfx = npc.graphicsId
       npc._kantoLifeFROrigSprite = npc.sprite
-      -- Switch to random bird Pokemon sprite
       local gfx = FLY_BIRD_GFX[math.random(#FLY_BIRD_GFX)]
-      pcall(function()
-        local GfxIds = require("src.core.game3.scripting.gfx_ids")
-        npc.graphicsId = gfx
-        npc.sprite = GfxIds.spriteFor(gfx)
-      end)
-      -- Play fly sound
+      npc.graphicsId = gfx
+      if npc.def then npc.def.graphicsId = gfx end
+      npc.sprite = nil
       pcall(function()
         local Audio = require("src.core.game3.audio")
         if Audio and Audio.playSe then Audio.playSe("SE_M_FLY") end
@@ -184,7 +239,7 @@ return function(ctx)
       if t >= 0.4 then
         local riseT = (t - 0.4) / 0.8
         -- Accelerating rise
-        npc.spriteYOffset = -math.floor(riseT * riseT * 60)
+        npc.spriteYOffset = -math.floor(riseT * riseT * 150)
       end
     elseif method == "surf" then
       -- Surf: no special animation, bubble cue is sufficient
@@ -357,24 +412,43 @@ return function(ctx)
     b._kantoLifeCollisionBubbleText, b._kantoLifeCollisionBubbleUntil = text, untilAt
   end
   local function ambientAt(x, y, except)
+    -- The routine actors must respect every visible event object, not just
+    -- Kanto-Life actors. Otherwise a spawned walker can pass through a ROM NPC.
     for _, other in ipairs(actors()) do
-      if other ~= except and isAmbient(other) and not other.hidden
-         and tonumber(other.cellX) == tonumber(x) and tonumber(other.cellY) == tonumber(y) then return other end
+      if other ~= except and not other.hidden and other.visible ~= false then
+        local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+        local tx, ty = tonumber(other.targetX), tonumber(other.targetY)
+        if (ox == tonumber(x) and oy == tonumber(y))
+           or (other.moving and tx == tonumber(x) and ty == tonumber(y)) then
+          return other
+        end
+      end
     end
     return nil
   end
 
   local function occupiedByAmbient(world, x, y, selfNpc)
     if occupied(world, x, y, selfNpc) then return true end
-    -- Do not trust native EventObject collision alone: ambient objects are
-    -- created dynamically and the native movement layer can lag one tick
-    -- behind their Lua positions. Explicitly reserve the destination cell.
+    -- Reserve both occupied cells and in-flight destination cells for ALL
+    -- event objects. The native Game3 collision grid does not consistently
+    -- reserve dynamic ambient NPCs, which was allowing actors to phase through
+    -- one another (and through the player while the player was stepping).
     for _, other in ipairs(actors()) do
-      if other ~= selfNpc and isAmbient(other) and not other.hidden then
-        if tonumber(other.cellX) == tonumber(x) and tonumber(other.cellY) == tonumber(y) then
+      if other ~= selfNpc and not other.hidden and other.visible ~= false then
+        local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
+        local tx, ty = tonumber(other.targetX), tonumber(other.targetY)
+        if (ox == tonumber(x) and oy == tonumber(y))
+           or (other.moving and tx == tonumber(x) and ty == tonumber(y)) then
           return true
         end
       end
+    end
+    local Player = engine("src.core.game3.player")
+    if Player then
+      local px, py = tonumber(Player.cellX), tonumber(Player.cellY)
+      local ptx, pty = tonumber(Player.targetX), tonumber(Player.targetY)
+      if (px == tonumber(x) and py == tonumber(y))
+         or (Player.moving and ptx == tonumber(x) and pty == tonumber(y)) then return true end
     end
     return false
   end
@@ -871,6 +945,12 @@ return function(ctx)
       if untilAt > os.time() then return end
       npc._kantoLifeFRTalkPaused = nil
       npc._kantoLifeFRTalkHoldUntil = nil
+      if npc._kantoLifeFROrigFrozen ~= nil then
+        npc.frozen = npc._kantoLifeFROrigFrozen
+        npc._kantoLifeFROrigFrozen = nil
+      else
+        npc.frozen = false
+      end
     end
     st.wanderCooldown = math.max(0, (st.wanderCooldown or 0) - dt)
 
@@ -1066,12 +1146,43 @@ return function(ctx)
     local nx = (npc.cellX or 0) + (delta and delta[1] or 0)
     local ny = (npc.cellY or 0) + (delta and delta[2] or 0)
     local other = ambientAt(nx, ny, npc)
-    if other then
-      collisionBubble(npc, other)
+    local free = not occupiedByAmbient(world, nx, ny, npc)
+    if other or not free then
+      if other then collisionBubble(npc, other) end
       st.blockedTime = (st.blockedTime or 0) + dt
+      if st.blockedTime >= 0.18 then
+        st.blockedTime = 0
+        -- Turn away from the obstruction instead of repeatedly attempting the
+        -- same blocked tile. Prefer stepping back, then try a side-step. This
+        -- makes actors visibly yield to the player and to other NPCs.
+        local opposite = ({up="down",down="up",left="right",right="left"})[dir]
+        local candidates = {opposite}
+        if dir == "up" or dir == "down" then
+          candidates[#candidates + 1] = "left"; candidates[#candidates + 1] = "right"
+        else
+          candidates[#candidates + 1] = "up"; candidates[#candidates + 1] = "down"
+        end
+        local hAvoid = npcHandle(world, npc)
+        for _, alt in ipairs(candidates) do
+          local dd = ({up={0,-1},down={0,1},left={-1,0},right={1,0}})[alt]
+          local ax, ay = (tonumber(npc.cellX) or 0) + dd[1], (tonumber(npc.cellY) or 0) + dd[2]
+          local okCan, can = false, false
+          if not occupiedByAmbient(world, ax, ay, npc) and hAvoid then
+            okCan, can = pcall(hAvoid.canStep, hAvoid, alt)
+          end
+          if okCan and can and slowStep(hAvoid, npc, alt) then
+            npc.facing = alt
+            st.targetX, st.targetY = nil, nil
+            st.exitX, st.exitY = nil, nil
+            st.wanderTargetX, st.wanderTargetY = nil, nil
+            st.wanderTime = 0
+            st.blockedCount = 0
+            break
+          end
+        end
+      end
       return
     end
-    local free = not occupiedByAmbient(world, nx, ny, npc)
     -- Downhill ledge hop: bypass canStep and jump the 2 cells directly via
     -- Objects.scriptJump, mirroring Handle:stepNow's frozen/scriptBusy
     -- restore so routine state is unaffected.
@@ -1189,9 +1300,35 @@ return function(ctx)
         elseif facing == "down" then fy = fy and fy + 1
         elseif facing == "left" then fx = fx and fx - 1
         elseif facing == "right" then fx = fx and fx + 1 end
-        if npc.kantoLifeAmbient and fx ~= nil and fy ~= nil and npc.cellX == fx and npc.cellY == fy then
+        local facingCurrent = fx ~= nil and fy ~= nil and npc.cellX == fx and npc.cellY == fy
+        local facingDestination = fx ~= nil and fy ~= nil and npc.moving
+          and tonumber(npc.targetX) == tonumber(fx) and tonumber(npc.targetY) == tonumber(fy)
+        local isOurs = npc.kantoLifeAmbient or npc.kantoLifePokeAmbient
+          or (npc.def and (npc.def.kantoLifeAmbient or npc.def.kantoLifePokeAmbient))
+        npc.passable = false
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        local holdUntil = tonumber(npc._kantoLifeTalkHoldUntil) or 0
+        if isOurs and (facingCurrent or facingDestination or now < holdUntil) then
+          -- Native Field.interact ignores moving EventObjects. Snap into the
+          -- faced cell if mid-step, then hold still so A can start dialogue.
+          local targetX, targetY = tonumber(npc.targetX), tonumber(npc.targetY)
+          if facingDestination and targetX and targetY then
+            npc.cellX, npc.cellY = targetX, targetY
+          end
           npc.moving = false
+          npc.progress = 0
+          npc.targetX, npc.targetY = nil, nil
+          npc.frozen = true
+          if facingCurrent or facingDestination then
+            npc._kantoLifeTalkHoldUntil = now + 0.5
+          end
+          if tonumber(npc.cellX) then npc.px = npc.cellX * 16 end
+          if tonumber(npc.cellY) then npc.py = npc.cellY * 16 end
         else
+          if npc._kantoLifeTalkHoldUntil then
+            npc._kantoLifeTalkHoldUntil = nil
+            npc.frozen = false
+          end
           updateActor(world, npc, st, tick)
         end
       end

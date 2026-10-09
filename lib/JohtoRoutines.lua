@@ -84,9 +84,44 @@ return function(ctx)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._johtoLifeDepartMethod = method
     npc._johtoLifeDepartUntil = now + 1.2
+    -- Animation state for 2D draw + voxel pose. Species drives temporary
+    -- sprite substitution (random flying mon / psychic mon).
+    if method == "fly" or method == "teleport" then
+      local species
+      if method == "fly" then
+        local flyers = {"PIDGEY","SPEAROW","FARFETCHD","DODUO","CHARIZARD","AERODACTYL","DRAGONITE","ARTICUNO","ZAPDOS","MOLTRES","LUGIA","HO_OH"}
+        species = flyers[math.random(#flyers)]
+      else
+        -- Full Gen1+Gen2 Psychic-type pool for teleport.
+        local psychics = {
+          "ABRA","KADABRA","ALAKAZAM",
+          "SLOWPOKE","SLOWBRO","SLOWKING",
+          "DROWZEE","HYPNO",
+          "EXEGGCUTE","EXEGGUTOR",
+          "STARYU","STARMIE",
+          "MR_MIME","JYNX","SMOOCHUM",
+          "ESPEON","UNOWN","WOBBUFFET","WYNAUT",
+          "NATU","XATU","GIRAFARIG",
+          "MEWTWO","MEW","CELEBI",
+        }
+        species = psychics[math.random(#psychics)]
+      end
+      npc._johtoLifeTravelAnim = {
+        kind = method, frame = 0, total = 72,
+        species = species,
+        basePx = tonumber(npc.px) or ((tonumber(npc.cellX) or 0) * 16),
+        basePy = tonumber(npc.py) or ((tonumber(npc.cellY) or 0) * 16),
+        facing = npc.facing or "down",
+      }
+      npc._johtoLifeDepartSpecies = species
+      npc._johtoLifeDepartFrame = 0
+    end
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+    if method == "teleport" and type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "from")
+    end
   end
 
   local DIRS = {
@@ -987,6 +1022,15 @@ return function(ctx)
         states[key] = nil; stateKeys[key] = nil; goto continue
       end
       activateNative(npc)
+      -- Advance special travel visuals independently from path movement.
+      local travelAnim = npc._johtoLifeTravelAnim
+      if travelAnim then
+        travelAnim.frame = (tonumber(travelAnim.frame) or 0) + math.max(1, math.floor((tonumber(dt) or 1/60) * 60 + 0.5))
+        if travelAnim.frame >= (travelAnim.total or 72) then
+          npc._johtoLifeTravelAnim = nil
+          npc.facing = travelAnim.facing or npc.facing
+        end
+      end
 
       if not st.traveling then
         st.wait = math.max(0, (st.wait or 0) - (dt or 0))
