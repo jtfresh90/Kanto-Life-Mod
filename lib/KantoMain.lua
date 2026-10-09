@@ -6186,18 +6186,20 @@ local function nightlifeTick(world, dt)
         if self then
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
-            -- Teleport: GBC-faithful spin + rise with NPC's own sprite.
-            -- (No per-species Pokemon sprites in base game; GBC player
-            -- teleport never swaps sprite either — just spins/rises.)
-            -- Never mutate npc fields; pose-time only.
+            -- Teleport: spin + rise, showing a psychic Pokemon.
+            -- Uses SPRITE_MONSTER (generic, exists in base game) as the
+            -- teleport creature. GBC spins the player; we show the mon
+            -- doing the teleporting. Never mutate npc fields; pose-time only.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
+            local monSprite = nil
+            pcall(function() monSprite = getPokeSpriteObject("SPRITE_MONSTER") end)
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
             -- GBC: spin in place first, then rise (mirror engine spinRise)
             local rise = 0
             if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
             if rise > 60 then rise = 60 end
-            return sprite, px, py - rise, spinFacing, 0, false, false
+            return monSprite or sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
@@ -6205,10 +6207,22 @@ local function nightlifeTick(world, dt)
             -- GBC fxBird does exactly this while the player hides.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
-            pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
-            -- Fallback: try "BIRD" if SPRITE_BIRD lookup fails
+            -- Try direct sprite ID first (most reliable)
+            pcall(function()
+              local sprites = game and game.data and game.data.sprites
+              local birdId = "SPRITE_BIRD"
+              local def = sprites and sprites[birdId]
+              if def then
+                local ok, SR = pcall(require, "src.render.SpriteRenderer")
+                if ok and SR and SR.new then
+                  local ok2, obj = pcall(SR.new, def)
+                  if ok2 and obj then bird = obj end
+                end
+              end
+            end)
+            -- Fallback via helper
             if not bird then
-              pcall(function() bird = getPokeSpriteObject("BIRD") end)
+              pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
             end
             local total = fl.total or 90
             local progress = fl.frame / total
