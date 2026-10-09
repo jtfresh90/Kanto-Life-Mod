@@ -3223,6 +3223,20 @@ function putToSleep(npc)
       npc.sprite = npc._kantoOrigSprite
       npc._kantoOrigSprite = nil
     end
+    -- Clear sleep caches (fix stale sprite on re-sleep).
+    -- Without this, NPCs that wake and re-sleep reuse corrupted
+    -- caches: wrong sprite in 2D, invisible in voxel.
+    -- (Research 2026-10-09: bug existed since caches introduced,
+    -- exposed by increased sleep/wake cycling from Natural + roaming.)
+    npc._kantoSleepCanvas = nil
+    npc._kantoSleepSpriteActive = nil
+    npc._kantoSleepVoxelFrames = nil
+    npc._kantoSleepVoxelPaths = nil
+    npc._kantoSleepVoxelFrame = nil
+    npc._kantoSleepProxySprite = nil
+    npc._kantoSleepIsHgss = nil
+    npc.kantoLifeNaturalSleepStyle = nil
+    npc.kantoLifeRandomSleepStyle = nil
     npc.timer = love.math.random(30, 120)
   end
 
