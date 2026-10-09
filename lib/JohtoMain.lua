@@ -1505,6 +1505,26 @@ return function(mod)
             if isNight then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
+                -- Natural sleep style (Gen 1 parity)
+                pcall(function()
+                  if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                    local mapId = tostring(world.map.id or "")
+                    local naturalResult
+                    if not isIndoor(mapId, world.map) then naturalResult = 1
+                    elseif mapId:upper():find("HOUSE", 1, true) then naturalResult = 3
+                    else
+                      local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                      local h = 0
+                      for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                      naturalResult = (h < 80) and 2 or 0
+                    end
+                    npc.johtoLifeNaturalSleepStyle = naturalResult
+                  end
+                end)
+                -- Snap px/py to grid (Gen 1 parity)
+                if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+                  npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+                end
                 npc.frozen = true
                 npc.nightlifeSleeping = true
                 if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
@@ -1687,6 +1707,26 @@ return function(mod)
             if chosen[npc] and not d.johtoLifePokemon then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
+                -- Natural sleep style (Gen 1 parity)
+                pcall(function()
+                  if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                    local mapId = tostring(world.map.id or "")
+                    local naturalResult
+                    if not isIndoor(mapId, world.map) then naturalResult = 1
+                    elseif mapId:upper():find("HOUSE", 1, true) then naturalResult = 3
+                    else
+                      local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                      local h = 0
+                      for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                      naturalResult = (h < 80) and 2 or 0
+                    end
+                    npc.johtoLifeNaturalSleepStyle = naturalResult
+                  end
+                end)
+                -- Snap px/py to grid (Gen 1 parity)
+                if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+                  npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+                end
                 npc.frozen = true
                 npc.nightlifeSleeping = true
                 if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
@@ -1718,6 +1758,26 @@ return function(mod)
             if isNight then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
+                -- Natural sleep style (Gen 1 parity)
+                pcall(function()
+                  if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                    local mapId = tostring(world.map.id or "")
+                    local naturalResult
+                    if not isIndoor(mapId, world.map) then naturalResult = 1
+                    elseif mapId:upper():find("HOUSE", 1, true) then naturalResult = 3
+                    else
+                      local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                      local h = 0
+                      for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                      naturalResult = (h < 80) and 2 or 0
+                    end
+                    npc.johtoLifeNaturalSleepStyle = naturalResult
+                  end
+                end)
+                -- Snap px/py to grid (Gen 1 parity)
+                if type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+                  npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+                end
                 npc.frozen = true
                 npc.nightlifeSleeping = true
                 if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
