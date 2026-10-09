@@ -6233,7 +6233,16 @@ local function nightlifeTick(world, dt)
                   self.kantoLifeNaturalSleepStyle = nr
                 end
               end)
-              pcall(putToSleep, self)
+              -- Don't sleep within 5 cells of a door/warp (blocks player)
+              local onWarp = false
+              pcall(function()
+                if map and self.cellX and self.cellY then
+                  onWarp = nearWarp(map, math.floor(self.cellX), math.floor(self.cellY))
+                end
+              end)
+              if not onWarp then
+                pcall(putToSleep, self)
+              end
             end
             hardFreeze(self)
             -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
