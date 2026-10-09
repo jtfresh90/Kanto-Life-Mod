@@ -155,8 +155,10 @@ return function(mod)
       default = 0, min = 0, max = 50, step = 1 },
     { key = "poke_random", type = "toggle", label = "RANDOM POKE NPCS", default = true },
     { key = "sleeping_npcs", type = "toggle", label = "SLEEPING NPCS", default = true },
-    { key = "sleep_pct", type = "number", label = "SLEEP RATE %",
-      default = 30, min = 0, max = 100, step = 10 },
+    { key = "sleep_pct", type = "number", label = "SLEEP RATE % (DAY)",
+      default = 10, min = 0, max = 100, step = 10 },
+    { key = "sleep_pct_night", type = "number", label = "SLEEP RATE % (NIGHT)",
+      default = 80, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
     { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 }, { "Natural", 5 } } },
@@ -1388,12 +1390,10 @@ return function(mod)
   ensureNpcAgendaPersistence()
 
   -- Day Sleepers policy:
-  -- When enabled, each fresh game/mod load starts the sleep rate at 10%.
-  -- When disabled, leave the user's saved sleep rate untouched so it persists
-  -- across reboots. The internal option key stays the same for compatibility.
-  if opt("day_sleepers") == true then
-    setOpt("sleep_pct", 10)
-  end
+  -- When enabled, the DAY sleep rate defaults to 10% (separate from night).
+  -- The night rate (sleep_pct_night, default 80%) is never touched here.
+  -- When disabled, leave the user's saved rates untouched.
+  -- Note: sleep_pct default is now 10, sleep_pct_night default is 80.
 
   mod.events:on("map.entered", function(ev)
     local mapId, enteredMap = ev.mapId, ev.map
@@ -2359,7 +2359,9 @@ local nm = storyDisplayName(talker)
     return (idn + (isNight and 0 or 97)) % 100
   end
   local function shouldSleepNow(npc, isNight)
-    local pct = math.floor(tonumber(opt("sleep_pct")) or 15)
+    local key = isNight and "sleep_pct_night" or "sleep_pct"
+    local default = isNight and 80 or 10
+    local pct = math.floor(tonumber(opt(key)) or default)
     if pct <= 0 then return false end
     if pct > 100 then pct = 100 end
     if pct >= 100 then return true end
@@ -6320,8 +6322,8 @@ local function nightlifeTick(world, dt)
         if opt("sleeping_npcs") and type(shouldSleepNow) == "function" then
           local isNight = false
           pcall(function()
-            local ow = map and map or nil
-            -- night() expects overworld; approximate
+            local ow = mod.world and mod.world:overworld()
+            if ow then isNight = night(ow) end
           end)
           -- The engine owns the live player follower. Kanto Life must never
           -- enter its sleep path, even if the follower implementation does
