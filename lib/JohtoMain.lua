@@ -1445,7 +1445,7 @@ return function(mod)
     for i = 1, want do chosen[candidates[i].npc] = true end
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
-      if d.johtoLifeAmbient and not d.johtoLifePokemon then
+      if d.johtoLifeAmbient then
         -- Never sleep story-critical NPCs (safety check)
         local spr = tostring(d.sprite or ""):upper()
         local nm = tostring(d.name or ""):upper()
@@ -1461,7 +1461,7 @@ return function(mod)
             pcall(bakeRotatedSleepSprite, npc)
             pcall(function() if type(npc.face) == "function" then npc:face(sign > 0 and "LEFT" or "RIGHT") else npc.facing = sign > 0 and "LEFT" or "RIGHT" end end)
           end
-        elseif npc.nightlifeSleeping then
+        elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
           npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
           pcall(restoreRotatedSleepSprite, npc)
           if npc.johtoLifeSleepFacing ~= nil then
@@ -1486,7 +1486,7 @@ return function(mod)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
-            elseif npc.nightlifeSleeping then
+            elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
               npc.frozen = false
               npc.nightlifeSleeping = nil
               npc.johtoLifeSleepAngle = nil
@@ -1649,8 +1649,8 @@ return function(mod)
 
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
-          if d.johtoLifeAmbient and not d.johtoLifePokemon then
-            if chosen[npc] then
+          if d.johtoLifeAmbient then
+            if chosen[npc] and not d.johtoLifePokemon then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
                 npc.frozen = true
