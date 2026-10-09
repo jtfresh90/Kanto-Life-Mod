@@ -5130,6 +5130,17 @@ local function nightlifeTick(world, dt)
       local base = Overworld.interact
       Overworld.interact = function(self)
         if courtesyInteract(self) then return end
+        -- Allow talking to NPCs that are mid-step: freeze them so the engine's
+        -- `not npc.moving` gate in OverworldState:interact doesn't eat the A press.
+        pcall(function()
+          if self and self.player and type(self.player.facingCell) == "function" then
+            local fx, fy = self.player:facingCell()
+            if fx and type(self.npcAtCell) == "function" then
+              local npc = self:npcAtCell(fx, fy)
+              if npc and npc.moving then npc.moving = false end
+            end
+          end
+        end)
         return base(self)
       end
     end
@@ -5216,6 +5227,31 @@ local function nightlifeTick(world, dt)
           return nil
         end
       end
+      -- Gold: wrap Gen2World.npcAt to find mid-step NPCs by target cell.
+      -- Gold's World:interactBody uses npcAt (not npcAtCell), and NPC:covers()
+      -- only checks cellX/cellY, missing NPCs walking INTO the faced cell.
+      pcall(function()
+        local Gen2World = safeRequire("src.world.gen2.World")
+        if Gen2World and type(Gen2World.npcAt) == "function"
+           and not Gen2World._kantoLifeNpcAtWrapped then
+          local baseNpcAt = Gen2World.npcAt
+          Gen2World._kantoLifeNpcAtWrapped = true
+          Gen2World.npcAt = function(self, cx, cy)
+            local npc = baseNpcAt(self, cx, cy)
+            if npc then return npc end
+            -- Find mid-step NPCs by target cell
+            local npcs = self.npcs
+            if type(npcs) == "table" then
+              for _, n in ipairs(npcs) do
+                if type(n) == "table" and n.targetX == cx and n.targetY == cy then
+                  return n
+                end
+              end
+            end
+            return nil
+          end
+        end
+      end)
       if OWS and type(OWS.interact) == "function" and not OWS._kantoLifeInteractWrapped then
         local baseOWSInteract = OWS.interact
         OWS._kantoLifeInteractWrapped = true
