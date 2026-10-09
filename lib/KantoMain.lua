@@ -3972,7 +3972,7 @@ function putToSleep(npc)
                 -- bubble tail ~26 world px above the foot (matches 2D).
                 G.push()
                 G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale + 100, 1)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 60, 1)
                 G.pop()
               end
               end  -- end if ghOk else
