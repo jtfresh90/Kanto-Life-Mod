@@ -640,21 +640,35 @@ return function(ctx)
     local mw = tonumber(map and (map.widthCells or (map.width and map.width * 2) or (map.def and (map.def.widthCells or (map.def.width and map.def.width * 2))))) or 255
     local mh = tonumber(map and (map.heightCells or (map.height and map.height * 2) or (map.def and (map.def.heightCells or (map.def.height and map.def.height * 2))))) or 255
     local cx, cy = tonumber(npc and npc.cellX) or 0, tonumber(npc and npc.cellY) or 0
-    -- Pick a meaningfully distant local destination. Map-wide random targets
-    -- often selected unreachable tiles on the other side of walls, making NPCs
-    -- repeatedly take one or two steps and appear frozen near their anchor.
-    for _ = 1, 64 do
-      local radius = math.random(4, 9)
+    -- Wide map wander (no anchor tether). Prefer 8–20 cells away so NPCs
+    -- leave the local 2-cell bounce pattern. Avoid recently used cells.
+    local recent = npc._johtoWanderRecent
+    if type(recent) ~= "table" then recent = {}; npc._johtoWanderRecent = recent end
+    local function isRecent(tx, ty)
+      for _, c in ipairs(recent) do
+        if c[1] == tx and c[2] == ty then return true end
+      end
+      return false
+    end
+    for attempt = 1, 96 do
+      local radius = (attempt <= 48) and math.random(8, 20) or math.random(5, 12)
       local tx = cx + math.random(-radius, radius)
       local ty = cy + math.random(-radius, radius)
       local dist = math.abs(tx - cx) + math.abs(ty - cy)
-      if tx >= 1 and ty >= 1 and tx < mw - 1 and ty < mh - 1 and dist >= 4 then
+      if tx >= 1 and ty >= 1 and tx < mw - 1 and ty < mh - 1 and dist >= 6 and not isRecent(tx, ty) then
         local isDoor = false
         if map and type(map.isDoorTileCell) == "function" then pcall(function() isDoor = map:isDoorTileCell(tx,ty) end) end
         if not isDoor and not occupied(world, tx, ty, npc) then
-          if not map or type(map.isWalkableCell) ~= "function" then return {tx,ty} end
-          local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
-          if ok and walk then return {tx,ty} end
+          local walk = true
+          if map and type(map.isWalkableCell) == "function" then
+            local ok, w = pcall(map.isWalkableCell, map, tx, ty)
+            walk = ok and w
+          end
+          if walk then
+            recent[#recent + 1] = {tx, ty}
+            while #recent > 12 do table.remove(recent, 1) end
+            return {tx, ty}
+          end
         end
       end
     end
@@ -1045,12 +1059,21 @@ return function(ctx)
 
       if st.phase == "wander" then
         st.wait = (st.wait or 0) - (dt or 0)
+        -- Force a new target if lingering in the same two cells > 2s.
+        local cellKey = tostring(npc.cellX) .. "," .. tostring(npc.cellY)
+        if st._lastCellKey == cellKey then
+          st._cellDwell = (st._cellDwell or 0) + (dt or 0)
+        else
+          st._prevCellKey = st._lastCellKey
+          st._lastCellKey = cellKey
+          st._cellDwell = 0
+        end
+        local oscillating = st._prevCellKey and st._cellDwell > 2.0
+        if oscillating then st.wanderTarget = nil; st._cellDwell = 0 end
         if not st.wanderTarget then st.wanderTarget = wanderTarget(world, npc) end
         local wt = st.wanderTarget
         if wt and npc.cellX == wt[1] and npc.cellY == wt[2] then st.wanderTarget = nil end
         if st.wait <= 0 then
-          -- Fly/teleport/surf NPCs depart in place with a visual effect
-          -- instead of walking to a door or route exit.
           local kind = st.travelKind
           if kind == "fly" or kind == "teleport" or kind == "surf" then
             st.phase = "special_depart"
@@ -1067,14 +1090,41 @@ return function(ctx)
         goto continue
       end
 
-      -- Special departure: fly/teleport/surf. The NPC plays its effect in
-      -- place, then despawns and a replacement spawns at a random exit.
+      -- Special departure: fly/teleport/surf. Despawn, then spawn a replacement
+      -- that enters with the matching arrival style (fly-in / teleport-in).
       if st.phase == "special_depart" then
         st.wait = (st.wait or 0) - (dt or 0)
         if st.wait <= 0 then
-          local dest = destinationFor(world, npc, nil, "door")
-          if not dest then dest = destinationFor(world, npc, nil, "route") end
+          local kind = st.travelKind or "door"
+          local dest
+          if kind == "route" then
+            dest = destinationFor(world, npc, nil, "route")
+          elseif kind == "door" then
+            dest = destinationFor(world, npc, nil, "door")
+          else
+            -- fly/teleport: prefer a free walkable cell near a route/door edge
+            dest = destinationFor(world, npc, nil, "route")
+              or destinationFor(world, npc, nil, "door")
+          end
+          local departKind = kind
           if dest and spawnReplacement(world, npc, dest, nil) then
+            -- Tag the newest Johto routine NPC for arrival anim.
+            pcall(function()
+              for _, n in ipairs(world.npcs or {}) do
+                local dn = n.def and n.def.name
+                if type(dn) == "string" and dn:find("JOHTO_ROUTINE_", 1, true) and not n._johtoLifeArrivalDone then
+                  n._johtoLifeArrivalDone = true
+                  if departKind == "fly" or departKind == "teleport" then
+                    startDepartEffect(n, departKind)
+                    if n._johtoLifeTravelAnim then
+                      n._johtoLifeTravelAnim.mode = "in"
+                      n._johtoLifeTravelAnim.frame = 0
+                    end
+                  end
+                  break
+                end
+              end
+            end)
             states[key] = nil; stateKeys[key] = nil; goto continue
           end
           st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil

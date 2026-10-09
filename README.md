@@ -53,11 +53,12 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - **NPC-to-NPC collision reactions** with short speech bubbles in supported Gen 3 gameplay.
 - **Door Knocking** / house-entry etiquette.
 - **Sleeping NPCs** with adjustable sleep rates in 10% steps.
-- **Day Sleepers** option for occasional daytime sleepers.
+- **Day Sleepers** option for occasional daytime sleepers (10% of Pokémon NPCs).
 - **Sleep ZZZs** that can be enabled or disabled.
-- **Sleeping NPCs:** Default sleeping sprites only (grayscale, lying down). Tent/Sleeping Bag/Bed accessories disabled as of 1.4.31 — they caused visual regressions.
+- **Sleep accessories:** Tent, Sleeping Bag, and Bed styles, plus Natural (auto-selects by location).
 - **Grayscale sleeping characters** with stationary sleep poses.
 - **Voxel-safe sleeping visuals**, designed to work alongside supported 3D/voxel sprite systems without replacing their core rendering behavior.
+- **NPC travel animations:** teleport (spin + rise), fly (rise), surf — with species-appropriate sprite swaps.
 - **FireRed/Gen 3 ambient dialogue** with large, varied pools of contextual lines.
 - **Named spawned civilians** so ambient characters do not all appear under the same name.
 - **Progressive FireRed interactions:** repeated conversations can lead to an item, trade, or battle event.
@@ -74,10 +75,10 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 
 ## 🎮 Generation Support
 
-### Gen 1 — Kanto / Yellow (v1.4.36)
+### Gen 1 — Kanto / Yellow (v1.4.192)
 
-**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. HGSS sprite support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
-**Travel:** 25% fly / 25% teleport / 25% door / 25% route.
+**Sleep:** Grayscale, lying-down sprites with Zzz. HGSS sprite support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random/Natural).
+**Travel:** 25% fly / 25% teleport / 25% door / 25% route, with animated departures (teleport spin/rise, fly rise).
 **Wild mods:** Compatible with Wilds of Kanto, Wilds of Kanto Revival, Untamed Tohjo via pcall protections.
 
 - Extra human NPCs for towns and routes.
@@ -99,11 +100,13 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - Door Knocking.
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
+- Teleport/fly departure animations with native engine effects.
+- 5th-interaction events: item, trade, or battle.
 
-### Gen 2 — Gold / Johto (v1.4.36)
+### Gen 2 — Gold / Johto (v1.4.192)
 
-**Sleep:** 1.0.0-based. Grayscale, lying-down sprites with Zzz. 2D and voxel support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random).
-**Travel:** 25% fly / 25% teleport / 25% door / 25% route.
+**Sleep:** Grayscale, lying-down sprites with Zzz. 2D and voxel support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random/Natural).
+**Travel:** 25% fly / 25% teleport / 25% door / 25% route, with native teleport animation and fly rise.
 
 - Extra human NPCs for towns, routes, and interiors.
 - Adjustable indoor NPC population.
@@ -115,18 +118,20 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - Door approach cells to prevent doorway ping-pong.
 - Replacement spawning through usable entrances.
 - Sleeping NPCs with adjustable rate.
-- Daytime sleepers.
+- Daytime sleepers (10% of Pokémon NPCs sleep during day).
 - Sleep ZZZs.
-- Default sleeping sprites only (1.0.0 behavior; accessories disabled in 1.4.31).
+- Sleeping sprites with bed/tent/sleeping-bag accessories.
 - Grayscale/stationary sleeping presentation.
-- Sleep props that can be rendered safely with supported voxel/3D sprite setups.
-- NPC talk/collision bubbles.
+- Sleep props rendered safely with supported voxel/3D sprite setups.
+- NPC talk/collision bubbles (2D and voxel).
 - Door Knocking.
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
+- Teleport/fly departure animations.
+- 5th-interaction events: item, trade, or battle.
 - Migration of older Johto Life option data into the unified Kanto Life settings bucket.
 
-### Gen 3 — FireRed / LeafGreen / Emerald
+### Gen 3 — FireRed / LeafGreen / Emerald (v1.4.192)
 
 - Native Game3 EventObject-based ambient NPCs.
 - Extra human NPCs with real game graphics rather than fabricated placeholder actors.
@@ -161,12 +166,14 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 
 ## 💤 Sleeping NPCs
 
-Sleeping NPCs can use four visual styles:
+Sleeping NPCs can use six visual styles:
 
 1. **Default** — the NPC lies down in the sleep pose.
 2. **Tent** — adds the sleeping tent texture.
 3. **Sleeping Bag** — adds the sleeping-bag texture.
 4. **Bed** — adds the bed texture.
+5. **Random** — randomly assigns one of the above per NPC.
+6. **Natural** — auto-selects by location: tent outdoors, bed in houses, 80% sleeping bag / 20% default in other interiors.
 
 Sleeping characters are kept stationary and presented in a grayscale sleep state, with optional **ZZZ** effects. The implementation is designed to be safe for both traditional 2D rendering and supported voxel/3D overworld sprite systems.
 
@@ -199,7 +206,7 @@ Open the mod options from the game's normal options/mod interface. The available
 - **Sleep Rate %** — adjustable in 10% increments.
 - **Day Sleepers** — allow sleepers during daytime.
 - **Sleep ZZZ** — show/hide the ZZZ effect.
-- **Sleep Style** — Default, Tent, Sleeping Bag, or Bed.
+- **Sleep Style** — Default, Tent, Sleeping Bag, Bed, Random, or Natural (auto-selects: tent outdoors, bed in houses, 80% sleeping bag / 20% default elsewhere).
 - **NPC Talk Bubbles** — show/hide short NPC-to-NPC collision reactions.
 - **Door Knocking** — enable/disable house-entry etiquette.
 - **NPC Routines** — enable/disable routine behavior.
@@ -339,4 +346,4 @@ Kanto Life is built for the **gen1recomp** ecosystem and uses each supported gen
 
 Optional sprite, voxel, and overworld mods remain optional; Kanto Life adapts its behavior when their supported interfaces are present.
 
-**Current unified build:** `1.2.36`
+**Current unified build:** `1.4.192`

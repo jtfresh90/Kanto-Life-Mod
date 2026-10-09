@@ -4162,10 +4162,16 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local ok, v = pcall(Pipelines.worldPipeline)
           if ok then id = v end
         end
+        -- Battle Art Gen2, Potato Voxel, and any voxel-like pipeline.
         local isVoxel = (id == "voxel")
-          or (type(id) == "string" and id:lower():find("voxel", 1, true) ~= nil)
-          or (ctx and ctx.voxel == true)
-        if isVoxel and out then
+          or (type(id) == "string" and (
+               id:lower():find("voxel", 1, true)
+            or id:lower():find("potato", 1, true)
+            or id:lower():find("battle", 1, true)
+          ) ~= nil)
+          or (ctx and (ctx.voxel == true or ctx.pipeline == "voxel"))
+          or isVoxelPresentation()
+        if out and (isVoxel or (Voxel3D and type(Voxel3D.project) == "function")) then
           pcall(function() drawGoldSleep(out, ctx) end)
           pcall(function() drawGoldBubbles(out, ctx) end)
         end
