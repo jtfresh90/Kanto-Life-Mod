@@ -3979,11 +3979,12 @@ function putToSleep(npc)
                   if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
                   if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
                 end
-                -- Draw in world-px units under engine-equivalent scale;
-                -- bubble tail ~26 world px above the foot (matches 2D).
+                -- Draw in world-px units under engine-equivalent scale.
+                -- Bubble sits above the HEAD, not the foot. Foot is at oy;
+                -- head is ~32 world-px above foot, bubble tail ~12 above head.
                 G.push()
                 G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale - 26, 1)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 44, 1)
                 G.pop()
               end
               end  -- end if ghOk else
