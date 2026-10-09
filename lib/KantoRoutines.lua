@@ -276,206 +276,123 @@ return function(ctx)
   -- Update teleport/fly animations. Called every frame before the frozen check.
   -- Returns true if the NPC is currently animating (skip normal routine).
   local function updateTravelAnimation(npc, dt)
-    -- ENGINE-FAITHFUL travel animations (research 2026-10-09).
+    -- Travel animations: write directly to npc.py/px.
+    -- (NPC:pose wrapper removed in 1.4.153 - was breaking sleep rendering.
+    -- Direct writes work in 2D; voxel shows the movement via e.py.)
     --
-    -- The engine NEVER modifies player.py. The lift exists ONLY in the
-    -- pose return value. Our NPC:pose wrapper (KantoMain.lua) returns
-    -- ta.py/ta.px from npc._kantoTravelAnim; npc.py stays at ground.
-    -- 2D draws at returned py; voxel computes p.lift = e.py - vy.
-    --
-    -- Teleport: exact copy of Player teleport mechanics
-    -- (OverworldController.lua:2432, Player.lua:191-212, Player.lua:312-329)
-    -- Fly: engine path tables + phases (OverworldController.lua:2403, 6146)
+    -- Teleport: spin + rise with engine timing (135f out, 43f in)
+    -- Fly: move along path with bird sprite
 
     local SPIN_ORDER = {"down", "left", "up", "right"}
 
-    -- Teleport animation state
     local tp = npc.kantoLifeTeleport
     if tp then
-      -- Initialize _kantoTravelAnim on first frame
-      if not npc._kantoTravelAnim then
-        local holds, total, riseFrom, dropSteps
+      if tp.frame == nil then
+        tp.frame = 0
+        tp.spinStep = 0
         if tp.mode == "out" then
-          -- Departure: 135 frames (OverworldController.lua:2432)
-          holds = {15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0, 3,3,3,3,3,0}
-          total = 135
-          riseFrom = 15
+          tp.holds = {15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0, 3,3,3,3,3,0}
+          tp.total = 135
+          tp.riseFrom = 15
         else
-          -- Arrival: 43 frames (OverworldController.lua:5429)
-          holds = {3,3,3,3,3,0, 1,2,3,4,5,6,7,0}
-          total = 43
-          dropSteps = 6
+          tp.holds = {3,3,3,3,3,0, 1,2,3,4,5,6,7,0}
+          tp.total = 43
+          tp.dropSteps = 6
         end
-        npc._kantoTravelAnim = {
-          kind = "teleport",
-          frame = 0,
-          spinStep = 0,
-          spinHold = holds[1],
-          holds = holds,
-          total = total,
-          riseFrom = riseFrom,
-          dropSteps = dropSteps,
-          sprite = tp.sprite,  -- Abra (set by startDepartEffect)
-          px = npc.px,
-          py = npc.py,  -- BASE py; pose wrapper adds lift
-          facing = "down",
-          phase = 0,
-          sfxStep = -1,
-        }
+        tp.spinHold = tp.holds[1]
+        tp.origPy = npc.py
+        tp.origPx = npc.px
+        tp.origSprite = npc.sprite
+        tp.origFacing = npc.facing
+        -- Swap to Abra for teleport out
+        if tp.mode == "out" and tp.sprite then
+          npc.sprite = tp.sprite
+        end
         npc.frozen = true
-        -- Play departure SFX
-        if tp.mode == "out" then
-          pcall(function()
-            local S = require("src.core.Sound")
-            local g = type(getGame) == "function" and getGame() or nil
-            if g then S.play(g.data, "Teleport_Exit2") end
-          end)
-        else
-          pcall(function()
-            local S = require("src.core.Sound")
-            local g = type(getGame) == "function" and getGame() or nil
-            if g then S.play(g.data, "Teleport_Enter1") end
-          end)
-        end
       end
 
-      local ta = npc._kantoTravelAnim
-      ta.frame = ta.frame + 1
+      tp.frame = tp.frame + 1
 
-      -- Tick holds exactly like Player:update (Player.lua:191-212)
-      ta.spinHold = ta.spinHold - 1
-      while ta.spinHold <= 0 and ta.spinStep < #ta.holds - 1 do
-        ta.spinStep = ta.spinStep + 1
-        ta.spinHold = ta.holds[ta.spinStep + 1]
+      -- Tick spin (engine Player:update)
+      tp.spinHold = tp.spinHold - 1
+      while tp.spinHold <= 0 and tp.spinStep < #tp.holds - 1 do
+        tp.spinStep = tp.spinStep + 1
+        tp.spinHold = tp.holds[tp.spinStep + 1]
       end
 
-      -- SFX on step change (engine: steps 4,8,12 -> Exit2, step 16 -> Exit1)
-      if ta.spinStep ~= ta.sfxStep then
-        ta.sfxStep = ta.spinStep
-        local key = nil
-        if tp.mode == "out" then
-          if ta.spinStep == 4 or ta.spinStep == 8 or ta.spinStep == 12 then
-            key = "Teleport_Exit2"
-          elseif ta.spinStep == 16 then
-            key = "Teleport_Exit1"
-          end
-        end
-        if key then
-          pcall(function()
-            local S = require("src.core.Sound")
-            local g = type(getGame) == "function" and getGame() or nil
-            if g then S.play(g.data, key) end
-          end)
-        end
-      end
+      -- Spin facing
+      npc.facing = SPIN_ORDER[tp.spinStep % 4 + 1]
 
-      -- Render exactly like Player:pose (Player.lua:312-329)
-      ta.facing = SPIN_ORDER[ta.spinStep % 4 + 1]
-      ta.phase = 0
+      -- Rise/drop (write directly to npc.py)
       local lift = 0
       if tp.mode == "out" then
-        -- Departure: rise 16px per step after riseFrom
-        if ta.spinStep > ta.riseFrom then
-          lift = (ta.spinStep - ta.riseFrom) * 16
+        if tp.spinStep > tp.riseFrom then
+          lift = (tp.spinStep - tp.riseFrom) * 16
         end
       else
-        -- Arrival: start high, drop 16px per step
-        local left = (ta.dropSteps or 6) - ta.spinStep
+        local left = (tp.dropSteps or 6) - tp.spinStep
         if left > 0 then lift = left * 16 end
       end
-      -- ta.py is pose py (raised); npc.py stays at ground
-      ta.py = npc.py - lift
-      ta.px = npc.px  -- Stay in place horizontally
+      if type(tp.origPy) == "number" then
+        npc.py = tp.origPy - lift
+      end
 
       -- Done?
-      if ta.frame >= ta.total then
-        npc._kantoTravelAnim = nil
+      if tp.frame >= tp.total then
+        if tp.origPy then npc.py = tp.origPy end
+        if tp.origPx then npc.px = tp.origPx end
+        if tp.origSprite then npc.sprite = tp.origSprite end
+        if tp.origFacing then npc.facing = tp.origFacing end
         npc.kantoLifeTeleport = nil
         npc.frozen = false
         if tp.mode == "out" then
-          npc._kantoLifeTravelHidden = true  -- Hide until despawn
+          npc._kantoLifeTravelHidden = true
         end
       end
-      return true  -- Animating
+      return true
     end
 
-    -- Fly animation: engine path tables + phases
-    -- (OverworldController.lua:2403 flyTo, :6146 fxBird, :1364-1406 phases)
     local fl = npc.kantoLifeFly
     if fl then
-      if not npc._kantoTravelAnim then
-        -- FLY_PATH1, FLY_PATH2 from OverworldController.lua:85-97
-        -- (screen-space offsets, anchored at FLY_ANCHOR)
-        local FLY_ANCHOR = {0x3C, 0x48}
-        npc._kantoTravelAnim = {
-          kind = "fly",
-          t = 0,
-          phaseName = "flap",  -- flap -> path1 -> hold -> path2
-          sprite = fl.sprite,  -- Flying-type (set by startDepartEffect)
-          px = npc.px,
-          py = npc.py,
-          facing = "right",
-          phase = 0,
-          anchor = FLY_ANCHOR,
-          path1 = {{0x3C,0x48},{0x3A,0x4E},{0x38,0x54},{0x36,0x5A},{0x34,0x60},{0x32,0x66},{0x30,0x6C},{0x2E,0x72},{0x2C,0x78},{0x2A,0x7E},{0x28,0x84},{0x27,0xA0}},
-          path2 = {{0x1A,0x90},{0x16,0x88},{0x12,0x80},{0x0E,0x78},{0x0A,0x70},{0x06,0x68},{0x02,0x60},{-2,0x58},{-6,0x50},{-10,0x48},{-16,0x00}},
-        }
+      if fl.frame == nil then
+        fl.frame = 0
+        fl.origPx = npc.px
+        fl.origPy = npc.py
+        fl.origSprite = npc.sprite
+        if fl.sprite then
+          npc.sprite = fl.sprite  -- Flying-type
+        end
         npc.frozen = true
       end
 
-      local ta = npc._kantoTravelAnim
-      ta.t = ta.t + 1
+      fl.frame = fl.frame + 1
+      local total = 133  -- flap(24) + path1(36) + hold(40) + path2(33)
 
-      -- Phase machine (OverworldController.lua:1373-1406)
-      local phase, path, facing
-      if ta.t <= 24 then
-        phase, path, facing = "flap", nil, "right"
-      elseif ta.t <= 60 then  -- 24 + 36
-        phase, path, facing = "path1", ta.path1, "right"
-        if ta.t == 25 then  -- SFX at path1 entry
-          pcall(function()
-            local S = require("src.core.Sound")
-            local g = type(getGame) == "function" and getGame() or nil
-            if g then S.play(g.data, "Fly") end
-          end)
-        end
-      elseif ta.t <= 100 then  -- 60 + 40
-        phase, path, facing = "hold", nil, "right"
-      elseif ta.t <= 133 then  -- 100 + 33
-        phase, path, facing = "path2", ta.path2, "left"
-      else
-        -- Done
-        npc._kantoTravelAnim = nil
+      if fl.frame >= total then
+        if fl.origPx then npc.px = fl.origPx end
+        if fl.origPy then npc.py = fl.origPy end
+        if fl.origSprite then npc.sprite = fl.origSprite end
         npc.kantoLifeFly = nil
         npc.frozen = false
         if fl.mode == "out" then
           npc._kantoLifeTravelHidden = true
         end
-        return true
-      end
-
-      ta.phaseName = phase
-      ta.facing = facing
-      -- Wing flap: step % 2 (exactly like fxBird)
-      local step = math.floor(ta.t / 3)
-      ta.phase = step % 2
-
-      if path then
-        local pair = path[math.min(#path, step + 1)]
-        if pair then
-          -- Screen-space offset from anchor (fxBird math)
-          local sx = pair[2] - ta.anchor[2]
-          local sy = pair[1] - ta.anchor[1]
-          ta.px = npc.px + sx
-          ta.py = npc.py + sy
-        end
       else
-        -- Flap/hold: stay in place
-        ta.px = npc.px
-        ta.py = npc.py
+        -- Move up and away (simple arc)
+        local progress = fl.frame / total
+        if type(fl.origPx) == "number" and type(fl.origPy) == "number" then
+          if fl.mode == "out" then
+            npc.px = fl.origPx + progress * 120
+            npc.py = fl.origPy - progress * 100
+          else
+            npc.px = fl.origPx + (1 - progress) * 120
+            npc.py = fl.origPy - (1 - progress) * 100
+          end
+        end
+        -- Wing flap
+        npc.facing = (fl.frame % 16 < 8) and "right" or "left"
       end
-
-      return true  -- Animating
+      return true
     end
 
     return false  -- Not animating
