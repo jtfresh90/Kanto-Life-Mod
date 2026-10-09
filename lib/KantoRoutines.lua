@@ -92,6 +92,47 @@ return function(ctx)
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
+  -- Stuck recovery: teleport NPC to nearest walkable cell.
+  -- Called when blockedCount >= 3. Keeps the same NPC (no despawn/pop).
+  local function teleportUnstick(world, npc)
+    local map = world and world.map
+    if not map or type(map.isWalkableCell) ~= "function" then return false end
+    local cx, cy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
+    -- Spiral search: 5-15 cells away, find walkable unoccupied cell
+    for radius = 5, 15 do
+      for angle = 0, 7 do
+        local tx = cx + math.floor(radius * math.cos(angle * math.pi / 4) + 0.5)
+        local ty = cy + math.floor(radius * math.sin(angle * math.pi / 4) + 0.5)
+        if tx ~= cx or ty ~= cy then
+          local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
+          if ok and walk then
+            -- Check not occupied (simple: no other NPC at target)
+            local occupied = false
+            if world.npcs then
+              for _, other in ipairs(world.npcs) do
+                if other ~= npc and tonumber(other.cellX) == tx and tonumber(other.cellY) == ty then
+                  occupied = true
+                  break
+                end
+              end
+            end
+            if not occupied then
+              -- Teleport with visual cue
+              startDepartEffect(npc, "teleport")
+              npc.cellX, npc.cellY = tx, ty
+              if type(npc.px) == "number" then npc.px, npc.py = tx * 16, ty * 16 end
+              npc.targetX, npc.targetY = nil, nil
+              npc.moving = false
+              startArriveEffect(npc, "teleport")
+              return true
+            end
+          end
+        end
+      end
+    end
+    return false
+  end
+
   local function startArriveEffect(npc, method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeArriveMethod = method
@@ -470,7 +511,10 @@ return function(ctx)
     st.localRoamRadius = 70  -- 3x area (was 40)
     -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
     -- They use wanderTarget() but never despawn at doors.
-    st.roamFar = (not traveling) and (math.random() < 0.3)
+    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area)
+    local d2 = npc.def or {}
+    local isPoke2 = npc.kantoLifePokeAmbient or d2.kantoLifePokeAmbient
+    st.roamFar = isPoke2 or ((not traveling) and (math.random() < 0.3))
     st.blockedTime = 0
     st.blockedCount = 0
     st.travelKind = pickTravelKind(npc, world or lastWorld)
@@ -556,7 +600,7 @@ return function(ctx)
         end
       end
       -- Raised for 3x area: covers ~d=63 in open terrain (was 5000)
-      if #qx > 8000 then break end
+      if #qx > 20000 then break end  -- Increased for Pokemon long-range (was 8000)
     end
     if not seen[goalKey] then return nil end
     local rev, k = {}, goalKey
@@ -869,8 +913,13 @@ return function(ctx)
     -- (user requirement: routines should travel far, not small squares)
     -- 3x AREA: ±70 (140x140=19,600 cells vs 80x80=6,400)
     -- User requirement: routines cover 3x as much area
-    for _ = 1, 40 do
-      local radius = (st and st.localRoamRadius) or 70
+    -- POKEMON: ±200 (400x400=160,000 cells, ~8x human range)
+    local d = npc.def or {}
+    local isPoke = npc.kantoLifePokeAmbient or d.kantoLifePokeAmbient
+    local pokeRadius = 200
+    local attempts = isPoke and 60 or 40
+    for _ = 1, attempts do
+      local radius = isPoke and pokeRadius or ((st and st.localRoamRadius) or 70)
       local tx = cx + math.random(-radius, radius)
       local ty = cy + math.random(-radius, radius)
       if tx ~= cx or ty ~= cy then
@@ -1276,17 +1325,27 @@ return function(ctx)
             st.target = destinationFor(world, npc, st.target, st.travelKind)
             if st.blockedCount >= 3 then
               st.blockedCount = 0
-              -- Last resort: the NPC leaves by surf/fly. Uses the same paired
-              -- primitive as a doorway exit (despawn here, a replacement pops
-              -- at another exit), so the population stays stable.
-              local replacement = destinationFor(world, npc, st.target, st.travelKind)
-              if replacement and spawnReplacement(world, npc, replacement, st.target) then
-                states[key] = nil; stateKeys[key] = nil; goto continue
+              -- Stuck recovery: try teleport to nearby cell first (keeps same NPC).
+              -- Falls back to despawn/replacement if teleport fails.
+              if teleportUnstick(world, npc) then
+                st.phase = "wander"
+                st.wait = 1.0
+                st.wanderTarget = nil
+                st.target = nil
+                st.localTarget = nil
+              else
+                -- Last resort: the NPC leaves by surf/fly. Uses the same paired
+                -- primitive as a doorway exit (despawn here, a replacement pops
+                -- at another exit), so the population stays stable.
+                local replacement = destinationFor(world, npc, st.target, st.travelKind)
+                if replacement and spawnReplacement(world, npc, replacement, st.target) then
+                  states[key] = nil; stateKeys[key] = nil; goto continue
+                end
+                st.phase = "wander"
+                st.wait = 1.0
+                st.wanderTarget = nil
+                st.target = nil
               end
-              st.phase = "wander"
-              st.wait = 1.0
-              st.wanderTarget = nil
-              st.target = nil
             end
           elseif st.repath > 1.0 then
             st.repath = 0
