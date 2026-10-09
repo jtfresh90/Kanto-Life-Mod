@@ -891,6 +891,9 @@ return function(mod)
     local d = npc.def or {}
     if d.kantoLifePokeAmbient or npc.kantoLifePokeAmbient then return true end
     if tostring(d.name or ""):match("^KANTO_POKE_") then return true end
+    -- Wilds of Kanto names entities wilds_of_kanto_entity_%d
+    if tostring(d.name or ""):match("^wilds_of_kanto_entity_") then return true end
+    if tostring(npc.name or ""):match("^wilds_of_kanto_entity_") then return true end
     return false
   end
 
@@ -3638,7 +3641,7 @@ function putToSleep(npc)
   end
 
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
-  local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
+  local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","BATTLE_ART_VOXEL_GEN2","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel","potato_voxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
     -- Try multiple paths for platform compatibility.
     -- In Gold (gen1=false), use the Gen 2 NPC class (src.world.gen2.Npc).
@@ -3830,7 +3833,7 @@ function putToSleep(npc)
           return battleLib
         end
         if type(mod.find) == "function" then
-          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL" }) do
+          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL" }) do
             local ok, m = pcall(mod.find, id)
             local lib = ok and m and m.exports and m.exports.lib or nil
             if lib and type(lib.require) == "function" then
@@ -5601,7 +5604,9 @@ local function nightlifeTick(world, dt)
       if NPCMod and NPCMod._kantoLifePublicSleepRenderer then return end
 
       local okFind, battle = pcall(function()
-        return mod.find("BATTLE_ART_VOXEL_FORK")
+        local m = mod.find("BATTLE_ART_VOXEL_FORK")
+        if not m then m = mod.find("BATTLE_ART_VOXEL_GEN2") end
+        return m
       end)
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
@@ -6129,7 +6134,9 @@ local function nightlifeTick(world, dt)
       if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
       pcall(function() fileLog("BUBBLE: attempting registration") end)
       local okFind, battle = pcall(function()
-        return mod.find("BATTLE_ART_VOXEL_FORK")
+        local m = mod.find("BATTLE_ART_VOXEL_FORK")
+        if not m then m = mod.find("BATTLE_ART_VOXEL_GEN2") end
+        return m
       end)
       if not okFind or not battle then
         okFind, battle = pcall(function()
