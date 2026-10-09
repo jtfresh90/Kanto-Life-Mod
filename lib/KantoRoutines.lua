@@ -79,6 +79,11 @@ return function(ctx)
     else return "route" end
   end
 
+  -- Forward declarations are required because startDepartEffect is defined
+  -- before the animation implementations. Without these locals, Lua resolves
+  -- the calls as globals and the Yellow/Gen1 departure effects silently fail.
+  local npcTeleportOut, npcFlyOut, npcTeleportIn, npcFlyIn
+
   -- Visual departure effect markers. The main controller's draw wrappers can
   -- use these for fancier effects; the routines themselves just need the
   -- timing. Fail-open: if nothing reads them, the NPC still despawns.

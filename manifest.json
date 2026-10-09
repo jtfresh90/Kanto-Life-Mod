@@ -1,7 +1,7 @@
 {
   "id": "kanto_life_experimental",
   "name": "Kanto Life Experimental",
-  "version": "1.4.183-exp1",
+  "version": "1.4.186-exp1",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -26,7 +26,7 @@
     "TERRARIUM"
   ],
   "conflicts": [],
-  "description": "EXPERIMENTAL FORK of Kanto Life for testing lifelike-NPC features (schedules, jobs, weather reactions, NPC memory, groups, player reactions, door greetings). Do not distribute as the main mod. Unified Kanto Life for Gen1, Gen2, and Gen3 including FireRed/LeafGreen/Emerald: continuous ambient movement, route/door routines, Gen3 dialogue and interaction events, NPC collision bubbles, and voxel-safe sleep props. Yellow keeps the engine-native local walker active and uses the controller for route/door travel; Gen3 uses native profile-specific Game3 graphics and world handles.",
+  "description": "Unified Kanto Life for Gen1, Gen2, and Gen3 including FireRed/LeafGreen/Emerald: continuous ambient movement, route/door routines, Gen3 dialogue and interaction events, NPC collision bubbles, and voxel-safe sleep props. Yellow keeps the engine-native local walker active and uses the controller for route/door travel; Gen3 uses native profile-specific Game3 graphics and world handles.",
   "github": "jtfresh90/Kanto-Life-Mod",
   "affects_link": false,
   "experimental": false

@@ -233,7 +233,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 }, { "Natural", 5 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -1122,9 +1122,9 @@ return function(mod)
           end },
         { label = "DAY SLEEP", right = opt("day_sleepers") and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("day_sleepers", not opt("day_sleepers")) end },
-        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
-          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%5; setOpt("sleep_style",n) end,
-          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%5; setOpt("sleep_style",n) end },
+        { label = "SLEEP STYLE", right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default", stepper = true,
+          step = function(dir) local n=(math.floor(tonumber(opt("sleep_style")) or 0)+(dir or 1))%6; setOpt("sleep_style",n) end,
+          onSelect = function() local n=(math.floor(tonumber(opt("sleep_style")) or 0)+1)%6; setOpt("sleep_style",n) end },
         { label = "NPC TALK BUBBLES", right = opt("npc_collision_bubbles") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_collision_bubbles", not (opt("npc_collision_bubbles") ~= false)) end },
         { label = "NPC ROUTINES", right = opt("npc_routines") and "ON" or "OFF", stepper = true,
@@ -1624,8 +1624,8 @@ return function(mod)
     for i = 1, want do chosen[candidates[i].npc] = true end
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
-      if d.johtoLifeAmbient and not d.johtoLifePokemon then
-        -- Never sleep story-critical NPCs (safety check, 1.4.26)
+      if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and not (d.johtoLifePokemon or npc.johtoLifePokemon) then
+        -- Never sleep story-critical NPCs (safety check)
         local spr = tostring(d.sprite or ""):upper()
         local nm = tostring(d.name or ""):upper()
         local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
@@ -1652,7 +1652,7 @@ return function(mod)
         -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
-          if d.johtoLifeAmbient and d.johtoLifePokemon then
+          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and (d.johtoLifePokemon or npc.johtoLifePokemon) then
             if isNight then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
@@ -2374,7 +2374,7 @@ return function(mod)
 
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
-          if d.johtoLifeAmbient and not d.johtoLifePokemon then
+          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and not (d.johtoLifePokemon or npc.johtoLifePokemon) then
             if chosen[npc] then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
@@ -2414,7 +2414,7 @@ return function(mod)
         -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
-          if d.johtoLifeAmbient and d.johtoLifePokemon then
+          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and (d.johtoLifePokemon or npc.johtoLifePokemon) then
             if isNight then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
@@ -3396,6 +3396,20 @@ function isVoxelPresentation()
   local function resolveSleepStyle(npc)
     -- Accessories re-enabled (1.4.45)
     local style = math.floor(tonumber(opt("sleep_style")) or 0)
+    if style == 5 then
+      -- Natural mirrors Kanto: tent outdoors, bed in houses, and sleeping
+      -- bag/default for other interiors. Resolve once per sleep session.
+      local cached = npc.kantoLifeNaturalSleepStyle
+      if cached ~= nil then return cached end
+      local ow = mod.world and mod.world:overworld()
+      local map = ow and ow.map
+      local id = tostring(map and map.id or ""):upper()
+      if not isIndoor(id, map) then cached = 1
+      elseif id:find("HOUSE", 1, true) or id:find("HOME", 1, true) then cached = 3
+      else cached = (math.random(100) <= 80) and 2 or 0 end
+      npc.kantoLifeNaturalSleepStyle = cached
+      return cached
+    end
     if style ~= 4 then return style end
     local cached = npc.kantoLifeRandomSleepStyle
     if cached == nil then
@@ -3418,9 +3432,9 @@ function isVoxelPresentation()
       love.graphics.push("all")
       love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
-      -- Shift toward feet so the head hole aligns with the head (not covering it)
-      local shiftX = (math.sin(angle) * 10)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      -- Keep the accessory centered on the NPC anchor. A prior +10px
+      -- horizontal shift pushed beds/bags right of the sleeper in 2D.
+      love.graphics.translate(px + 8, py + 8)
       love.graphics.rotate(angle)
       love.graphics.translate(-iw/2, -ih/2)
       love.graphics.draw(img, 0, 0)
@@ -3444,9 +3458,9 @@ function isVoxelPresentation()
       -- whenever scale ~= 1 and offset them even at scale == 1.
       love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
-      -- Shift toward feet so the head hole aligns with the head (not covering it)
-      local shiftX = style == 1 and 0 or (math.sin(angle) * 10)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      -- Center the accessory on the same anchor as the sprite. The asset's
+      -- transparent head opening already handles the head clearance.
+      love.graphics.translate(px + 8, py + 8)
       if style == 2 or style == 3 then love.graphics.rotate(angle) end
       -- Center the accessory on the NPC (was -ih, causing head coverage)
       love.graphics.translate(-iw/2, -ih/2)
@@ -3468,20 +3482,18 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       local font = G.getFont()
       local tw, th = font:getWidth(text), font:getHeight()
       local w, h = math.max(22, tw + 10), math.max(13, th + 5)
-      -- ox,oy arrive as the negated, scaled camera offset (see World draw),
-      -- so screen position is ox + world*scale. (Previously this subtracted
-      -- ox, displacing the bubble by twice the camera offset, usually
-      -- off-screen.)
-      local s = scale or 1
-      local x = (ox or 0) + px * s + 8 * s - w/2
-      local y = (oy or 0) + py * s - h - 4
+      -- NPC:draw supplies screen-space draw offsets, just like the sleep-prop
+      -- renderer. Add those offsets; subtracting them treated them as camera
+      -- coordinates and pushed bubbles off-screen / to the wrong side indoors.
+      local screenX = (ox or 0) + px + 8
+      local screenY = (oy or 0) + py
+      local x = screenX - w/2
+      local y = screenY - h - 4
       G.setColor(1,1,1,1); G.rectangle("fill",x,y,w,h,2,2)
       G.setColor(0.1,0.1,0.1,1); G.rectangle("line",x,y,w,h,2,2)
       G.polygon("fill",x+w/2-2,y+h,x+w/2+2,y+h,x+w/2,y+h+3)
       G.setColor(0.1,0.1,0.1,1)
-      -- Text must be positioned relative to the box (x,y), not using the
-      -- old pre-fix formula. Center it in the box.
-      G.print(text, x + (w - tw)/2, y + (h-th)/2)
+      G.print(text, screenX - tw/2, y + (h-th)/2)
       G.pop()
     end
 
@@ -3527,11 +3539,27 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       NPC._johtoLifeZzzWrapped = nil
       local baseDraw = NPC.draw
       NPC.draw = function(self, ox, oy, scale)
-        -- Always preserve original 2-arg behavior through base
+        -- The native 2D path calls draw(self, camX, camY) without a scale.
+        -- Keep that signature, but layer in the same props/bubbles as the
+        -- scaled path; previously this early return skipped both entirely.
         if scale == nil then
-          local r = baseDraw(self, ox, oy)
-          if not isVoxelPresentation() then
-            drawZzzForNpc(self, ox, oy, nil)
+          local r = nil
+          local sleeping = self and self.nightlifeSleeping
+          if sleeping then
+            local style = resolveSleepStyle(self)
+            if style ~= 1 and style ~= 0 then
+              pcall(drawSleepAccessoryBase, self, -(ox or 0), -(oy or 0), 1)
+            end
+            if style ~= 1 then r = baseDraw(self, ox, oy) end
+            pcall(drawSleepAccessory, self, -(ox or 0), -(oy or 0), 1)
+            if not isVoxelPresentation() then
+              drawZzzForNpc(self, ox, oy, nil)
+            end
+          else
+            r = baseDraw(self, ox, oy)
+            local cbUntil = tonumber(self and self._kantoLifeCollisionBubbleUntil) or 0
+            local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+            if cbUntil > cbNow then pcall(drawCollisionBubble, self, -(ox or 0), -(oy or 0), 1) end
           end
           return r
         end
@@ -3706,8 +3734,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       end
 
       local function drawGoldSleep(canvas, ctx)
-        if not canvas or not ctx or opt("sleep_bubbles") == false then return end
-        if not setupSleepRuntime() then return end
+        if not canvas or not ctx then return end
+
+        -- Props and the sleeper model are independent of the optional Zzz
+        -- toggle. Only initialize Gold's battle-animation runtime when Zzz is
+        -- enabled; otherwise still render beds/tents/bags in voxel mode.
+        local showZzz = opt("sleep_bubbles") ~= false
+        if showZzz and not setupSleepRuntime() then showZzz = false end
 
         local state = ctx.state
         if not state then return end
@@ -3746,8 +3779,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local ow = type(canvas.getWidth) == "function" and canvas:getWidth() or iw
         local oh = type(canvas.getHeight) == "function" and canvas:getHeight() or ih
         local sxRatio, syRatio = ow / iw, oh / ih
-        local frame = math.floor(((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 60)
-        stepSleepRuntime(frame)
+        if showZzz then
+          local frame = math.floor(((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 60)
+          stepSleepRuntime(frame)
+        end
 
         Gfx.push("all")
         Gfx.setShader()
@@ -3862,21 +3897,15 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               if scale < 0.35 then scale = 0.35 end; if scale > 8.0 then scale = 8.0 end
               -- Determine prop style first (tent replaces, others go on top).
               -- Accessories re-enabled (1.4.45)
-              local propStyle = math.floor(tonumber(opt("sleep_style")) or 0)
-              if propStyle == 4 then
-                propStyle = npc.kantoLifeRandomSleepStyle
-                if propStyle == nil then
-                  propStyle = math.random(0, 3)
-                  npc.kantoLifeRandomSleepStyle = propStyle
-                end
-              end
+              local propStyle = 0
+              pcall(function() propStyle = resolveSleepStyle(npc) end)
+              propStyle = math.floor(tonumber(propStyle) or 0)
               -- Tent (style 1) REPLACES the default sprite; skip it.
               -- Bed/bag (2,3) and default (0) draw the sprite.
-              if propStyle ~= 1 then
-                local pang = math.pi/2
-                Gfx.push()
+              if showZzz then
                 local tx = x - BATTLE_ANCHOR_X * scale
                 local ty = y - BATTLE_ANCHOR_Y * scale
+                Gfx.push()
                 Gfx.scale(scale, scale)
                 drawSleepObjectsWithOutline(tx / scale, ty / scale, scale)
                 Gfx.pop()
@@ -3898,8 +3927,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                                 Gfx.setColor(1,1,1,1)
 -- groundX/groundY are unscaled; x/y were already scaled at line 2987.
                 -- Scale ground before averaging, don't scale the result.
-                local propX = (groundX * sxRatio + x) * 0.5
-                local propY = (groundY * syRatio + y) * 0.5
+                local propX = groundX * sxRatio
+                local propY = groundY * syRatio
             Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
                 Gfx.pop()
               end
@@ -3937,14 +3966,31 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
             local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
             local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
-            -- Screen position
-            local sx = (px - camX) * scale
-            local sy = (py - camY) * scale
+            -- In voxel mode, NPC world coordinates are not screen coordinates.
+            -- Project the same foot anchor the voxel renderer uses; fall back to
+            -- the 2D camera transform only if the renderer cannot project it.
+            local sx, sy
+            local projected = false
+            if Voxel3D and type(Voxel3D.project) == "function" then
+              local okP, pxs, pys = pcall(Voxel3D.project, px + 8, 0, py + 8)
+              if okP and type(pxs) == "number" and type(pys) == "number" then
+                local aa = 1
+                pcall(function()
+                  local AALib = V.require("AntiAlias")
+                  if AALib and type(AALib.factor) == "function" then aa = tonumber(AALib.factor()) or 1 end
+                end)
+                if aa < 1 then aa = 1 end
+                sx, sy, projected = pxs / aa, pys / aa, true
+              end
+            end
+            if not projected then
+              sx, sy = (px - camX) * scale, (py - camY) * scale
+            end
             local font = Gfx.getFont()
             local tw = 12
             pcall(function() if font then tw = font:getWidth(text) end end)
             local w, h = math.max(24, tw + 10), 16
-            local bx, by = sx + 8 * scale - w/2, sy - 30 * scale
+            local bx, by = sx + 8 * (projected and 1 or scale) - w/2, sy - 30 * (projected and 1 or scale)
             Gfx.setColor(1, 1, 1, 1)
             Gfx.rectangle("fill", bx, by, w, h, 3, 3)
             Gfx.setColor(0.1, 0.1, 0.1, 1)
