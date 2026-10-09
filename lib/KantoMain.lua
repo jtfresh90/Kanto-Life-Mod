@@ -3838,10 +3838,9 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- DISABLED: Voxel bubble projection is broken (follows camera).
-        -- Needs engine billboard approach (Tilt.groundPoint with cam offset).
-        -- 2D bubbles work via NPCMod.draw. Re-enable after proper fix.
-        do return out end
+        -- Voxel bubbles: match engine/Battle Art approach.
+        -- Project FOOT position (world coords), then offset in screen space.
+        -- Battle Art: Voxel3D.project(wx, 0, wy) — height handled in 2D.
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -3936,31 +3935,22 @@ function putToSleep(npc)
               -- bubbles pin-sized. Bubble base height is 12px at scale=1;
               -- scale so 12px = 12 world units (matches NPC scale).
               -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
-              -- Camera pitch displaces high 3D points horizontally; at body
-              -- height the projected X matches the sprite's screen center.
-              -- Then apply screen-space Y offset (no pitch distortion).
-              local okP, bx3d, by3d = pcall(Voxel3D.project, px + 8, gh + 2, py + 8)
-              if okP and type(bx3d) == "number" and type(by3d) == "number"
-                 and math.abs(bx3d) < 10000 and math.abs(by3d) < 10000 then
-                local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 14, py + 8)
-                local scale = 1
-                if okP2 and type(y2) == "number" then
-                  local pxPer12 = math.abs(y2 - by3d)
-                  scale = pxPer12 / 12
-                  if scale < 0.5 then scale = 0.5 end
-                  if scale > 8 then scale = 8 end
-                end
-                local bx, by = bx3d * sxRatio, by3d * syRatio
-                -- Screen-space offset above body center
-                local yOff = 26 * scale * sxRatio
-                by = by - yOff
-                -- Viewport clamp (preserves 1.4.132 edge fix)
+              -- Match engine/Battle Art: project FOOT (ground level),
+              -- then offset bubble in screen space above.
+              -- Battle Art: Voxel3D.project(wx, 0, wy)
+              local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
+              if okP and type(sx) == "number" and type(sy) == "number"
+                 and math.abs(sx) < 10000 and math.abs(sy) < 10000 then
+                -- Screen-space: bubble sits above the foot position
+                -- (engine fxEmote draws at ey = py - 20)
+                local bx, by = sx, sy - 28
+                -- Viewport clamp
                 local vw, vh = G.getDimensions()
                 if bx < 8 then bx = 8 end
                 if bx > vw - 8 then bx = vw - 8 end
                 if by < 8 then by = 8 end
                 if by > vh - 8 then by = vh - 8 end
-                drawCollisionBubble(npc, bx, by, scale * sxRatio)
+                drawCollisionBubble(npc, bx, by, 1)
               end
               end  -- end if ghOk else
             end
