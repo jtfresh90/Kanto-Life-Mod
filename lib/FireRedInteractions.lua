@@ -743,12 +743,24 @@ local function spriteGender(npc, def)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = realNow() + (tonumber(seconds) or 30)
     npc._kantoLifeFRTalkPaused = true
+    -- Freeze the event object too: pausing only the routine still allowed the
+    -- engine movement update to carry an NPC through its dialogue.
+    if npc._kantoLifeFROrigFrozen == nil then npc._kantoLifeFROrigFrozen = npc.frozen end
+    npc.frozen = true
+    npc.targetX, npc.targetY = nil, nil
+    npc.moving = false
   end
 
   releaseActor = function(npc)
     if not npc then return end
     npc._kantoLifeFRTalkHoldUntil = nil
     npc._kantoLifeFRTalkPaused = nil
+    if npc._kantoLifeFROrigFrozen ~= nil then
+      npc.frozen = npc._kantoLifeFROrigFrozen
+      npc._kantoLifeFROrigFrozen = nil
+    else
+      npc.frozen = false
+    end
   end
 
   local function progressive(game, npc)

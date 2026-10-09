@@ -302,17 +302,10 @@ return function(ctx)
     end
     return cached
   end
-  local function accessoryImage(style)
-    style = math.floor(tonumber(style) or 0)
-    if style == 0 then return nil end
-    local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
-    local rel = names[style]; if not rel then return nil end
+  local function loadSleepAsset(rel)
     if accessoryCache[rel] then return accessoryCache[rel] end
     local path = rel
     local ok, img = false, nil
-    -- Prefer the mod asset cache API. This is the engine-supported way to
-    -- resolve bundled art and avoids a generation-specific 2D/voxel path
-    -- mismatch. Keep the old path fallback for older runtimes.
     if mod.assets and type(mod.assets.image) == "function" then
       ok, img = pcall(mod.assets.image, mod.assets, "assets/" .. rel)
     end
@@ -320,19 +313,32 @@ return function(ctx)
       if mod.assets and type(mod.assets.path) == "function" then
         path = mod.assets:path("assets/" .. rel)
       else
-        -- Fallback: try relative to mod directory
         local modPath = (mod and mod.path) or ""
         if modPath ~= "" then path = modPath .. "/assets/" .. rel end
       end
       ok, img = pcall(love.graphics.newImage, path)
     end
-    -- Last resort: try just the asset name (love filesystem)
     if (not ok or not img) and path ~= rel then
       ok, img = pcall(love.graphics.newImage, "assets/" .. rel)
     end
     if ok and img then img:setFilter("nearest","nearest"); accessoryCache[rel]=img; return img end
     mod.log:warn("Kanto Life: could not load FireRed sleep prop %s", tostring(rel))
     return nil
+  end
+  local function accessoryImage(style)
+    style = math.floor(tonumber(style) or 0)
+    if style == 0 then return nil end
+    local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
+    local rel = names[style]; if not rel then return nil end
+    return loadSleepAsset(rel)
+  end
+  -- Opaque underlay for the 3-layer system (drawn under the NPC).
+  local function accessoryBaseImage(style)
+    style = math.floor(tonumber(style) or 0)
+    if style ~= 2 and style ~= 3 then return nil end
+    local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
+    local rel = names[style]; if not rel then return nil end
+    return loadSleepAsset(rel)
   end
 
   local function makeSleepImage(npc, key, image, quad, fw, fh, flip)
@@ -363,7 +369,9 @@ return function(ctx)
       imageCache[key]=canvas; return canvas
     end
     local accessory = accessoryImage(style)
-    local canvas = love.graphics.newCanvas(24,24)
+    local baseProp = accessoryBaseImage(style)
+    -- Larger 36px canvas prevents the requested 50% larger bed/bag from being clipped.
+    local canvas = love.graphics.newCanvas(36,36)
     local previous = love.graphics.getCanvas()
     love.graphics.setCanvas(canvas); love.graphics.clear(0,0,0,0); love.graphics.setColor(1,1,1,1)
     if not grayShader and love.graphics.newShader then
@@ -376,20 +384,34 @@ return function(ctx)
       ]]); if ok then grayShader = shader end
     end
     local angle=(flip and -1 or 1)*math.pi/2
-    -- Keep the sleeper itself exactly as before: rotated and grayscale.
-    if grayShader then love.graphics.setShader(grayShader) end
-    love.graphics.push(); love.graphics.translate(12,12); love.graphics.rotate(angle); love.graphics.translate(-fw/2,-fh/2)
-    if quad then love.graphics.draw(image,quad,0,0) else love.graphics.draw(image,0,0) end
-    love.graphics.pop()
-    love.graphics.setShader()
+    -- 3-layer: opaque base UNDER the sleeper, then sleeper, then overlay.
+    if baseProp then
+      local bw,bh=baseProp:getDimensions()
+      local shiftX = (-math.sin(angle) * 6.5)
+      love.graphics.push(); love.graphics.translate(18 + shiftX,18)
+      love.graphics.rotate(angle); love.graphics.scale(1.5,1.5)
+      love.graphics.translate(-bw/2,-bh/2)
+      love.graphics.draw(baseProp,0,0); love.graphics.pop()
+    end
+    -- Tent mode replaces the sleeping NPC completely: the 2D canvas contains
+    -- only the upright tent; the normal Zzz overlay is drawn by drawSleepers.
+    if style ~= 1 then
+      -- Keep the sleeper grayscale and lying on their side for bed/bag modes.
+      if grayShader then love.graphics.setShader(grayShader) end
+      love.graphics.push(); love.graphics.translate(18,18); love.graphics.rotate(angle); love.graphics.translate(-fw/2,-fh/2)
+      if quad then love.graphics.draw(image,quad,0,0) else love.graphics.draw(image,0,0) end
+      love.graphics.pop()
+      love.graphics.setShader()
+    end
     -- The prop is a foreground cover with a transparent head opening.
     if accessory then
       love.graphics.setColor(1,1,1,1)
       local aw,ah=accessory:getDimensions()
       local shiftX = style == 1 and 0 or (-math.sin(angle) * 6.5)
-      love.graphics.push(); love.graphics.translate(12 + shiftX,12)
+      love.graphics.push(); love.graphics.translate(18 + shiftX,18)
       if style ~= 1 then love.graphics.rotate(angle) end
-      if style == 1 then local ts=math.max(24/aw,24/ah); love.graphics.scale(ts,ts) end; love.graphics.translate(-aw/2,-ah/2)
+      if style == 1 then local ts=math.max(36/aw,36/ah); love.graphics.scale(ts,ts) else love.graphics.scale(1.5,1.5) end
+      love.graphics.translate(-aw/2,-ah/2)
       love.graphics.draw(accessory,0,0); love.graphics.pop()
     end
     love.graphics.setCanvas(previous); love.graphics.setColor(1,1,1,1)
@@ -490,7 +512,19 @@ return function(ctx)
     if not (okV and Voxel3D and type(Voxel3D.project) == "function" and Pipelines and type(Pipelines.worldPresent) == "function") then return end
     local base = Pipelines.worldPresent
     Pipelines.worldPresent = function(canvas, ctx)
-      local out = base(canvas, ctx)
+      -- Tent replaces the sleeping trainer in voxel mode too. Hide only the
+      -- sleepers whose resolved style is Tent for the native render pass, then
+      -- restore their flags before drawing the prop/Zzz overlay.
+      local hiddenForTent = {}
+      for _, npc in ipairs(sleepList) do
+        if sleeping[npc] and resolveSleepStyle(npc) == 1 then
+          hiddenForTent[#hiddenForTent + 1] = {npc, npc.visible, npc.hidden}
+          npc.visible, npc.hidden = false, true
+        end
+      end
+      local okBase, out = pcall(base, canvas, ctx)
+      for _, row in ipairs(hiddenForTent) do row[1].visible, row[1].hidden = row[2], row[3] end
+      if not okBase then error(out, 0) end
       local id = nil
       if type(Pipelines.worldPipeline) == "function" then
         local ok, v = pcall(Pipelines.worldPipeline); if ok then id = v end
@@ -525,12 +559,26 @@ return function(ctx)
           local okP, x, y, perspective = pcall(Voxel3D.project, px+8, gh, py+8)
           if okP and x and y then
             perspective = math.max(0.35, math.min(3.0, tonumber(perspective) or 1))
-            local scale = (tonumber(ctx and ctx.scale) or 1) * perspective * sxRatio
+            -- Bed and sleeping-bag props were undersized against the sleeper.
+            -- Increase the established voxel prop scale by 50%.
+            local scale = (tonumber(ctx and ctx.scale) or 1) * perspective * sxRatio * 1.5
             local pw, ph = npcProp:getDimensions()
             love.graphics.push("all")
             love.graphics.setColor(1,1,1,1)
             local angle = (npc.kantoLifeSleepAngle or (math.pi/2))
             love.graphics.draw(npcProp, x*sxRatio, y*syRatio, angle, scale, scale, pw/2, ph/2)
+            -- Keep Zzz visible in voxel mode, including when Tent replaces the
+            -- NPC model. The label is a screen-space overlay anchored to the
+            -- projected sleeper rather than part of the prop texture.
+            if opt("firered_sleep_bubbles", true) then
+              local phase = (((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 1.1) % 2.4
+              local zx, zy = x*sxRatio + 4, y*syRatio - 18 - phase*5
+              love.graphics.setColor(1,1,1,0.95)
+              love.graphics.print("Z", zx-1, zy, 0, 1, 1)
+              love.graphics.print("Z", zx+1, zy, 0, 1, 1)
+              love.graphics.setColor(0.1,0.05,0.3,0.95)
+              love.graphics.print("Z", zx, zy, 0, 1, 1)
+            end
             love.graphics.pop()
           end
         end

@@ -201,10 +201,16 @@ return function(ctx)
       pcall(npc.scriptTeleport, npc, "from")
       return true
     end
-    -- Gen 1/3 custom: spin + rise with random Psychic-type Pokemon
-    -- (GBC: player spins; we show Abra/Kadabra/Alakazam/etc.)
-    local psychicTypes = {"ABRA", "KADABRA", "ALAKAZAM", "DROWZEE", "HYPNO",
-                          "MIME_JR", "MR_MIME", "JYNX", "MEW", "MEWTWO"}
+    -- Gen 1: spin + rise with a random Psychic-type species (full Gen1 list).
+    local psychicTypes = {
+      "ABRA", "KADABRA", "ALAKAZAM",
+      "SLOWPOKE", "SLOWBRO",
+      "DROWZEE", "HYPNO",
+      "EXEGGCUTE", "EXEGGUTOR",
+      "STARYU", "STARMIE",
+      "MR_MIME", "JYNX",
+      "MEWTWO", "MEW",
+    }
     local psySpecies = psychicTypes[math.random(#psychicTypes)]
     npc.kantoLifeTeleport = {
       frame = 0,
@@ -240,6 +246,16 @@ return function(ctx)
   -- NPC Fly OUT animation.
   -- Hides NPC, shows random flying Pokémon sprite flying up and away.
   npcFlyOut = function(npc)
+    -- Prefer the engine's native trainer Fly script when the active generation
+    -- exposes it. Older Gen1Recomp NPCs do not, so retain the sprite-based
+    -- flying-Pokemon fallback below for those builds.
+    if type(npc.scriptFly) == "function" then
+      local ok, result = pcall(npc.scriptFly, npc, "from")
+      if ok and result ~= false then
+        npc.frozen = true
+        return true
+      end
+    end
     local species = randomFlyingSpecies()
     if not species then return false end
     -- Play sound
@@ -1355,8 +1371,39 @@ return function(ctx)
     if mapChanged then lastMap = mapId; dirty = true end
     if dirty or force then refresh(world, force or mapChanged) end
 
+    -- Keep ambient NPCs solid and freezable for A-talk while walking.
+    local p = world.player
+    local fx, fy = p and p.cellX, p and p.cellY
+    local facing = p and p.facing
+    if facing == "up" then fy = fy and fy - 1
+    elseif facing == "down" then fy = fy and fy + 1
+    elseif facing == "left" then fx = fx and fx - 1
+    elseif facing == "right" then fx = fx and fx + 1 end
+    local nowT = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
+      if npc then
+        npc.passable = false
+        -- Hold still while player faces this NPC or a talk-hold is active.
+        local holdUntil = tonumber(npc._kantoLifeTalkHoldUntil) or 0
+        local faced = fx and fy and ((npc.cellX == fx and npc.cellY == fy)
+          or (npc.moving and npc.targetX == fx and npc.targetY == fy))
+        if faced or nowT < holdUntil then
+          if faced and npc.moving and npc.targetX == fx and npc.targetY == fy then
+            npc.cellX, npc.cellY = npc.targetX, npc.targetY
+            if type(npc.px) == "number" then npc.px = npc.cellX * 16 end
+            if type(npc.py) == "number" then npc.py = npc.cellY * 16 end
+          end
+          npc.moving = false
+          npc.targetX, npc.targetY = nil, nil
+          npc.progress = 0
+          if faced then
+            npc._kantoLifeTalkHoldUntil = nowT + 0.45
+          end
+          goto continue
+        end
+      end
       -- Update travel animations (teleport/fly) before frozen check.
       -- Animating NPCs have frozen=true but need their animation updated.
       if npc then

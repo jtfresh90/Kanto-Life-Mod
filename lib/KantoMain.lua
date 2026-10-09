@@ -401,21 +401,59 @@ return function(mod)
 
   -- Get a Pokemon sprite OBJECT (for pose-time travel animations).
   -- Returns cached sprite table, or nil. Never assigns to npc.sprite.
+  -- Falls back to a minimal SpriteRenderer def built from pokemon front/icon
+  -- art when no overworld sprite key exists (common for travel mon swaps).
   local pokeSpriteCache = {}
   local function getPokeSpriteObject(species)
     if not species then return nil end
     if pokeSpriteCache[species] then return pokeSpriteCache[species] end
-    local spriteId = resolvePokeSprite(species)
-    if not spriteId then return nil end
-    local sprites = game and game.data and game.data.sprites
-    local spriteDef = sprites and sprites[spriteId]
-    if not spriteDef then return nil end
     local ok, SR = pcall(require, "src.render.SpriteRenderer")
     if not (ok and SR and SR.new) then return nil end
-    local ok2, spriteObj = pcall(SR.new, spriteDef)
-    if not (ok2 and spriteObj) then return nil end
-    pokeSpriteCache[species] = spriteObj
-    return spriteObj
+    local sprites = game and game.data and game.data.sprites
+    local spriteId = resolvePokeSprite(species)
+    local spriteDef = spriteId and sprites and sprites[spriteId]
+    if spriteDef then
+      local ok2, spriteObj = pcall(SR.new, spriteDef)
+      if ok2 and spriteObj then
+        pokeSpriteCache[species] = spriteObj
+        return spriteObj
+      end
+    end
+    -- Fallback: build from pokemon data front sprite / icon image.
+    local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
+    local image = nil
+    if type(pdef) == "table" then
+      image = pdef.front or pdef.icon or pdef.image or pdef.sprite
+      if type(image) == "string" and sprites and sprites[image] then
+        local sd = sprites[image]
+        image = sd and (sd.image or sd)
+      end
+    end
+    if not image then
+      -- Last resort: scan sprite table for any image-bearing entry matching species
+      local up = tostring(species):upper()
+      if sprites then
+        for id, sd in pairs(sprites) do
+          if type(sd) == "table" and tostring(id):upper():find(up, 1, true)
+             and not tostring(id):upper():find("BACK", 1, true) and sd.image then
+            local ok3, obj = pcall(SR.new, sd)
+            if ok3 and obj then pokeSpriteCache[species] = obj; return obj end
+          end
+        end
+      end
+      return nil
+    end
+    local def = {
+      id = "SPRITE_KANTO_TRAVEL_" .. tostring(species),
+      image = image,
+      frames = 1,
+      walker = false,
+      spriteType = "POKEMON_SPRITE",
+      species = species,
+    }
+    local ok4, obj = pcall(SR.new, def)
+    if ok4 and obj then pokeSpriteCache[species] = obj; return obj end
+    return nil
   end
 
   local function playSpeciesCry(species)
@@ -3649,24 +3687,49 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
-        -- Teleport animation: apply vertical offset (rise/descend)
-        local tpY = self.kantoLifeTeleportY
-        if tpY then
-          -- Temporarily offset py for the draw, restore after
-          local origPy = self.py
-          if type(self.py) == "number" then self.py = self.py + tpY end
-          local ok, res = pcall(baseNpcDraw, self, camX, camY)
-          if type(origPy) == "number" then self.py = origPy end
-          if not ok then error(res) end
+        -- Teleport: draw random psychic mon with spin + rise (2D path).
+        local tp = self.kantoLifeTeleport
+        if tp and tp.frame ~= nil then
+          local mon = nil
+          pcall(function() mon = getPokeSpriteObject(tp.psySpecies) end)
+          local rise = 0
+          if (tp.frame or 0) > 16 then rise = math.min(120, ((tp.frame or 0) - 16) * 4) end
+          local spin = ({"down","left","up","right"})[(math.floor((tp.frame or 0) / 2) % 4) + 1]
+          local px = tonumber(self.px) or ((tonumber(self.cellX) or 0) * 16)
+          local py = (tonumber(self.py) or ((tonumber(self.cellY) or 0) * 16)) - rise
+          if mon and type(mon.draw) == "function" then
+            pcall(function() mon:draw(px, py, camX or 0, camY or 0, spin, 0, false, nil, nil, nil) end)
+          else
+            local origPy, origFacing, origSprite = self.py, self.facing, self.sprite
+            if type(self.py) == "number" then self.py = self.py - rise end
+            self.facing = spin
+            pcall(baseNpcDraw, self, camX, camY)
+            self.py, self.facing, self.sprite = origPy, origFacing, origSprite
+          end
           return
         end
-        -- Fly animation: hide NPC, draw bird instead
+        -- Fly: replace the trainer with a flying Pokémon in 2D.
         if self.kantoLifeFlyHidden and self.kantoLifeFly then
           local fl = self.kantoLifeFly
-          -- Draw bird sprite at fly position (simplified: use NPC draw with offset)
-          -- TODO: Draw actual flying Pokémon sprite. For now, skip NPC draw
-          -- (bird visual coming in next iteration).
-          return  -- Skip NPC draw; bird drawn separately
+          local bird = nil
+          pcall(function() bird = getPokeSpriteObject(fl.species) end)
+          local progress = math.max(0, math.min(1, (tonumber(fl.frame) or 0) / (tonumber(fl.total) or 90)))
+          local bx = tonumber(fl.startPx) or tonumber(self.px) or ((tonumber(self.cellX) or 0) * 16)
+          local by = tonumber(fl.startPy) or tonumber(self.py) or ((tonumber(self.cellY) or 0) * 16)
+          local lift = progress * progress * 160
+          local drift = progress * 64
+          if bird and type(bird.draw) == "function" then
+            pcall(function()
+              bird:draw(bx + drift, by - lift, camX or 0, camY or 0, "down", math.floor((fl.frame or 0) / 3) % 2, false, nil, nil, nil)
+            end)
+          else
+            local origPy = self.py
+            if type(self.py) == "number" then self.py = by - lift end
+            if type(self.px) == "number" then self.px = bx + drift end
+            pcall(baseNpcDraw, self, camX, camY)
+            self.py = origPy
+          end
+          return
         end
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
@@ -3958,22 +4021,23 @@ function putToSleep(npc)
               if not (wscale > 0) then wscale = 1 end
               local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
               if okP and type(sx) == "number" and type(sy) == "number" then
-                -- Foot anchor in `out` canvas px:
+                -- Foot anchor in `out` canvas px (project is supersampled by aa).
                 local ox, oy = sx / aa, sy / aa
-                -- Viewport clamp in OUT's pixel space (not window points!)
+                -- Skip off-screen projections rather than clamping (clamping
+                -- pinned indoor bubbles many cells below the sprites).
                 local vwo, vho = nil, nil
                 pcall(function() vwo, vho = out:getDimensions() end)
                 vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
-                if vwo > 16 and vho > 16 then
-                  if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
-                  if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
+                local offscreen = vwo > 16 and vho > 16 and
+                  (ox < -40 or ox > vwo + 40 or oy < -40 or oy > vho + 40)
+                if not offscreen then
+                  -- Head-height offset in display px (~16–32 above projected foot).
+                  local headOff = 22
+                  G.push()
+                  G.scale(wscale, wscale)
+                  drawCollisionBubble(npc, ox / wscale, oy / wscale - headOff, 1)
+                  G.pop()
                 end
-                -- Draw in world-px units under engine-equivalent scale;
-                -- bubble tail ~26 world px above the foot (matches 2D).
-                G.push()
-                G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale - 26, 1)
-                G.pop()
               end
               end  -- end if ghOk else
             end
@@ -5117,6 +5181,34 @@ local function nightlifeTick(world, dt)
     if type(Overworld.interact) == "function" then
       local base = Overworld.interact
       Overworld.interact = function(self)
+        -- Engine only talks when not npc.moving. Stop any facing NPC so A works.
+        pcall(function()
+          if not (self and self.player and type(self.player.facingCell) == "function") then return end
+          local fx, fy = self.player:facingCell()
+          if not fx then return end
+          local npc = type(self.npcAtCell) == "function" and self:npcAtCell(fx, fy) or nil
+          if not npc and self.npcs then
+            for _, n in ipairs(self.npcs) do
+              if n and ((n.cellX == fx and n.cellY == fy)
+                or (n.moving and n.targetX == fx and n.targetY == fy)) then
+                npc = n; break
+              end
+            end
+          end
+          if npc then
+            if npc.moving and npc.targetX and npc.targetY
+               and npc.targetX == fx and npc.targetY == fy then
+              npc.cellX, npc.cellY = npc.targetX, npc.targetY
+              if type(npc.px) == "number" then npc.px = npc.cellX * 16 end
+              if type(npc.py) == "number" then npc.py = npc.cellY * 16 end
+            end
+            npc.moving = false
+            npc.targetX, npc.targetY = nil, nil
+            npc.progress = 0
+            npc.passable = false
+            npc._kantoLifeTalkHoldUntil = ((love and love.timer and love.timer.getTime and love.timer.getTime()) or 0) + 0.5
+          end
+        end)
         if courtesyInteract(self) then return end
         return base(self)
       end
@@ -6157,7 +6249,7 @@ local function nightlifeTick(world, dt)
         -- then rotate, then translate.
         local bubbleScale = 1.5
         local model = Mat4.mul(
-          Mat4.translate(px + 8, gh + 26, py + 8),
+          Mat4.translate(px + 8, gh + 19, py + 8),
           Mat4.mul(
             Mat4.rotateY(zyaw),
             Mat4.scale(bubbleScale, bubbleScale, 1)
@@ -6218,8 +6310,8 @@ local function nightlifeTick(world, dt)
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
             -- GBC: spin in place first, then rise (mirror engine spinRise)
             local rise = 0
-            if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
-            if rise > 60 then rise = 60 end
+            if tp.frame > 20 then rise = (tp.frame - 20) * 5 end
+            if rise > 100 then rise = 100 end
             return monSprite or sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
