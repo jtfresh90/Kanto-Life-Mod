@@ -794,9 +794,64 @@ local function spriteGender(npc, def)
     return message(display .. ":\n" .. line, function() releaseActor(npc) end)
   end
 
+  local function stopFacingAmbient()
+    pcall(function()
+      local Field = engine("src.core.game3.field")
+      local Player = engine("src.core.game3.player")
+      local Objects = engine("src.core.game3.objects")
+      if not (Player and Objects and type(Objects.at) == "function") then return end
+      local px, py = tonumber(Player.cellX), tonumber(Player.cellY)
+      local facing = Player.facing
+      if not px or not py or not facing then return end
+      local fx, fy = px, py
+      if facing == "up" then fy = fy - 1
+      elseif facing == "down" then fy = fy + 1
+      elseif facing == "left" then fx = fx - 1
+      elseif facing == "right" then fx = fx + 1 end
+      local eo = Objects.at(fx, fy)
+      if not eo then
+        -- Also check destination cell of a mid-step walker
+        for _, obj in pairs((Objects._byId) or {}) do
+          if type(obj) == "table" and obj.moving
+             and tonumber(obj.targetX) == fx and tonumber(obj.targetY) == fy then
+            eo = obj; break
+          end
+        end
+      end
+      if not eo then return end
+      local def = eo.def or {}
+      local ours = eo.kantoLifeAmbient or def.kantoLifeAmbient
+        or eo.kantoLifePokemon or def.kantoLifePokemon
+      if not ours then return end
+      if eo.moving and tonumber(eo.targetX) == fx and tonumber(eo.targetY) == fy then
+        eo.cellX, eo.cellY = eo.targetX, eo.targetY
+        if type(eo.px) == "number" then eo.px = eo.cellX * 16 end
+        if type(eo.py) == "number" then eo.py = eo.cellY * 16 end
+      end
+      eo.moving = false
+      eo.progress = 0
+      eo.targetX, eo.targetY = nil, nil
+      eo.passable = false
+      holdActor(eo, 1.0)
+    end)
+  end
+
   local function install()
     if installed or not mod.hooks or not mod.hooks.wrap then return end
     local ok = pcall(function()
+      -- Stop ambient NPCs before native Field.interact so A always works mid-step.
+      pcall(function()
+        local Field = engine("src.core.game3.field")
+        if Field and type(Field.interact) == "function" and not Field._kantoLifeInteractWrapped then
+          local base = Field.interact
+          Field.interact = function(game)
+            stopFacingAmbient()
+            return base(game)
+          end
+          Field._kantoLifeInteractWrapped = true
+        end
+      end)
+
       mod.hooks:wrap("world.talk", function(next, a, b)
         local game, npc = a, b
         if type(npc) ~= "table" or not npc.def or not isRegularNpc(npc) then

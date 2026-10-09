@@ -400,59 +400,82 @@ return function(mod)
   end
 
   -- Get a Pokemon sprite OBJECT (for pose-time travel animations).
-  -- Returns cached sprite table, or nil. Never assigns to npc.sprite.
-  -- Falls back to a minimal SpriteRenderer def built from pokemon front/icon
-  -- art when no overworld sprite key exists (common for travel mon swaps).
+  -- Prefer ambient-poke overworld art; fall back to any live poke ambient so
+  -- fly/teleport never keeps the human trainer sprite.
   local pokeSpriteCache = {}
   local function getPokeSpriteObject(species)
     if not species then return nil end
+    species = tostring(species):upper():gsub(" ", "_"):gsub("'", "")
     if pokeSpriteCache[species] then return pokeSpriteCache[species] end
     local ok, SR = pcall(require, "src.render.SpriteRenderer")
     if not (ok and SR and SR.new) then return nil end
     local sprites = game and game.data and game.data.sprites
+    local function tryDef(def)
+      if not def then return nil end
+      local ok2, obj = pcall(SR.new, def)
+      if ok2 and obj then pokeSpriteCache[species] = obj; return obj end
+      return nil
+    end
     local spriteId = resolvePokeSprite(species)
-    local spriteDef = spriteId and sprites and sprites[spriteId]
-    if spriteDef then
-      local ok2, spriteObj = pcall(SR.new, spriteDef)
-      if ok2 and spriteObj then
-        pokeSpriteCache[species] = spriteObj
-        return spriteObj
+    if spriteId and sprites then
+      local obj = tryDef(sprites[spriteId])
+      if obj then return obj end
+    end
+    if sprites then
+      for _, key in ipairs({
+        species, "SPRITE_" .. species, "SPRITE_POKEMON_" .. species,
+        "SPRITE_POKE_" .. species, "POKE_" .. species,
+      }) do
+        local obj = tryDef(sprites[key])
+        if obj then return obj end
+      end
+      local up = species
+      for id, sd in pairs(sprites) do
+        local uid = tostring(id):upper()
+        if type(sd) == "table" and sd.image
+           and uid:find(up, 1, true)
+           and not uid:find("BACK", 1, true)
+           and (uid:find("POKE", 1, true) or uid:find("POKEMON", 1, true) or uid == up) then
+          local obj = tryDef(sd)
+          if obj then return obj end
+        end
       end
     end
-    -- Fallback: build from pokemon data front sprite / icon image.
-    local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
-    local image = nil
-    if type(pdef) == "table" then
-      image = pdef.front or pdef.icon or pdef.image or pdef.sprite
-      if type(image) == "string" and sprites and sprites[image] then
-        local sd = sprites[image]
-        image = sd and (sd.image or sd)
-      end
-    end
-    if not image then
-      -- Last resort: scan sprite table for any image-bearing entry matching species
-      local up = tostring(species):upper()
-      if sprites then
-        for id, sd in pairs(sprites) do
-          if type(sd) == "table" and tostring(id):upper():find(up, 1, true)
-             and not tostring(id):upper():find("BACK", 1, true) and sd.image then
-            local ok3, obj = pcall(SR.new, sd)
-            if ok3 and obj then pokeSpriteCache[species] = obj; return obj end
+    -- Reuse a live ambient poke's sprite (same art pipeline as spawned mon NPCs).
+    pcall(function()
+      local ow = mod.world and mod.world:overworld and mod.world:overworld()
+      for _, n in ipairs((ow and ow.npcs) or {}) do
+        if n and (n.kantoLifePokeAmbient or (n.def and n.def.kantoLifePokeAmbient))
+           and n.sprite and type(n.sprite.draw) == "function" then
+          local sp = (n.def and n.def.kantoLifeSpecies) or n.kantoLifeSpecies
+          if sp and tostring(sp):upper():gsub(" ", "_"):gsub("'", "") == species then
+            pokeSpriteCache[species] = n.sprite; return
           end
         end
       end
-      return nil
+      for _, n in ipairs((ow and ow.npcs) or {}) do
+        if n and (n.kantoLifePokeAmbient or (n.def and n.def.kantoLifePokeAmbient))
+           and n.sprite and type(n.sprite.draw) == "function" then
+          pokeSpriteCache[species] = n.sprite; return
+        end
+      end
+    end)
+    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
+    if type(pdef) == "table" then
+      local image = pdef.front or pdef.icon or pdef.image
+      if type(image) == "string" and sprites and sprites[image] then
+        image = sprites[image].image or image
+      end
+      if image then
+        local obj = tryDef({
+          id = "SPRITE_KANTO_TRAVEL_" .. species,
+          image = image, frames = 1, walker = false,
+          spriteType = "POKEMON_SPRITE", species = species,
+        })
+        if obj then return obj end
+      end
     end
-    local def = {
-      id = "SPRITE_KANTO_TRAVEL_" .. tostring(species),
-      image = image,
-      frames = 1,
-      walker = false,
-      spriteType = "POKEMON_SPRITE",
-      species = species,
-    }
-    local ok4, obj = pcall(SR.new, def)
-    if ok4 and obj then pokeSpriteCache[species] = obj; return obj end
     return nil
   end
 
@@ -4031,8 +4054,9 @@ function putToSleep(npc)
                 local offscreen = vwo > 16 and vho > 16 and
                   (ox < -40 or ox > vwo + 40 or oy < -40 or oy > vho + 40)
                 if not offscreen then
-                  -- Head-height offset in display px (~16–32 above projected foot).
-                  local headOff = 22
+                  -- Project is near the foot; bubbles must sit well above the head
+                  -- in voxel (any camera angle). Prior 22px left them far below.
+                  local headOff = 96
                   G.push()
                   G.scale(wscale, wscale)
                   drawCollisionBubble(npc, ox / wscale, oy / wscale - headOff, 1)
