@@ -1490,6 +1490,21 @@ return function(mod)
           end)
         end
         if not blocking then
+          pcall(function()
+            if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and ow and ow.map then
+              local mapId = tostring(ow.map.id or "")
+              local nr
+              if not isIndoor(mapId, ow.map) then nr = 1
+              elseif string.upper(mapId):find("HOUSE", 1, true) then nr = 3
+              else
+                local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "") .. ":" .. tostring(npc.cellY or "")
+                local h = 0
+                for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                nr = (h < 80) and 2 or 0
+              end
+              npc.kantoLifeNaturalSleepStyle = nr
+            end
+          end)
           pcall(putToSleep, npc)
         end
       end
@@ -3394,30 +3409,11 @@ function putToSleep(npc)
       return cached
     end
     if style == 5 then
-      -- Natural: cache keyed by map so moving to a new location recomputes
-      local world = mod and mod.world
-      local map = world and world.map
-      local mapId = map and tostring(map.id or "") or ""
-      if npc.kantoLifeNaturalSleepStyle ~= nil
-         and npc.kantoLifeNaturalSleepMap == mapId then
-        return npc.kantoLifeNaturalSleepStyle
-      end
-      local result
-      if not isIndoor(mapId, map) then
-        result = 1  -- Outdoor: always tent
-      elseif string.upper(mapId):find("HOUSE", 1, true) then
-        result = 3  -- House interior: bed
-      else
-        -- Non-house building: 80% sleeping bag, 20% default (deterministic)
-        local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "")
-                     .. ":" .. tostring(npc.cellY or "")
-        local h = 0
-        for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
-        result = (h < 80) and 2 or 0
-      end
-      npc.kantoLifeNaturalSleepStyle = result
-      npc.kantoLifeNaturalSleepMap = mapId
-      return result
+      -- Natural: computed at sleep time (see putToSleep call site).
+      -- Falls back to tent if not yet computed.
+      local cached = npc.kantoLifeNaturalSleepStyle
+      if cached ~= nil then return cached end
+      return 1  -- Fallback: tent
     end
     return style
   end
@@ -4994,6 +4990,27 @@ local function nightlifeTick(world, dt)
             end)
           end
           if not blocking then
+            -- Natural sleep style (5): compute at sleep time when world/map is available.
+            -- Outdoor->tent, house->bed, other indoor->80% bag / 20% default.
+            pcall(function()
+              if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+                local mapId = tostring(world.map.id or "")
+                local naturalResult
+                if not isIndoor(mapId, world.map) then
+                  naturalResult = 1  -- Outdoor: tent
+                elseif string.upper(mapId):find("HOUSE", 1, true) then
+                  naturalResult = 3  -- House: bed
+                else
+                  local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "")
+                               .. ":" .. tostring(npc.cellY or "")
+                  local h = 0
+                  for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                  naturalResult = (h < 80) and 2 or 0  -- 80% bag, 20% default
+                end
+                npc.kantoLifeNaturalSleepStyle = naturalResult
+                npc.kantoLifeNaturalSleepMap = mapId
+              end
+            end)
             putToSleep(npc)
           end
         elseif npc.nightlifeSleeping then
@@ -6165,6 +6182,21 @@ local function nightlifeTick(world, dt)
           end
           if shouldSleepNow(self, isNight) then
             if not self.nightlifeSleeping then
+              pcall(function()
+                if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then
+                  local mapId = tostring(map.id or "")
+                  local nr
+                  if not isIndoor(mapId, map) then nr = 1
+                  elseif string.upper(mapId):find("HOUSE", 1, true) then nr = 3
+                  else
+                    local seed = tostring(self.id or "") .. ":" .. tostring(self.cellX or "") .. ":" .. tostring(self.cellY or "")
+                    local h = 0
+                    for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+                    nr = (h < 80) and 2 or 0
+                  end
+                  self.kantoLifeNaturalSleepStyle = nr
+                end
+              end)
               pcall(putToSleep, self)
             end
             hardFreeze(self)
