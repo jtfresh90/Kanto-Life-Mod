@@ -703,10 +703,25 @@ return function(ctx)
     st.localRoamRadius = 70  -- 3x area (was 40)
     -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
     -- They use wanderTarget() but never despawn at doors.
-    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area)
+    -- POKEMON: Roam map-wide ONLY if outdoors/caves (not in buildings).
+    -- User reported: "no Pokemon NPCs in houses now" — they were all leaving.
     local d2 = npc.def or {}
     local isPoke2 = npc.kantoLifePokeAmbient or d2.kantoLifePokeAmbient
-    st.roamFar = isPoke2 or ((not traveling) and (math.random() < 0.3))
+    -- Check if indoors (mirror the localWanderTarget logic)
+    local map2 = world and world.map
+    local mapId2 = map2 and tostring(map2.id or "") or ""
+    local indoor2 = false
+    pcall(function()
+      local id = mapId2:upper()
+      if id:match("^ROUTE_") or id:match("^TOWN_") then indoor2 = false; return end
+      indoor2 = id:find("HOUSE", 1, true) ~= nil
+        or id:find("GATE", 1, true) ~= nil
+        or id:find("_1F", 1, true) ~= nil or id:find("_2F", 1, true) ~= nil
+        or id:find("MART", 1, true) ~= nil or id:find("POKECENTER", 1, true) ~= nil
+        or id:find("GYM", 1, true) ~= nil or id:find("LAB", 1, true) ~= nil
+    end)
+    -- Pokemon roam far only if not in a building; humans 30% if not traveling
+    st.roamFar = (isPoke2 and not indoor2) or ((not traveling) and (math.random() < 0.3))
     st.blockedTime = 0
     st.blockedCount = 0
     st.travelKind = pickTravelKind(npc, world or lastWorld)

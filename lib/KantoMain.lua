@@ -6221,6 +6221,16 @@ local function nightlifeTick(world, dt)
           end
           if shouldSleepNow(self, isNight) then
             if not self.nightlifeSleeping then
+              -- Don't sleep on door/warp cells (blocks player)
+              local onWarp = false
+              pcall(function()
+                if map and self.cellX and self.cellY then
+                  onWarp = nearWarp(map, math.floor(self.cellX), math.floor(self.cellY))
+                end
+              end)
+              if onWarp then
+                -- On a door: don't sleep, just skip
+              else
               pcall(function()
                 if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then
                   local mapId = tostring(map.id or "")
@@ -6237,6 +6247,7 @@ local function nightlifeTick(world, dt)
                 end
               end)
               pcall(putToSleep, self)
+              end  -- if not onWarp
             end
             hardFreeze(self)
             -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake
