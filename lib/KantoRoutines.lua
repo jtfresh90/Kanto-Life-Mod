@@ -196,12 +196,17 @@ return function(ctx)
       pcall(npc.scriptTeleport, npc, "from")
       return true
     end
-    -- Gen 1/3 custom: spin + rise
+    -- Gen 1/3 custom: spin + rise with random Psychic-type Pokemon
+    -- (GBC: player spins; we show Abra/Kadabra/Alakazam/etc.)
+    local psychicTypes = {"ABRA", "KADABRA", "ALAKAZAM", "DROWZEE", "HYPNO",
+                          "MIME_JR", "MR_MIME", "JYNX", "MEW", "MEWTWO"}
+    local psySpecies = psychicTypes[math.random(#psychicTypes)]
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,  -- 1.5s at 60fps (snappier than player's 135)
       mode = "out",
       origFacing = npc.facing or "down",
+      psySpecies = psySpecies,  -- Used by pose wrapper (never mutates npc.sprite)
     }
     npc.frozen = true
     return true

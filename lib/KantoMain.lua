@@ -6185,29 +6185,34 @@ local function nightlifeTick(world, dt)
         -- This works in both 2D (NPC:draw via pose) and voxel (posesOf via pose).
         if self then
           local tp = self.kantoLifeTeleport
-          if tp and tp.frame then
-            -- Teleport: spin + rise, Abra sprite
+          if tp and tp.frame ~= nil then
+            -- Teleport: spin + rise. Sprite = random Psychic type (or NPC if lookup fails).
+            -- GBC behavior: spin in place, then rise. Never mutate npc fields.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
-            local abra = nil
-            pcall(function() abra = getPokeSpriteObject("ABRA") end)
+            local psySprite = nil
+            -- Use cached random Psychic species for this teleport (set by routine)
+            local psySpecies = tp.psySpecies or "ABRA"
+            pcall(function() psySprite = getPokeSpriteObject(psySpecies) end)
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
-            -- Rise after in-place spins (mirror engine: rise = (step - 16) * 16)
+            -- GBC: spin in place first, then rise (mirror engine spinRise)
             local rise = 0
-            if tp.frame > 32 then rise = (tp.frame - 32) * 2 end
-            if rise > 48 then rise = 48 end
-            return abra or sprite, px, py - rise, spinFacing, 0, false, false
+            if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
+            if rise > 60 then rise = 60 end
+            return psySprite or sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
-          if fl and fl.frame then
-            -- Fly: bird sprite, arc up and away
+          if fl and fl.frame ~= nil then
+            -- Fly: bird sprite, arc up and away. Species = random Fly learner.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
             pcall(function() bird = getPokeSpriteObject(fl.species or "PIDGEY") end)
-            local progress = fl.frame / 90
+            local total = fl.total or 90
+            local progress = fl.frame / total
             if progress > 1 then progress = 1 end
-            local lift = progress * 100
-            local dx = progress * 60
+            if progress < 0 then progress = 0 end
+            local lift = progress * 120
+            local dx = progress * 80
             local flapPhase = math.floor(fl.frame / 3) % 2
             return bird or sprite, px + dx, py - lift, facing, flapPhase, false, false
           end
