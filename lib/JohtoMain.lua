@@ -1502,7 +1502,12 @@ return function(mod)
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
           if d.johtoLifeAmbient and d.johtoLifePokemon then
-            if isNight then
+            -- 10% sleep during day, all sleep at night (user requirement)
+            local pokeId = tostring(npc.id or "")
+            local pokeHash = 0
+            for i = 1, #pokeId do pokeHash = (pokeHash + pokeId:byte(i) * i) % 100 end
+            local pokeShouldSleep = isNight or (pokeHash < 10)
+            if pokeShouldSleep then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
                 -- Natural sleep style (Gen 1 parity)
@@ -1755,7 +1760,12 @@ return function(mod)
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
           if d.johtoLifeAmbient and d.johtoLifePokemon then
-            if isNight then
+            -- 10% sleep during day, all sleep at night (user requirement)
+            local pokeId = tostring(npc.id or "")
+            local pokeHash = 0
+            for i = 1, #pokeId do pokeHash = (pokeHash + pokeId:byte(i) * i) % 100 end
+            local pokeShouldSleep = isNight or (pokeHash < 10)
+            if pokeShouldSleep then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
                 -- Natural sleep style (Gen 1 parity)
