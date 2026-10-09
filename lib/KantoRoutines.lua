@@ -86,6 +86,12 @@ return function(ctx)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeDepartMethod = method
     npc._kantoLifeDepartUntil = now + 1.2
+    -- Trigger real animation (in addition to bubble cue).
+    if method == "teleport" then
+      pcall(npcTeleportOut, npc)
+    elseif method == "fly" then
+      pcall(npcFlyOut, npc)
+    end
     -- Show a cue bubble so the departure doesn't look like a pop.
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
@@ -137,10 +143,196 @@ return function(ctx)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeArriveMethod = method
     npc._kantoLifeArriveUntil = now + 1.2
+    -- Trigger real animation (in addition to bubble cue).
+    if method == "teleport" then
+      pcall(npcTeleportIn, npc)
+    elseif method == "fly" then
+      pcall(npcFlyIn, npc)
+    end
     -- Show a cue bubble so the arrival doesn't look like a pop.
     local cue = method == "fly" and "vv" or method == "teleport" and "**" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+  end
+
+  -- Random flying Pokémon species for fly animation.
+  -- User requirement: real bird/flying Pokémon (legendaries OK), not SPRITE_BIRD.
+  local flyingSpeciesCache = nil
+  local function randomFlyingSpecies()
+    if flyingSpeciesCache and #flyingSpeciesCache > 0 then
+      return flyingSpeciesCache[math.random(#flyingSpeciesCache)]
+    end
+    -- Try to get game data (set by KantoMain)
+    local gd = _G._kantoLifeGameData
+    local data = gd and gd.pokemon
+    if type(data) ~= "table" then return nil end
+    local flyers = {}
+    for name, pdef in pairs(data) do
+      if type(pdef) == "table" and type(pdef.types) == "table" then
+        for _, ty in ipairs(pdef.types) do
+          if tostring(ty):upper() == "FLYING" then
+            flyers[#flyers + 1] = name
+            break
+          end
+        end
+      end
+    end
+    flyingSpeciesCache = flyers
+    if #flyers == 0 then return nil end
+    return flyers[math.random(#flyers)]
+  end
+
+  -- NPC Teleport OUT animation.
+  -- Gen 2: uses built-in npc:scriptTeleport("from").
+  -- Gen 1/3: custom spin + rise (mirrors Player:pose logic).
+  local function npcTeleportOut(npc)
+    -- Play sound
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
+    end)
+    -- Gen 2 built-in (verified: src/world/gen2/Npc.lua:391)
+    if type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "from")
+      return true
+    end
+    -- Gen 1/3 custom: spin + rise
+    npc.kantoLifeTeleport = {
+      frame = 0,
+      total = 90,  -- 1.5s at 60fps (snappier than player's 135)
+      mode = "out",
+      origFacing = npc.facing or "down",
+    }
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Teleport IN animation (arrival).
+  local function npcTeleportIn(npc)
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
+    end)
+    if type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "to")
+      return true
+    end
+    npc.kantoLifeTeleport = {
+      frame = 0,
+      total = 90,
+      mode = "in",
+      origFacing = npc.facing or "down",
+    }
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Fly OUT animation.
+  -- Hides NPC, shows random flying Pokémon sprite flying up and away.
+  local function npcFlyOut(npc)
+    local species = randomFlyingSpecies()
+    if not species then return false end
+    -- Play sound
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Fly") end
+    end)
+    -- Store fly state; KantoMain draw hook will render the bird
+    npc.kantoLifeFly = {
+      species = species,
+      frame = 0,
+      total = 90,  -- 1.5s
+      mode = "out",
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
+    }
+    npc.kantoLifeFlyHidden = true  -- Draw hook skips NPC, draws bird instead
+    npc.frozen = true
+    return true
+  end
+
+  -- NPC Fly IN animation (arrival).
+  local function npcFlyIn(npc)
+    local species = randomFlyingSpecies()
+    if not species then return false end
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Fly") end
+    end)
+    npc.kantoLifeFly = {
+      species = species,
+      frame = 0,
+      total = 90,
+      mode = "in",
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
+    }
+    npc.kantoLifeFlyHidden = true
+    npc.frozen = true
+    return true
+  end
+
+  -- Update teleport/fly animations. Called every frame before the frozen check.
+  -- Returns true if the NPC is currently animating (skip normal routine).
+  local function updateTravelAnimation(npc, dt)
+    -- Teleport animation: spin + rise (Gen 1/3 custom; Gen 2 uses built-in)
+    local tp = npc.kantoLifeTeleport
+    if tp then
+      tp.frame = tp.frame + 1
+      if tp.frame >= tp.total then
+        -- Animation complete
+        npc.kantoLifeTeleport = nil
+        npc.frozen = false
+        if tp.mode == "out" then
+          -- Teleported away: hide until arrival (handled by routine)
+          npc.kantoLifeTeleportedAway = true
+        end
+      else
+        -- Spin: cycle facing every 2 frames
+        local spinOrder = {"down", "left", "up", "right"}
+        local idx = math.floor(tp.frame / 2) % 4 + 1
+        npc.facing = spinOrder[idx]
+        -- Rise (out) or descend (in): up to 24px vertical offset
+        local progress = tp.frame / tp.total
+        local offset = math.floor(progress * 24)
+        if tp.mode == "out" then
+          npc.kantoLifeTeleportY = -offset  -- Rise up
+        else
+          npc.kantoLifeTeleportY = -(24 - offset)  -- Start high, descend
+        end
+      end
+      return true  -- Animating, skip normal routine
+    end
+    
+    -- Fly animation: bird flies up and away (out) or in from above (in)
+    local fl = npc.kantoLifeFly
+    if fl then
+      fl.frame = fl.frame + 1
+      if fl.frame >= fl.total then
+        -- Animation complete
+        npc.kantoLifeFly = nil
+        npc.kantoLifeFlyHidden = false
+        npc.frozen = false
+        if fl.mode == "out" then
+          npc.kantoLifeFlewAway = true
+        end
+      else
+        -- Bird position: up-right path (simplified FLY_PATH1)
+        local progress = fl.frame / fl.total
+        if fl.mode == "out" then
+          -- Start at NPC, fly up-right off screen
+          fl.px = fl.startPx + progress * 100  -- Move right
+          fl.py = fl.startPy - progress * 80   -- Move up
+        else
+          -- Start off-screen up-right, fly to NPC position
+          fl.px = fl.startPx + (1 - progress) * 100
+          fl.py = fl.startPy - (1 - progress) * 80
+        end
+      end
+      return true  -- Animating, skip normal routine
+    end
+    
+    return false  -- Not animating
   end
 
   local DIRS = {
@@ -1168,6 +1360,13 @@ return function(ctx)
 
     for key, st in pairs(states) do
       local npc = st.npc or stateKeys[key]
+      -- Update travel animations (teleport/fly) before frozen check.
+      -- Animating NPCs have frozen=true but need their animation updated.
+      if npc then
+        local animating = false
+        pcall(function() animating = updateTravelAnimation(npc, dt) end)
+        if animating then goto continue end
+      end
       -- RESEARCH FIX: Skip frozen NPCs (talking) without deleting state.
       -- They'll resume their routine when unfrozen.
       if npc and npc.frozen then goto continue end

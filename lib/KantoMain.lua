@@ -1421,6 +1421,13 @@ return function(mod)
 
   -- Keep the large gameplay/menu implementation in its own function scope.
   -- Gen1Recomp/LuaJIT caps a single function at 200 local variables.
+  -- Expose game data for KantoRoutines (flying species lookup)
+  pcall(function()
+    if game and game.data then
+      _G._kantoLifeGameData = game.data
+    end
+  end)
+
   local function setupGameplay()
 
   -- ------- Native OPTIONS submenu (same pattern as Wilds of Kanto / overworld-spawn-mod)
@@ -3587,6 +3594,25 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
+        -- Teleport animation: apply vertical offset (rise/descend)
+        local tpY = self.kantoLifeTeleportY
+        if tpY then
+          -- Temporarily offset py for the draw, restore after
+          local origPy = self.py
+          if type(self.py) == "number" then self.py = self.py + tpY end
+          local ok, res = pcall(baseNpcDraw, self, camX, camY)
+          if type(origPy) == "number" then self.py = origPy end
+          if not ok then error(res) end
+          return
+        end
+        -- Fly animation: hide NPC, draw bird instead
+        if self.kantoLifeFlyHidden and self.kantoLifeFly then
+          local fl = self.kantoLifeFly
+          -- Draw bird sprite at fly position (simplified: use NPC draw with offset)
+          -- TODO: Draw actual flying Pokémon sprite. For now, skip NPC draw
+          -- (bird visual coming in next iteration).
+          return  -- Skip NPC draw; bird drawn separately
+        end
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
           -- UNIFORM: Skip bake. Draw with rotation+tint at draw time.
