@@ -3972,7 +3972,7 @@ function putToSleep(npc)
                 -- bubble tail ~26 world px above the foot (matches 2D).
                 G.push()
                 G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale - 100, 1)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 60, 1)
                 G.pop()
               end
               end  -- end if ghOk else
@@ -6207,16 +6207,19 @@ local function nightlifeTick(world, dt)
         if self then
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
-            -- Teleport: spin + rise, showing a psychic Pokemon.
-            -- Uses SPRITE_MONSTER (generic, exists in base game) as the
-            -- teleport creature. GBC spins the player; we show the mon
-            -- doing the teleporting. Never mutate npc fields; pose-time only.
+            -- Teleport: spin + rise using a randomly selected Psychic Pokémon.
+            -- The temporary visual is returned from pose only; the NPC entity,
+            -- dialogue, identity and state remain untouched.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local monSprite = nil
-            pcall(function() monSprite = getPokeSpriteObject("SPRITE_MONSTER") end)
+            pcall(function()
+              monSprite = getPokeSpriteObject(tp.psySpecies)
+                or getPokeSpriteObject("ABRA")
+                or getPokeSpriteObject("SPRITE_MONSTER")
+            end)
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
-            -- GBC: spin in place first, then rise (mirror engine spinRise)
+            -- GBC: spin in place first, then rise (mirror engine spinRise).
             local rise = 0
             if tp.frame > 20 then rise = (tp.frame - 20) * 3 end
             if rise > 60 then rise = 60 end
@@ -6224,27 +6227,16 @@ local function nightlifeTick(world, dt)
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
-            -- Fly: use SPRITE_BIRD (engine's fly sprite, guaranteed to exist).
-            -- GBC fxBird does exactly this while the player hides.
+            -- Fly: show a randomly selected Pokémon that can learn Fly.
+            -- The sprite is substituted only for this rendered pose; the
+            -- original NPC object and its state are preserved.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
-            -- Try direct sprite ID first (most reliable)
             pcall(function()
-              local sprites = game and game.data and game.data.sprites
-              local birdId = "SPRITE_BIRD"
-              local def = sprites and sprites[birdId]
-              if def then
-                local ok, SR = pcall(require, "src.render.SpriteRenderer")
-                if ok and SR and SR.new then
-                  local ok2, obj = pcall(SR.new, def)
-                  if ok2 and obj then bird = obj end
-                end
-              end
+              bird = getPokeSpriteObject(fl.species)
+                or getPokeSpriteObject("PIDGEY")
+                or getPokeSpriteObject("SPRITE_BIRD")
             end)
-            -- Fallback via helper
-            if not bird then
-              pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
-            end
             local total = fl.total or 90
             local progress = fl.frame / total
             if progress > 1 then progress = 1 end

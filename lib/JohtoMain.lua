@@ -1445,7 +1445,7 @@ return function(mod)
     for i = 1, want do chosen[candidates[i].npc] = true end
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
-      if d.johtoLifeAmbient and not d.johtoLifePokemon then
+      if d.johtoLifeAmbient then
         -- Never sleep story-critical NPCs (safety check)
         local spr = tostring(d.sprite or ""):upper()
         local nm = tostring(d.name or ""):upper()
@@ -1461,7 +1461,7 @@ return function(mod)
             pcall(bakeRotatedSleepSprite, npc)
             pcall(function() if type(npc.face) == "function" then npc:face(sign > 0 and "LEFT" or "RIGHT") else npc.facing = sign > 0 and "LEFT" or "RIGHT" end end)
           end
-        elseif npc.nightlifeSleeping then
+        elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
           npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
           pcall(restoreRotatedSleepSprite, npc)
           if npc.johtoLifeSleepFacing ~= nil then
@@ -1649,8 +1649,8 @@ return function(mod)
 
         for _, npc in ipairs(world.npcs or {}) do
           local d = npc.def or {}
-          if d.johtoLifeAmbient and not d.johtoLifePokemon then
-            if chosen[npc] then
+          if d.johtoLifeAmbient then
+            if chosen[npc] and not d.johtoLifePokemon then
               if not npc.nightlifeSleeping then
                 npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
                 npc.frozen = true
@@ -1664,7 +1664,7 @@ return function(mod)
                 local faceDir = (sign > 0) and "LEFT" or "RIGHT"
                 pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
               end
-            elseif npc.nightlifeSleeping then
+            elseif npc.nightlifeSleeping and not d.johtoLifePokemon then
               npc.frozen = false
               npc.nightlifeSleeping = nil
 
@@ -2660,9 +2660,8 @@ function isVoxelPresentation()
       love.graphics.push("all")
       love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
-      -- Shift toward feet so the head hole aligns with the head (not covering it)
-      local shiftX = (math.sin(angle) * 10)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      -- Keep the opaque base centered on the NPC, matching the tent anchor.
+      love.graphics.translate(px + 8, py + 8)
       love.graphics.rotate(angle)
       love.graphics.translate(-iw/2, -ih/2)
       love.graphics.draw(img, 0, 0)
@@ -2686,9 +2685,8 @@ function isVoxelPresentation()
       -- whenever scale ~= 1 and offset them even at scale == 1.
       love.graphics.translate(ox or 0, oy or 0)
       love.graphics.scale(s, s)
-      -- Shift toward feet so the head hole aligns with the head (not covering it)
-      local shiftX = style == 1 and 0 or (math.sin(angle) * 10)
-      love.graphics.translate(px + 8 + shiftX, py + 8)
+      -- Center bed and sleeping bag on the same anchor used by the tent.
+      love.graphics.translate(px + 8, py + 8)
       if style == 2 or style == 3 then love.graphics.rotate(angle) end
       -- Center the accessory on the NPC (was -ih, causing head coverage)
       love.graphics.translate(-iw/2, -ih/2)
@@ -2767,6 +2765,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local r = baseDraw(self, ox, oy)
           if not isVoxelPresentation() then
             drawZzzForNpc(self, ox, oy, nil)
+            local cbUntil = tonumber(self._kantoLifeCollisionBubbleUntil) or 0
+            local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+            if cbUntil > cbNow then
+              pcall(drawCollisionBubble, self, ox, oy, nil)
+            end
           end
           return r
         end
@@ -2833,6 +2836,68 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         end
       end
       NPC._johtoLifeZzzWrapped = true
+
+      -- Travel animations use pose-time sprite substitution, so the persistent
+      -- NPC keeps its original definition, name, dialogue, and routine state.
+      if type(NPC.pose) == "function" and not NPC._johtoLifeTravelPoseWrapped then
+        local basePose = NPC.pose
+        local travelSpriteCache = {}
+        local function travelPokemonSprite(species)
+          if type(species) ~= "string" or species == "" then return nil end
+          if travelSpriteCache[species] then return travelSpriteCache[species] end
+          local g = G()
+          local data = g and g.data
+          local sprites = data and data.sprites or {}
+          local candidates = {species, "SPRITE_" .. species, "SPRITE_POKEMON_" .. species}
+          local pdef = data and data.pokemon and data.pokemon[species]
+          if type(pdef) == "table" then
+            for _, key in ipairs({"overworldSprite", "sprite", "fieldSprite", "owSprite"}) do
+              if pdef[key] then candidates[#candidates + 1] = pdef[key] end
+            end
+          end
+          local spriteId
+          for _, id in ipairs(candidates) do
+            if sprites[id] then spriteId = id; break end
+          end
+          if not spriteId then
+            local wanted = species:upper()
+            for id in pairs(sprites) do
+              local upper = tostring(id):upper()
+              if upper:find(wanted, 1, true) and not upper:find("BACK", 1, true) then
+                spriteId = id; break
+              end
+            end
+          end
+          local def = spriteId and sprites[spriteId]
+          if not def then return nil end
+          local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
+          if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
+          local okSprite, sprite = pcall(Renderer.new, def)
+          if okSprite and sprite then travelSpriteCache[species] = sprite; return sprite end
+          return nil
+        end
+
+        NPC.pose = function(self, ...)
+          local method = self and self._johtoLifeDepartMethod
+          local species = self and self._johtoLifeDepartSpecies
+          if (method == "fly" or method == "teleport") and species then
+            local sprite, px, py, facing, phase, flip, extra = basePose(self, ...)
+            local temporary = travelPokemonSprite(species)
+            if not temporary then return sprite, px, py, facing, phase, flip, extra end
+            local frame = math.max(0, tonumber(self._johtoLifeDepartFrame) or 0)
+            local spin = {"down", "left", "up", "right"}
+            if method == "teleport" then
+              local rise = math.max(0, math.min(60, (frame - 24) * 2))
+              return temporary, px, py - rise, spin[(math.floor(frame / 2) % 4) + 1], 0, false, extra
+            end
+            local progress = math.max(0, math.min(1, frame / 72))
+            local flap = math.floor(frame / 3) % 2
+            return temporary, px + progress * 80, py - progress * progress * 120, facing, flap, false, extra
+          end
+          return basePose(self, ...)
+        end
+        NPC._johtoLifeTravelPoseWrapped = true
+      end
     end)
 
     -- Voxel sleep Zs: use Gold's REAL Gen-2 battle animation runtime.
@@ -3129,9 +3194,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                 Gfx.push("all")
                                 Gfx.setColor(1,1,1,1)
 -- groundX/groundY are unscaled; x/y were already scaled at line 2987.
-                -- Scale ground before averaging, don't scale the result.
-                local propX = (groundX * sxRatio + x) * 0.5
-                local propY = (groundY * syRatio + y) * 0.5
+                -- Anchor bed, sleeping bag, and tent to the NPC's projected
+                -- ground center. Averaging ground and head coordinates shifted
+                -- props sideways/upward, especially with a pitched voxel camera.
+                local propX = groundX * sxRatio
+                local propY = groundY * syRatio
             Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw/2, ph/2)
                 Gfx.pop()
               end
@@ -3164,7 +3231,16 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prevCanvas = Gfx.getCanvas()
         if not pcall(Gfx.setCanvas, canvas) then return end
         Gfx.push("all")
-        for _, npc in ipairs(state.npcs or {}) do
+        local bubbleActors, seenBubbleActors = {}, {}
+        for _, list in ipairs({state.npcs or {}, state.entities or {}}) do
+          for _, actor in ipairs(list) do
+            if actor and not seenBubbleActors[actor] then
+              seenBubbleActors[actor] = true
+              bubbleActors[#bubbleActors + 1] = actor
+            end
+          end
+        end
+        for _, npc in ipairs(bubbleActors) do
           local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
           if untilAt > now then
             local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
