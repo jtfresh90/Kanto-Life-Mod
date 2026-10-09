@@ -110,9 +110,17 @@ return function(ctx)
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
+    -- Save the pixel-space render anchor. The Gen3 event-object renderer does
+    -- not consume spriteYOffset, so apply the animation offset to py itself
+    -- while keeping cellX/cellY untouched for collision and route logic.
+    if npc._kantoLifeFRBasePy == nil then
+      npc._kantoLifeFRBasePy = tonumber(npc.py) or ((tonumber(npc.cellY) or 0) * 16)
+    end
+    npc._kantoLifeFRBasePx = npc._kantoLifeFRBasePx or tonumber(npc.px) or ((tonumber(npc.cellX) or 0) * 16)
     -- Initialize travel animation state
     npc._kantoLifeFRAnimT = 0
     npc._kantoLifeFRAnimPhase = "spin"
+    npc.spriteYOffset = 0
     if method == "teleport" then
       -- Save original sprite for restoration (in case NPC returns)
       npc._kantoLifeFROrigGfx = npc.graphicsId
@@ -182,6 +190,11 @@ return function(ctx)
       -- Surf: no special animation, bubble cue is sufficient
       -- (NPC walks to water in a future enhancement)
     end
+    -- `spriteYOffset` is not read by the Gen3 field renderer. Mirror it onto
+    -- the sprite's pixel-space Y coordinate without changing its map cell.
+    if npc._kantoLifeFRBasePy ~= nil then
+      npc.py = npc._kantoLifeFRBasePy + (tonumber(npc.spriteYOffset) or 0)
+    end
     return t >= 1.2
   end
 
@@ -198,6 +211,9 @@ return function(ctx)
       npc._kantoLifeFROrigSprite = nil
     end
     npc.spriteYOffset = 0
+    if npc._kantoLifeFRBasePy ~= nil then npc.py = npc._kantoLifeFRBasePy end
+    npc._kantoLifeFRBasePy = nil
+    npc._kantoLifeFRBasePx = nil
     npc._kantoLifeFRAnimT = nil
     npc._kantoLifeFRAnimPhase = nil
   end

@@ -593,15 +593,23 @@ return function(ctx)
     local map = world and world.map
     local mw = tonumber(map and (map.widthCells or (map.width and map.width * 2) or (map.def and (map.def.widthCells or (map.def.width and map.def.width * 2))))) or 255
     local mh = tonumber(map and (map.heightCells or (map.height and map.height * 2) or (map.def and (map.def.heightCells or (map.def.height and map.def.height * 2))))) or 255
-    for _ = 1, 48 do
-      local tx = math.random(1, math.max(1, mw - 2))
-      local ty = math.random(1, math.max(1, mh - 2))
-      local isDoor = false
-      if map and type(map.isDoorTileCell) == "function" then pcall(function() isDoor = map:isDoorTileCell(tx,ty) end) end
-      if not isDoor and not occupied(world, tx, ty, npc) then
-        if not map or type(map.isWalkableCell) ~= "function" then return {tx,ty} end
-        local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
-        if ok and walk then return {tx,ty} end
+    local cx, cy = tonumber(npc and npc.cellX) or 0, tonumber(npc and npc.cellY) or 0
+    -- Pick a meaningfully distant local destination. Map-wide random targets
+    -- often selected unreachable tiles on the other side of walls, making NPCs
+    -- repeatedly take one or two steps and appear frozen near their anchor.
+    for _ = 1, 64 do
+      local radius = math.random(4, 9)
+      local tx = cx + math.random(-radius, radius)
+      local ty = cy + math.random(-radius, radius)
+      local dist = math.abs(tx - cx) + math.abs(ty - cy)
+      if tx >= 1 and ty >= 1 and tx < mw - 1 and ty < mh - 1 and dist >= 4 then
+        local isDoor = false
+        if map and type(map.isDoorTileCell) == "function" then pcall(function() isDoor = map:isDoorTileCell(tx,ty) end) end
+        if not isDoor and not occupied(world, tx, ty, npc) then
+          if not map or type(map.isWalkableCell) ~= "function" then return {tx,ty} end
+          local ok, walk = pcall(map.isWalkableCell, map, tx, ty)
+          if ok and walk then return {tx,ty} end
+        end
       end
     end
     return nil

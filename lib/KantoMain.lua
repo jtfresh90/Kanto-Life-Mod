@@ -3972,7 +3972,7 @@ function putToSleep(npc)
                 -- bubble tail ~26 world px above the foot (matches 2D).
                 G.push()
                 G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale - 100, 1)
+                drawCollisionBubble(npc, ox / wscale, oy / wscale - 26, 1)
                 G.pop()
               end
               end  -- end if ghOk else
@@ -6208,12 +6208,12 @@ local function nightlifeTick(world, dt)
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
             -- Teleport: spin + rise, showing a psychic Pokemon.
-            -- Uses SPRITE_MONSTER (generic, exists in base game) as the
-            -- teleport creature. GBC spins the player; we show the mon
-            -- doing the teleporting. Never mutate npc fields; pose-time only.
+            -- Use the selected psychic species rather than the generic
+            -- placeholder sprite. Sprite lookup is guarded so missing species
+            -- graphics safely fall back to the NPC's normal sprite.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local monSprite = nil
-            pcall(function() monSprite = getPokeSpriteObject("SPRITE_MONSTER") end)
+            pcall(function() monSprite = getPokeSpriteObject(tp.psySpecies) end)
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
             -- GBC: spin in place first, then rise (mirror engine spinRise)
@@ -6224,27 +6224,11 @@ local function nightlifeTick(world, dt)
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
-            -- Fly: use SPRITE_BIRD (engine's fly sprite, guaranteed to exist).
-            -- GBC fxBird does exactly this while the player hides.
+            -- Use the selected Fly-capable Pokémon, not the engine's generic
+            -- bird icon. This keeps the visible animation species-specific.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
-            -- Try direct sprite ID first (most reliable)
-            pcall(function()
-              local sprites = game and game.data and game.data.sprites
-              local birdId = "SPRITE_BIRD"
-              local def = sprites and sprites[birdId]
-              if def then
-                local ok, SR = pcall(require, "src.render.SpriteRenderer")
-                if ok and SR and SR.new then
-                  local ok2, obj = pcall(SR.new, def)
-                  if ok2 and obj then bird = obj end
-                end
-              end
-            end)
-            -- Fallback via helper
-            if not bird then
-              pcall(function() bird = getPokeSpriteObject("SPRITE_BIRD") end)
-            end
+            pcall(function() bird = getPokeSpriteObject(fl.species) end)
             local total = fl.total or 90
             local progress = fl.frame / total
             if progress > 1 then progress = 1 end

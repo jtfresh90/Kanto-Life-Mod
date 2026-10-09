@@ -79,6 +79,11 @@ return function(ctx)
     else return "route" end
   end
 
+  -- Forward declarations are required because startDepartEffect is defined
+  -- before the animation implementations. Without these locals, Lua resolves
+  -- the calls as globals and the Yellow/Gen1 departure effects silently fail.
+  local npcTeleportOut, npcFlyOut, npcTeleportIn, npcFlyIn
+
   -- Visual departure effect markers. The main controller's draw wrappers can
   -- use these for fancier effects; the routines themselves just need the
   -- timing. Fail-open: if nothing reads them, the NPC still despawns.
@@ -185,7 +190,7 @@ return function(ctx)
   -- NPC Teleport OUT animation.
   -- Gen 2: uses built-in npc:scriptTeleport("from").
   -- Gen 1/3: custom spin + rise (mirrors Player:pose logic).
-  local function npcTeleportOut(npc)
+  npcTeleportOut = function(npc)
     -- Play sound
     pcall(function()
       local gd = _G._kantoLifeGameData
@@ -213,7 +218,7 @@ return function(ctx)
   end
 
   -- NPC Teleport IN animation (arrival).
-  local function npcTeleportIn(npc)
+  npcTeleportIn = function(npc)
     pcall(function()
       local gd = _G._kantoLifeGameData
       if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
@@ -234,7 +239,7 @@ return function(ctx)
 
   -- NPC Fly OUT animation.
   -- Hides NPC, shows random flying Pokémon sprite flying up and away.
-  local function npcFlyOut(npc)
+  npcFlyOut = function(npc)
     local species = randomFlyingSpecies()
     if not species then return false end
     -- Play sound
@@ -257,7 +262,7 @@ return function(ctx)
   end
 
   -- NPC Fly IN animation (arrival).
-  local function npcFlyIn(npc)
+  npcFlyIn = function(npc)
     local species = randomFlyingSpecies()
     if not species then return false end
     pcall(function()

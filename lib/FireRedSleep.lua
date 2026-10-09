@@ -267,7 +267,34 @@ return function(ctx)
   -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
     local s = math.floor(tonumber(opt("firered_sleep_style")) or 0)
-    if s ~= 4 or npc == nil then return s end
+    if npc == nil then return s end
+    if s == 5 then
+      -- Natural matches the Gen1/Gen2 policy: tent outdoors, bed in a house,
+      -- and sleeping bag most of the time in other indoor maps.
+      local cached = npc.kantoLifeNaturalSleepStyle
+      if cached ~= nil then return cached end
+      local state = world()
+      local map = state and (state.map or state.currentMap)
+      local mapId = tostring(map and (map.id or map.name) or ""):upper()
+      local outdoor = false
+      pcall(function()
+        local FieldMoves = require("src.core.game3.field_moves")
+        if FieldMoves and type(FieldMoves.isOutdoors) == "function" then
+          local def = map and (map.def or map)
+          outdoor = FieldMoves.isOutdoors(def and def.mapType) == true
+        end
+      end)
+      if outdoor or mapId:find("ROUTE", 1, true) or mapId:find("TOWN", 1, true) then
+        cached = 1
+      elseif mapId:find("HOUSE", 1, true) or mapId:find("HOME", 1, true) then
+        cached = 3
+      else
+        cached = (math.random(100) <= 80) and 2 or 0
+      end
+      npc.kantoLifeNaturalSleepStyle = cached
+      return cached
+    end
+    if s ~= 4 then return s end
     local cached = npc.kantoLifeRandomSleepStyle
     if cached == nil then
       cached = math.random(0, 3)
@@ -469,10 +496,10 @@ return function(ctx)
         local ok, v = pcall(Pipelines.worldPipeline); if ok then id = v end
       end
       if id ~= "voxel" or not out then return out end
-      local style = resolveSleepStyle(npc)
-      if style == 0 then return out end
-      local prop = accessoryImage(style)
-      if not prop and style ~= 4 then return out end
+      -- Do not resolve a style against an undefined single NPC here: Natural
+      -- (5) and Random (4) are per-sleeper choices. Resolve each sleeper below
+      -- so Natural props are not accidentally skipped in voxel mode.
+      if #sleepList == 0 then return out end
       local prev = love.graphics.getCanvas()
       if not pcall(love.graphics.setCanvas, out) then return out end
       local iw, ih = 1, 1
