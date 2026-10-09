@@ -3840,9 +3840,10 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- Voxel bubbles: match engine/Battle Art approach.
-        -- Project FOOT position (world coords), then offset in screen space.
-        -- Battle Art: Voxel3D.project(wx, 0, wy) — height handled in 2D.
+        -- DISABLED: 2D projection bubbles conflict with 3D billboard renderer.
+        -- The 3D billboard (KANTO_LIFE_BUBBLE_3D, same as Zzz) is the correct
+        -- approach for voxel. This 2D path caused camera-follow + tiny bugs.
+        do return out end
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
