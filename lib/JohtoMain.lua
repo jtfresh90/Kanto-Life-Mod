@@ -1469,6 +1469,35 @@ return function(mod)
             npc.johtoLifeSleepFacing = nil
           end
         end
+        -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
+        for _, npc in ipairs(world.npcs or {}) do
+          local d = npc.def or {}
+          if d.johtoLifeAmbient and d.johtoLifePokemon then
+            if isNight then
+              if not npc.nightlifeSleeping then
+                npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
+                npc.frozen = true
+                npc.nightlifeSleeping = true
+                if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
+                local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
+                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
+                npc.johtoLifeSleepSide = sign
+                pcall(bakeRotatedSleepSprite, npc)
+                local faceDir = (sign > 0) and "LEFT" or "RIGHT"
+                pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
+              end
+            elseif npc.nightlifeSleeping then
+              npc.frozen = false
+              npc.nightlifeSleeping = nil
+              npc.johtoLifeSleepAngle = nil
+              pcall(restoreRotatedSleepSprite, npc)
+              if npc.johtoLifeSleepFacing ~= nil then
+                pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
+                npc.johtoLifeSleepFacing = nil
+              end
+            end
+          end
+        end
       end
     end
   end
@@ -1639,6 +1668,35 @@ return function(mod)
               npc.frozen = false
               npc.nightlifeSleeping = nil
 
+              npc.johtoLifeSleepAngle = nil
+              pcall(restoreRotatedSleepSprite, npc)
+              if npc.johtoLifeSleepFacing ~= nil then
+                pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
+                npc.johtoLifeSleepFacing = nil
+              end
+            end
+          end
+        end
+        -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
+        for _, npc in ipairs(world.npcs or {}) do
+          local d = npc.def or {}
+          if d.johtoLifeAmbient and d.johtoLifePokemon then
+            if isNight then
+              if not npc.nightlifeSleeping then
+                npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
+                npc.frozen = true
+                npc.nightlifeSleeping = true
+                if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
+                local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
+                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
+                npc.johtoLifeSleepSide = sign
+                pcall(bakeRotatedSleepSprite, npc)
+                local faceDir = (sign > 0) and "LEFT" or "RIGHT"
+                pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
+              end
+            elseif npc.nightlifeSleeping then
+              npc.frozen = false
+              npc.nightlifeSleeping = nil
               npc.johtoLifeSleepAngle = nil
               pcall(restoreRotatedSleepSprite, npc)
               if npc.johtoLifeSleepFacing ~= nil then
@@ -2556,7 +2614,8 @@ function isVoxelPresentation()
       -- Any Battle Art / Dramatic Shape voxel level other than OFF
       local names = {
         "DRAMATIC_SHAPE", "DRAMALESS_SHAPE", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_FORK",
-        "battle_art_voxel", "BattleArtVoxel", "POTATO_VOXEL", "PotatoVoxel",
+        "BATTLE_ART_VOXEL_GEN2",
+        "battle_art_voxel", "BattleArtVoxel", "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
       }
       if type(mod.find) == "function" then
         for _, id in ipairs(names) do
@@ -3089,6 +3148,48 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if type(Pipelines.worldPresent) ~= "function" then return end
       if Pipelines._johtoLifeSleepWorldPresentWrapped then return end
       local baseWorldPresent = Pipelines.worldPresent
+      -- Voxel bubble overlay: draw collision bubbles in screen space
+      local function drawGoldBubbles(canvas, ctx)
+        if opt("npc_collision_bubbles") == false then return end
+        local state = ctx and ctx.state
+        if not state then return end
+        local Gfx = love.graphics
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        local scale = tonumber(ctx.scale) or 1
+        -- Get camera position from ctx
+        local camX, camY = 0, 0
+        pcall(function()
+          if ctx.cam then camX, camY = ctx.cam.x or 0, ctx.cam.y or 0 end
+        end)
+        local prevCanvas = Gfx.getCanvas()
+        if not pcall(Gfx.setCanvas, canvas) then return end
+        Gfx.push("all")
+        for _, npc in ipairs(state.npcs or {}) do
+          local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
+          if untilAt > now then
+            local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
+            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
+            -- Screen position
+            local sx = (px - camX) * scale
+            local sy = (py - camY) * scale
+            local font = Gfx.getFont()
+            local tw = 12
+            pcall(function() if font then tw = font:getWidth(text) end end)
+            local w, h = math.max(24, tw + 10), 16
+            local bx, by = sx + 8 * scale - w/2, sy - 30 * scale
+            Gfx.setColor(1, 1, 1, 1)
+            Gfx.rectangle("fill", bx, by, w, h, 3, 3)
+            Gfx.setColor(0.1, 0.1, 0.1, 1)
+            Gfx.rectangle("line", bx, by, w, h, 3, 3)
+            if font then
+              Gfx.print(text, bx + (w - tw)/2, by + 2)
+            end
+          end
+        end
+        Gfx.pop()
+        pcall(Gfx.setCanvas, prevCanvas)
+      end
       Pipelines.worldPresent = function(canvas, ctx)
         local out = baseWorldPresent(canvas, ctx)
         local id = nil
@@ -3098,6 +3199,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         end
         if id == "voxel" and out then
           pcall(function() drawGoldSleep(out, ctx) end)
+          pcall(function() drawGoldBubbles(out, ctx) end)
         end
         return out
       end
