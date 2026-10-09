@@ -3169,7 +3169,16 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prevCanvas = Gfx.getCanvas()
         if not pcall(Gfx.setCanvas, canvas) then return end
         Gfx.push("all")
-        for _, npc in ipairs(state.npcs or {}) do
+        local bubbleActors, seenBubbleActors = {}, {}
+        for _, list in ipairs({state.npcs or {}, state.entities or {}}) do
+          for _, actor in ipairs(list) do
+            if actor and not seenBubbleActors[actor] then
+              seenBubbleActors[actor] = true
+              bubbleActors[#bubbleActors + 1] = actor
+            end
+          end
+        end
+        for _, npc in ipairs(bubbleActors) do
           local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
           if untilAt > now then
             local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
