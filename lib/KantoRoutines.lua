@@ -304,10 +304,11 @@ return function(ctx)
         tp.origPx = npc.px
         tp.origSprite = npc.sprite
         tp.origFacing = npc.facing
-        -- Swap to Abra for teleport out
-        if tp.mode == "out" and tp.sprite then
-          npc.sprite = tp.sprite
-        end
+        -- DISABLED: Sprite swap was breaking sleep bake.
+        -- (Abra sprite leaked into sleep rendering)
+        -- if tp.mode == "out" and tp.sprite then
+        --   npc.sprite = tp.sprite
+        -- end
         npc.frozen = true
       end
 
@@ -359,9 +360,10 @@ return function(ctx)
         fl.origPx = npc.px
         fl.origPy = npc.py
         fl.origSprite = npc.sprite
-        if fl.sprite then
-          npc.sprite = fl.sprite  -- Flying-type
-        end
+        -- DISABLED: Sprite swap was breaking sleep bake.
+        -- if fl.sprite then
+        --   npc.sprite = fl.sprite
+        -- end
         npc.frozen = true
       end
 
