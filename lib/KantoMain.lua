@@ -3161,6 +3161,8 @@ function putToSleep(npc)
     if npc.nightlifeSleeping then return end
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
+    -- Clear Gen 2 spriteYOffset (prevents accessory misalignment)
+    npc.spriteYOffset = 0
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3639,9 +3641,18 @@ function putToSleep(npc)
   local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
     -- Try multiple paths for platform compatibility.
+    -- In Gold (gen1=false), use the Gen 2 NPC class (src.world.gen2.Npc).
     local NPCMod = NPC
     if not (NPCMod and type(NPCMod.draw) == "function") then
-      for _, path in ipairs({"src.world.NPC", "src.world.npc", "world.NPC"}) do
+      local paths
+      if gen1 then
+        paths = {"src.world.NPC", "src.world.npc", "world.NPC"}
+      else
+        -- Gold: Gen 2 NPC class first, then fallbacks
+        paths = {"src.world.gen2.Npc", "src.world.gen2.npc",
+                 "src.world.NPC", "src.world.npc", "world.NPC"}
+      end
+      for _, path in ipairs(paths) do
         local m = safeRequire(path)
         if m and type(m.draw) == "function" then NPCMod = m; break end
       end
@@ -5527,7 +5538,13 @@ local function nightlifeTick(world, dt)
       npc.timer = 99999
     end
 
-    local NPCMod = NPC or safeRequire("src.world.NPC")
+    -- In Gold, use Gen 2 NPC class
+    local NPCMod
+    if gen1 then
+      NPCMod = NPC or safeRequire("src.world.NPC")
+    else
+      NPCMod = safeRequire("src.world.gen2.Npc") or safeRequire("src.world.NPC")
+    end
 
     ----------------------------------------------------------------
     -- Public voxel renderer bridge for Porygonal-compatible sleep.
