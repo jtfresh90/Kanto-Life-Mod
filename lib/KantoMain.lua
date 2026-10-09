@@ -5909,17 +5909,17 @@ local function nightlifeTick(world, dt)
     -- Returns false (does not claim the actor) so normal NPC rendering
     -- continues; we only ADD the bubble quad.
     ----------------------------------------------------------------
-    -- BRAND NEW APPROACH (v3): Pre-render at SETUP (2D context, safe).
-    -- v2 failed because it created Canvas DURING the 3D render pass.
-    -- Accessories work because they load PNGs (safe anytime).
-    -- This pre-renders all bubble texts at setup, caches meshes like
-    -- propMeshCache. The 3D pass only does Voxel3D.draw (no Canvas).
-    local bubbleMeshCache = {}  -- text -> {mesh, image, w, h}
-    local BUBBLE_TEXTS = { ":)", "!", "?", "!!", "^^", "**", "~~", "vv" }
+    -- REVERTED TO v2 (1.4.142) + fixes: v3 pre-render didn't work.
+    -- v2 provably shows bubbles (screenshot). Fixed: center anchor + 1.5x scale.
+    -- The hand-rolled mesh + Canvas texture failed. This uses:
+    --   Canvas -> Image (via newImageData) -> sleepImgCache + ensureAssetHook
+    --   -> SpriteBillboards.mesh (same as Zzz) -> Voxel3D.draw (no scale)
+    -- Every component is proven by the working Zzz.
+    local bubbleImageCache = {}  -- text -> {path, image, w, h}
 
-    local function getBubbleMesh(text)
+    local function getBubbleImage(text)
       text = tostring(text or ":)")
-      local cached = bubbleMeshCache[text]
+      local cached = bubbleImageCache[text]
       if cached then return cached end
       local G = love.graphics
       local font = nil
@@ -5973,14 +5973,8 @@ local function nightlifeTick(world, dt)
       sleepImgCache[path] = img
       ensureAssetHook()
       local entry = {path = path, image = img, w = w, h = h}
-      bubbleMeshCache[text] = entry
+      bubbleImageCache[text] = entry
       return entry
-    end
-
-    -- Pre-render all bubble texts at SETUP (2D context, safe).
-    -- This is the key fix: no Canvas creation during the 3D pass.
-    for _, bt in ipairs(BUBBLE_TEXTS) do
-      pcall(getBubbleMesh, bt)
     end
 
     local function installPublicVoxelBubbleRenderer()
@@ -6027,7 +6021,7 @@ local function nightlifeTick(world, dt)
         local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
 
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
-        local entry = getBubbleMesh(text)
+        local entry = getBubbleImage(text)
         if not entry or not entry.image then return false end
         local def = {
           id = "KANTO_LIFE_BUBBLE",
@@ -6038,7 +6032,8 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
-        local mesh = SpriteBillboards.mesh(def, 0)
+        -- Center anchor (entry.h / 2) like Zzz and accessories — fixes off-center placement
+        local mesh = SpriteBillboards.mesh(def, 0, entry.h / 2)
         if not mesh then return false end
 
         local px = tonumber(ctx.px) or tonumber(npc.px)
@@ -6060,9 +6055,15 @@ local function nightlifeTick(world, dt)
         -- overlap (gh+26). World-space position: no projection needed.
         -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
         -- (same as Zzz). This was a key difference from the failed approach.
+        -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
+        -- then rotate, then translate.
+        local bubbleScale = 1.5
         local model = Mat4.mul(
           Mat4.translate(px + 8, gh + 26, py + 8),
-          Mat4.rotateY(zyaw)
+          Mat4.mul(
+            Mat4.rotateY(zyaw),
+            Mat4.scale(bubbleScale, bubbleScale, 1)
+          )
         )
         -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
         pcall(Voxel3D.draw, mesh, entry.image, model, 0.5, model)
