@@ -159,7 +159,7 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "day_sleepers", type = "toggle", label = "DAY SLEEPERS", default = true },
     { key = "sleep_bubbles", type = "toggle", label = "SLEEP ZZZ", default = true },
-    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 } } },
+    { key = "sleep_style", type = "choice", label = "SLEEP STYLE", default = 0, choices = { { "Default", 0 }, { "Tent", 1 }, { "Sleeping Bag", 2 }, { "Bed", 3 }, { "Random", 4 }, { "Natural", 5 } } },
     { key = "npc_collision_bubbles", type = "toggle", label = "NPC TALK BUBBLES", default = true },
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
@@ -1773,11 +1773,11 @@ return function(mod)
           label = "SLEEP STYLE",
           stepper = true,
           kind = "number",
-          min = 0, max = 4, step = 1, stepFast = 1,
+          min = 0, max = 5, step = 1, stepFast = 1,
           current = math.floor(tonumber(opt("sleep_style")) or 0),
-          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(v) or 0)] or "Default" end,
-          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
-          apply = function(v) setOpt("sleep_style", math.max(0, math.min(4, math.floor(tonumber(v) or 0)))) end,
+          display = function(v) return ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(v) or 0)] or "Default" end,
+          right = ({[0]="Default",[1]="Tent",[2]="Sleeping Bag",[3]="Bed",[4]="Random",[5]="Natural"})[math.floor(tonumber(opt("sleep_style")) or 0)] or "Default",
+          apply = function(v) setOpt("sleep_style", math.max(0, math.min(5, math.floor(tonumber(v) or 0)))) end,
         },
         {
           label = "NPC TALK BUBBLES",
@@ -3380,17 +3380,46 @@ function putToSleep(npc)
     if ok and img then img:setFilter("nearest","nearest"); sleepAccessoryCache[rel]=img; return img end
     return nil
   end
-  -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
+  -- Resolve sleep style, handling Random (4) and Natural (5).
+  -- Natural: outdoor->tent, house->bed, other indoor->80% bag / 20% default.
   local function resolveSleepStyle(npc)
     -- Accessories re-enabled (1.4.45)
     local style = math.floor(tonumber(opt("sleep_style")) or 0)
-    if style ~= 4 then return style end
-    local cached = npc.kantoLifeRandomSleepStyle
-    if cached == nil then
-      cached = math.random(0, 3)
-      npc.kantoLifeRandomSleepStyle = cached
+    if style == 4 then
+      local cached = npc.kantoLifeRandomSleepStyle
+      if cached == nil then
+        cached = math.random(0, 3)
+        npc.kantoLifeRandomSleepStyle = cached
+      end
+      return cached
     end
-    return cached
+    if style == 5 then
+      -- Natural: cache keyed by map so moving to a new location recomputes
+      local world = mod and mod.world
+      local map = world and world.map
+      local mapId = map and tostring(map.id or "") or ""
+      if npc.kantoLifeNaturalSleepStyle ~= nil
+         and npc.kantoLifeNaturalSleepMap == mapId then
+        return npc.kantoLifeNaturalSleepStyle
+      end
+      local result
+      if not isIndoor(mapId, map) then
+        result = 1  -- Outdoor: always tent
+      elseif string.upper(mapId):find("HOUSE", 1, true) then
+        result = 3  -- House interior: bed
+      else
+        -- Non-house building: 80% sleeping bag, 20% default (deterministic)
+        local seed = tostring(npc.id or "") .. ":" .. tostring(npc.cellX or "")
+                     .. ":" .. tostring(npc.cellY or "")
+        local h = 0
+        for i = 1, #seed do h = (h * 31 + seed:byte(i)) % 100 end
+        result = (h < 80) and 2 or 0
+      end
+      npc.kantoLifeNaturalSleepStyle = result
+      npc.kantoLifeNaturalSleepMap = mapId
+      return result
+    end
+    return style
   end
   -- FRESH 2D accessory: single image drawn under NPC (simple, reliable).
   -- (Old 3-layer base/overlay never worked in 2D; scratched.)
@@ -5715,14 +5744,9 @@ local function nightlifeTick(world, dt)
           Mat4.mul(bodyRot, Mat4.translate(-8, 0, 0))
         )
 
-        local propStyle = math.floor(tonumber(opt("sleep_style")) or 0) -- Accessories re-enabled (1.4.45)
-        if propStyle == 4 then
-          propStyle = npc.kantoLifeRandomSleepStyle
-          if propStyle == nil then
-            propStyle = math.random(0, 3)
-            npc.kantoLifeRandomSleepStyle = propStyle
-          end
-        end
+        -- Use resolveSleepStyle (handles Random and Natural)
+        local propStyle = 0
+        pcall(function() propStyle = resolveSleepStyle(npc) end)
         -- 3-layer voxel beds: opaque base UNDER body, overlay (with head
         -- hole) ABOVE body. Tent (1) stays a single upright billboard.
         -- Accessories re-enabled (1.4.45)
