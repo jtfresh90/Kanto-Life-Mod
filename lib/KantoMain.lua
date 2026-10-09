@@ -3623,8 +3623,10 @@ function putToSleep(npc)
     if scale ~= 1 then G.scale(scale, scale) sx, sy = sx / scale, sy / scale end
     local font = G.getFont and G.getFont() or nil
     local tw = font and font:getWidth(text) or (#text * 6)
-    local w, h = math.max(18, tw + 8), 12
-    local x, y = math.floor(sx - w/2), math.floor(sy - 14)
+    local th = font and font:getHeight() or 8
+    -- Dynamic height: fit text with padding (fixes overflow)
+    local w, h = math.max(18, tw + 10), math.max(14, th + 6)
+    local x, y = math.floor(sx - w/2), math.floor(sy - h - 4)
     G.setColor(1,1,1,1); G.rectangle("fill", x, y, w, h, 2, 2)
     G.setColor(0.1,0.1,0.1,1); G.rectangle("line", x, y, w, h, 2, 2)
     G.polygon("fill", x + w/2 - 2, y + h, x + w/2 + 2, y + h, x + w/2, y + h + 3)
