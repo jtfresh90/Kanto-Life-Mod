@@ -2836,6 +2836,68 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         end
       end
       NPC._johtoLifeZzzWrapped = true
+
+      -- Travel animations use pose-time sprite substitution, so the persistent
+      -- NPC keeps its original definition, name, dialogue, and routine state.
+      if type(NPC.pose) == "function" and not NPC._johtoLifeTravelPoseWrapped then
+        local basePose = NPC.pose
+        local travelSpriteCache = {}
+        local function travelPokemonSprite(species)
+          if type(species) ~= "string" or species == "" then return nil end
+          if travelSpriteCache[species] then return travelSpriteCache[species] end
+          local g = G()
+          local data = g and g.data
+          local sprites = data and data.sprites or {}
+          local candidates = {species, "SPRITE_" .. species, "SPRITE_POKEMON_" .. species}
+          local pdef = data and data.pokemon and data.pokemon[species]
+          if type(pdef) == "table" then
+            for _, key in ipairs({"overworldSprite", "sprite", "fieldSprite", "owSprite"}) do
+              if pdef[key] then candidates[#candidates + 1] = pdef[key] end
+            end
+          end
+          local spriteId
+          for _, id in ipairs(candidates) do
+            if sprites[id] then spriteId = id; break end
+          end
+          if not spriteId then
+            local wanted = species:upper()
+            for id in pairs(sprites) do
+              local upper = tostring(id):upper()
+              if upper:find(wanted, 1, true) and not upper:find("BACK", 1, true) then
+                spriteId = id; break
+              end
+            end
+          end
+          local def = spriteId and sprites[spriteId]
+          if not def then return nil end
+          local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
+          if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
+          local okSprite, sprite = pcall(Renderer.new, def)
+          if okSprite and sprite then travelSpriteCache[species] = sprite; return sprite end
+          return nil
+        end
+
+        NPC.pose = function(self, ...)
+          local method = self and self._johtoLifeDepartMethod
+          local species = self and self._johtoLifeDepartSpecies
+          if (method == "fly" or method == "teleport") and species then
+            local sprite, px, py, facing, phase, flip, extra = basePose(self, ...)
+            local temporary = travelPokemonSprite(species)
+            if not temporary then return sprite, px, py, facing, phase, flip, extra end
+            local frame = math.max(0, tonumber(self._johtoLifeDepartFrame) or 0)
+            local spin = {"down", "left", "up", "right"}
+            if method == "teleport" then
+              local rise = math.max(0, math.min(60, (frame - 24) * 2))
+              return temporary, px, py - rise, spin[(math.floor(frame / 2) % 4) + 1], 0, false, extra
+            end
+            local progress = math.max(0, math.min(1, frame / 72))
+            local flap = math.floor(frame / 3) % 2
+            return temporary, px + progress * 80, py - progress * progress * 120, facing, flap, false, extra
+          end
+          return basePose(self, ...)
+        end
+        NPC._johtoLifeTravelPoseWrapped = true
+      end
     end)
 
     -- Voxel sleep Zs: use Gold's REAL Gen-2 battle animation runtime.
