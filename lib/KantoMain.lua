@@ -3153,6 +3153,135 @@ local nm = storyDisplayName(talker)
     return sid == "SPRITE_GAMBLER_ASLEEP" and id:find("VIRIDIAN_CITY_OBJ_", 1, true) ~= nil
   end
 
+  -- Gold: Bake sleeping sprite with accessory and Zzz into a single canvas.
+  -- "Bake, don't draw" approach: eliminates all render-time coordinate math.
+  -- The engine (2D and voxel) renders sprite.image normally.
+  local function bakeGoldSleepSprite(npc)
+    if not npc or not npc.sprite then return false end
+    local sprite = npc.sprite
+    if sprite._kantoGoldBaked then return true end
+    local G = love.graphics
+    if not G then return false end
+    
+    local ok = pcall(function()
+      local fw = tonumber(sprite.frameWidth) or 16
+      local fh = tonumber(sprite.frameHeight) or 16
+      local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
+      
+      -- Get sleep style and accessory images
+      local style = 0
+      pcall(function() style = resolveSleepStyle(npc) end)
+      local baseImg = nil
+      local overlayImg = nil
+      if style == 2 or style == 3 then
+        pcall(function()
+          baseImg = sleepAccessoryBaseImage(style)
+          overlayImg = sleepAccessoryImage(style)
+        end)
+      end
+      
+      -- Canvas size: fit accessory or NPC
+      local cw, ch = fw + 16, fh + 16
+      if baseImg then
+        local bw, bh = baseImg:getDimensions()
+        cw, ch = math.max(cw, bw + 8), math.max(ch, bh + 8)
+      end
+      
+      local canvas = G.newCanvas(cw, ch)
+      local prev = G.getCanvas()
+      G.setCanvas(canvas)
+      G.clear(0, 0, 0, 0)
+      G.setColor(1, 1, 1, 1)
+      
+      -- Draw base (bed/sleeping bag) centered
+      if baseImg then
+        local bw, bh = baseImg:getDimensions()
+        G.push()
+        G.translate(cw/2, ch/2)
+        G.rotate(angle)
+        G.translate(-bw/2, -bh/2)
+        G.draw(baseImg, 0, 0)
+        G.pop()
+      end
+      
+      -- Draw rotated gray NPC
+      local srcImg = sprite.image
+      if srcImg then
+        G.push()
+        G.translate(cw/2, ch/2)
+        G.rotate(angle)
+        -- Gray shader
+        local gray = nil
+        pcall(function()
+          gray = G.newShader([[
+            vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+              vec4 c = Texel(tex, uv) * color;
+              float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+              return vec4(g, g, g, c.a);
+            }
+          ]])
+        end)
+        if gray then G.setShader(gray) end
+        G.translate(-fw/2, -fh/2)
+        -- Draw current frame
+        local quad = nil
+        pcall(function()
+          quad = G.newQuad(0, 0, fw, fh, srcImg:getDimensions())
+        end)
+        if quad then
+          G.draw(srcImg, quad, 0, 0)
+        else
+          G.draw(srcImg, 0, 0)
+        end
+        if gray then G.setShader() end
+        G.pop()
+      end
+      
+      -- Draw overlay (transparent bed/bag top)
+      if overlayImg then
+        local ow, oh = overlayImg:getDimensions()
+        G.push()
+        G.translate(cw/2, ch/2)
+        G.rotate(angle)
+        G.translate(-ow/2, -oh/2)
+        G.draw(overlayImg, 0, 0)
+        G.pop()
+      end
+      
+      -- Draw Zzz text at top
+      G.setColor(1, 1, 1, 1)
+      local font = G.getFont()
+      if font then
+        G.setFont(font)
+        G.print("Z", cw - 14, 2)
+        G.print("z", cw - 10, 10)
+      end
+      
+      G.setCanvas(prev)
+      
+      -- Replace sprite image, store originals
+      if sprite._kantoOrigImage == nil then
+        sprite._kantoOrigImage = sprite.image
+      end
+      sprite.image = canvas
+      sprite._kantoGoldBaked = true
+      sprite._kantoSleepBaked = true
+    end)
+    return ok
+  end
+  
+  local function restoreGoldSleepSprite(npc)
+    if not npc or not npc.sprite then return end
+    local sprite = npc.sprite
+    if not sprite._kantoGoldBaked then return end
+    if sprite._kantoOrigImage ~= nil then
+      sprite.image = sprite._kantoOrigImage
+      sprite._kantoOrigImage = nil
+    end
+    sprite._kantoGoldBaked = nil
+    sprite._kantoSleepBaked = nil
+  end
+
 function putToSleep(npc)
     if not npc or isPlayerActor(npc) then return end
     if isPokemonFollower(npc) then return end
@@ -3163,6 +3292,10 @@ function putToSleep(npc)
     npc.nightlifeSleeping = true
     -- Clear Gen 2 spriteYOffset (prevents accessory misalignment)
     npc.spriteYOffset = 0
+    -- Gold: bake sleeping sprite (accessory + Zzz) - "bake, don't draw"
+    if not gen1 then
+      pcall(bakeGoldSleepSprite, npc)
+    end
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3211,6 +3344,8 @@ function putToSleep(npc)
     npc.sleepPose = nil
     npc.kantoLifeSleepAngle = nil
     restoreSleepSprite(npc)
+    -- Gold: restore baked sprite
+    pcall(restoreGoldSleepSprite, npc)
     if npc.sprite then
       npc.sprite._sleepScreenX = nil
       npc.sprite._sleepScreenY = nil
@@ -3664,6 +3799,12 @@ function putToSleep(npc)
       --   screen offsets (ox = -cam.x * scale). Use correct math per gen.
       local isGen2Draw = not gen1
       NPCMod.draw = function(self, a, b, c, d)
+        -- Gold: sleep visuals are baked into sprite.image at sleep time.
+        -- Skip render-time accessory drawing (would double-draw/misalign).
+        if not gen1 and self.nightlifeSleeping and self.sprite
+           and self.sprite._kantoGoldBaked then
+          return baseNpcDraw(self, a, b, c, d)
+        end
         local camX, camY = a, b
         -- Helper: convert world px to screen px
         local function toScreen(px, py)
