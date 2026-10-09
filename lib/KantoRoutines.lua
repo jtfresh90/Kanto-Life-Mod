@@ -1362,15 +1362,30 @@ return function(ctx)
             st.wait = (st.wait or 0) - (dt or 0)
             if st.wait <= 0 then
               -- No anchor: pick new random destination (user: not anchored to a point)
+              -- Routines still run; NPCs just don't return to spawn.
+              -- Sleep is unaffected (separate system via scheduleWalker).
               local t = agendaTarget(world, npc)
-              if t then st.phase = "out"; st.target = {t[1],t[2]}; st.wait = 0
-              else st.phase = "out"; st.target = {localWanderTarget(world, npc)}; st.wait = 0 end
+              if t then
+                st.phase = "out"; st.target = {t[1],t[2]}; st.wait = 0
+              else
+                local wx, wy = localWanderTarget(world, npc)
+                if wx and wy then
+                  st.phase = "out"; st.target = {wx, wy}; st.wait = 0
+                else
+                  -- No valid target: wait and retry (don't break routine)
+                  st.wait = 5
+                end
+              end
             end
           else
             local bx, by = npc.cellX, npc.cellY
             if not npc.moving then stepToward(world, npc, st.target[1], st.target[2]) end
             if bx == npc.cellX and by == npc.cellY then st.stuck = (st.stuck or 0) + 1 else st.stuck = 0 end
-            if st.stuck > 45 then st.target = {localWanderTarget(world, npc)}; st.phase = "out"; st.stuck = 0 end
+            if st.stuck > 45 then
+              local wx, wy = localWanderTarget(world, npc)
+              if wx and wy then st.target = {wx, wy} end
+              st.phase = "out"; st.stuck = 0
+            end
           end
         end
       end
