@@ -275,63 +275,37 @@ return function(ctx)
   -- Update teleport/fly animations. Called every frame before the frozen check.
   -- Returns true if the NPC is currently animating (skip normal routine).
   local function updateTravelAnimation(npc, dt)
-    -- Teleport animation: spin + rise (Gen 1/3 custom; Gen 2 uses built-in)
+    -- Travel animations render at POSE TIME (NPC:pose wrapper in KantoMain).
+    -- This function ONLY advances frame counters. It never mutates
+    -- npc.sprite, npc.py, npc.px, or npc.facing. The pose wrapper reads
+    -- tp.frame/fl.frame and returns substituted sprite + Y offset.
     local tp = npc.kantoLifeTeleport
     if tp then
-      tp.frame = tp.frame + 1
-      if tp.frame >= tp.total then
-        -- Animation complete
+      tp.frame = (tp.frame or 0) + 1
+      if tp.frame >= (tp.total or 90) then
         npc.kantoLifeTeleport = nil
+        npc.kantoLifeTeleportY = nil  -- Clear legacy side-channel
         npc.frozen = false
         if tp.mode == "out" then
-          -- Teleported away: hide until arrival (handled by routine)
-          npc.kantoLifeTeleportedAway = true
-        end
-      else
-        -- Spin: cycle facing every 2 frames
-        local spinOrder = {"down", "left", "up", "right"}
-        local idx = math.floor(tp.frame / 2) % 4 + 1
-        npc.facing = spinOrder[idx]
-        -- Rise (out) or descend (in): up to 24px vertical offset
-        local progress = tp.frame / tp.total
-        local offset = math.floor(progress * 24)
-        if tp.mode == "out" then
-          npc.kantoLifeTeleportY = -offset  -- Rise up
-        else
-          npc.kantoLifeTeleportY = -(24 - offset)  -- Start high, descend
+          npc._kantoLifeTravelHidden = true
         end
       end
       return true  -- Animating, skip normal routine
     end
-    
-    -- Fly animation: bird flies up and away (out) or in from above (in)
+
     local fl = npc.kantoLifeFly
     if fl then
-      fl.frame = fl.frame + 1
-      if fl.frame >= fl.total then
-        -- Animation complete
+      fl.frame = (fl.frame or 0) + 1
+      if fl.frame >= (fl.total or 90) then
         npc.kantoLifeFly = nil
-        npc.kantoLifeFlyHidden = false
         npc.frozen = false
         if fl.mode == "out" then
-          npc.kantoLifeFlewAway = true
-        end
-      else
-        -- Bird position: up-right path (simplified FLY_PATH1)
-        local progress = fl.frame / fl.total
-        if fl.mode == "out" then
-          -- Start at NPC, fly up-right off screen
-          fl.px = fl.startPx + progress * 100  -- Move right
-          fl.py = fl.startPy - progress * 80   -- Move up
-        else
-          -- Start off-screen up-right, fly to NPC position
-          fl.px = fl.startPx + (1 - progress) * 100
-          fl.py = fl.startPy - (1 - progress) * 80
+          npc._kantoLifeTravelHidden = true
         end
       end
       return true  -- Animating, skip normal routine
     end
-    
+
     return false  -- Not animating
   end
 

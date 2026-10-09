@@ -399,6 +399,25 @@ return function(mod)
     return nil
   end
 
+  -- Get a Pokemon sprite OBJECT (for pose-time travel animations).
+  -- Returns cached sprite table, or nil. Never assigns to npc.sprite.
+  local pokeSpriteCache = {}
+  local function getPokeSpriteObject(species)
+    if not species then return nil end
+    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    local spriteId = resolvePokeSprite(species)
+    if not spriteId then return nil end
+    local sprites = game and game.data and game.data.sprites
+    local spriteDef = sprites and sprites[spriteId]
+    if not spriteDef then return nil end
+    local ok, SR = pcall(require, "src.render.SpriteRenderer")
+    if not (ok and SR and SR.new) then return nil end
+    local ok2, spriteObj = pcall(SR.new, spriteDef)
+    if not (ok2 and spriteObj) then return nil end
+    pokeSpriteCache[species] = spriteObj
+    return spriteObj
+  end
+
   local function playSpeciesCry(species)
     pcall(function()
       if not species then return end
@@ -3819,8 +3838,10 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- ENABLED: 2D overlay for voxel bubbles (simplified).
-        -- Projects foot to screen, draws directly at projected coords.
+        -- DISABLED: Voxel bubble projection is broken (follows camera).
+        -- Needs engine billboard approach (Tilt.groundPoint with cam offset).
+        -- 2D bubbles work via NPCMod.draw. Re-enable after proper fix.
+        do return out end
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -6166,6 +6187,38 @@ local function nightlifeTick(world, dt)
         -- Bubble renderer: same lazy retry (was missing — root cause of no bubbles)
         if not NPCMod._kantoLifePublicBubbleRenderer then
           pcall(installPublicVoxelBubbleRenderer)
+        end
+        -- TRAVEL ANIMATIONS (pose-time, per engine/Free Fly/Wild Skies/Razor).
+        -- Never mutate npc.sprite/npc.py; return substituted sprite + Y offset.
+        -- This works in both 2D (NPC:draw via pose) and voxel (posesOf via pose).
+        if self then
+          local tp = self.kantoLifeTeleport
+          if tp and tp.frame then
+            -- Teleport: spin + rise, Abra sprite
+            local sprite, px, py, facing, phase, flip = basePose(self, ...)
+            local abra = nil
+            pcall(function() abra = getPokeSpriteObject("ABRA") end)
+            local spinOrder = {"down", "left", "up", "right"}
+            local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
+            -- Rise after in-place spins (mirror engine: rise = (step - 16) * 16)
+            local rise = 0
+            if tp.frame > 32 then rise = (tp.frame - 32) * 2 end
+            if rise > 48 then rise = 48 end
+            return abra or sprite, px, py - rise, spinFacing, 0, false, false
+          end
+          local fl = self.kantoLifeFly
+          if fl and fl.frame then
+            -- Fly: bird sprite, arc up and away
+            local sprite, px, py, facing, phase, flip = basePose(self, ...)
+            local bird = nil
+            pcall(function() bird = getPokeSpriteObject(fl.species or "PIDGEY") end)
+            local progress = fl.frame / 90
+            if progress > 1 then progress = 1 end
+            local lift = progress * 100
+            local dx = progress * 60
+            local flapPhase = math.floor(fl.frame / 3) % 2
+            return bird or sprite, px + dx, py - lift, facing, flapPhase, false, false
+          end
         end
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
