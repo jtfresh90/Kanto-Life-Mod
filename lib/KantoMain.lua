@@ -399,26 +399,6 @@ return function(mod)
     return nil
   end
 
-  -- Get a sprite OBJECT (not just ID) for a Pokemon species.
-  -- Used by KantoRoutines for teleport (Abra) and fly (bird) animations.
-  -- Returns a SpriteRenderer-compatible sprite table, or nil.
-  local pokeSpriteCache = {}
-  local function getPokeSpriteObject(species)
-    if not species then return nil end
-    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
-    local spriteId = resolvePokeSprite(species)
-    if not spriteId then return nil end
-    local sprites = game and game.data and game.data.sprites
-    local spriteDef = sprites and sprites[spriteId]
-    if not spriteDef then return nil end
-    local ok, SR = pcall(require, "src.render.SpriteRenderer")
-    if not (ok and SR and SR.new) then return nil end
-    local ok2, spriteObj = pcall(SR.new, spriteDef)
-    if not (ok2 and spriteObj) then return nil end
-    pokeSpriteCache[species] = spriteObj
-    return spriteObj
-  end
-
   local function playSpeciesCry(species)
     pcall(function()
       if not species then return end
@@ -596,22 +576,8 @@ return function(mod)
   local function isCeladonMap(mapId) if not mapId then return false end; local id = string.upper(tostring(mapId)); return id:find("CELADON", 1, true) ~= nil end
   local function pokeTargetCount(mapId, map)
     if not opt("poke_npcs") then return 0 end
-    local isOutdoor = isTown(mapId) or isRoute(mapId)
-    local indoor = isIndoor(mapId, map)
-    -- Fallback: small maps (<30x30) are likely building interiors
-    -- (isIndoor misses some like POWER_PLANT or custom interiors)
-    if not isOutdoor and not indoor then
-      local w = map and (map.widthCells or map.width or 0) or 0
-      local h = map and (map.heightCells or map.height or 0) or 0
-      if w > 0 and h > 0 and w < 30 and h < 30 then
-        indoor = true
-      else
-        return 0
-      end
-    end
+    if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, map)) then return 0 end
     local n = math.floor(tonumber(opt("poke_npc_count")) or 0); if wildSpawnModActive() then n = math.floor(n / 2) end
-    -- Indoors: cap at 3 (houses are small)
-    if indoor and not isOutdoor then n = math.min(n, 3) end
     if n < 0 then n = 0 end
     if n > 50 then n = 50 end
     return n
@@ -749,14 +715,7 @@ return function(mod)
     local ok, walk = pcall(function() return map:isWalkableCell(x, y) end)
     if not ok or not walk then return false end
     if isWaterCell(map, x, y) then return false end
-    -- Never spawn ON a warp, but allow NEAR warps in small interiors
-    -- (houses are tiny; the 3x3 exclusion zone covers too much)
-    local warpOk, isWarp = pcall(function() return map:warpAtCell(x, y) end)
-    if warpOk and isWarp then return false end
-    local w = map.widthCells or map.width or 0
-    local h = map.heightCells or map.height or 0
-    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
-    if not isSmallInterior and nearWarp(map, x, y) then return false end
+    if nearWarp(map, x, y) then return false end
     return true
   end
 
@@ -2384,7 +2343,6 @@ local nm = storyDisplayName(talker)
         isRoute = isRoute,
         resolveDestMap = resolveDestMap,
          getOption = function(k) return opt(k) end,
-        getPokeSpriteObject = getPokeSpriteObject,
       })
       if okInit and instance then
         kantoRoutines = instance
@@ -3148,28 +3106,6 @@ function putToSleep(npc)
     if (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then return end
     if isSpecialCharacter(npc) then return end
     if npc.nightlifeSleeping then return end
-    -- Clear travel-hidden flag: sleeping NPCs are visible
-    -- (Fix: flag was never cleared after teleport/fly, causing invisible sleepers)
-    npc._kantoLifeTravelHidden = nil
-    -- Clear teleport/fly animation state: the sprite swap (Abra/bird)
-    -- must not leak into the sleep bake. Restore original sprite first.
-    -- (Fix: NPCs that fell asleep mid-teleport baked the Abra sprite.)
-    if npc.kantoLifeTeleport then
-      local tp = npc.kantoLifeTeleport
-      if tp.origSprite then npc.sprite = tp.origSprite end
-      if tp.origPx then npc.px = tp.origPx end
-      if tp.origPy then npc.py = tp.origPy end
-      if tp.origFacing then npc.facing = tp.origFacing end
-      npc.kantoLifeTeleport = nil
-    end
-    if npc.kantoLifeFly then
-      local fl = npc.kantoLifeFly
-      if fl.origSprite then npc.sprite = fl.origSprite end
-      if fl.origPx then npc.px = fl.origPx end
-      if fl.origPy then npc.py = fl.origPy end
-      npc.kantoLifeFly = nil
-    end
-    npc._kantoTravelAnim = nil
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
@@ -3245,20 +3181,6 @@ function putToSleep(npc)
       npc.sprite = npc._kantoOrigSprite
       npc._kantoOrigSprite = nil
     end
-    -- Clear sleep caches (fix stale sprite on re-sleep).
-    -- Without this, NPCs that wake and re-sleep reuse corrupted
-    -- caches: wrong sprite in 2D, invisible in voxel.
-    -- (Research 2026-10-09: bug existed since caches introduced,
-    -- exposed by increased sleep/wake cycling from Natural + roaming.)
-    npc._kantoSleepCanvas = nil
-    npc._kantoSleepSpriteActive = nil
-    npc._kantoSleepVoxelFrames = nil
-    npc._kantoSleepVoxelPaths = nil
-    npc._kantoSleepVoxelFrame = nil
-    npc._kantoSleepProxySprite = nil
-    npc._kantoSleepIsHgss = nil
-    npc.kantoLifeNaturalSleepStyle = nil
-    npc.kantoLifeRandomSleepStyle = nil
     npc.timer = love.math.random(30, 120)
   end
 
@@ -3672,10 +3594,10 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
-        -- Teleport animation: apply vertical offset via side-channel (1.4.145).
-        -- npc.py is NEVER modified; offset applied during draw only.
+        -- Teleport animation: apply vertical offset (rise/descend)
         local tpY = self.kantoLifeTeleportY
         if tpY then
+          -- Temporarily offset py for the draw, restore after
           local origPy = self.py
           if type(self.py) == "number" then self.py = self.py + tpY end
           local ok, res = pcall(baseNpcDraw, self, camX, camY)
@@ -3683,9 +3605,13 @@ function putToSleep(npc)
           if not ok then error(res) end
           return
         end
-        -- Post-travel hide: NPC teleported/flew away, hide until despawn.
-        if self._kantoLifeTravelHidden then
-          return  -- Skip draw; NPC is gone
+        -- Fly animation: hide NPC, draw bird instead
+        if self.kantoLifeFlyHidden and self.kantoLifeFly then
+          local fl = self.kantoLifeFly
+          -- Draw bird sprite at fly position (simplified: use NPC draw with offset)
+          -- TODO: Draw actual flying Pokémon sprite. For now, skip NPC draw
+          -- (bird visual coming in next iteration).
+          return  -- Skip NPC draw; bird drawn separately
         end
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
@@ -3859,14 +3785,8 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- RE-ENABLED: 2D overlay is Battle Art's documented pattern for voxel FX.
-        -- The 3D billboard never worked reliably. This uses Voxel3D.project()
-        -- (Battle Art's own function) + drawCollisionBubble (proven 2D).
-        -- See: Voxel3D.lua "they stay ordinary 2D draws, anchored to wherever
-        -- their ground point lands under the same camera the 3D pass used."
-        -- (The old "wrong canvas/pitch/offscreen" issues were already fixed
-        -- in the code below: correct canvas, body-center projection + screen
-        -- Y offset, viewport clamp.)
+        -- ENABLED: 2D overlay for voxel bubbles (simplified).
+        -- Projects foot to screen, draws directly at projected coords.
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -3937,32 +3857,57 @@ function putToSleep(npc)
           if not pcall(G.setCanvas, out) then
             return
           end
-          -- Voxel bubbles: project foot to screen, draw directly.
-          -- (Simplified 2026-10-09: the translate trick wasn't working
-          -- in our Pipelines.worldPresent context. Direct draw at
-          -- projected coords is simpler and matches what the user sees.)
           for _, npc in ipairs(actors) do
             local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
             if untilAt > now and npc.visible ~= false and not npc.hidden then
               local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
               local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
-              -- Anchor at foot, project with world Y=0
-              local wx, wy = px + 8, py + 16
-              local okP, sx, sy = pcall(Voxel3D.project, wx, 0, wy)
-              if okP and type(sx) == "number" and type(sy) == "number"
-                 and math.abs(sx) < 10000 and math.abs(sy) < 10000 then
-                -- Apply canvas ratio
-                local bx, by = sx * sxRatio, sy * syRatio
-                -- Offset above head (screen space)
-                by = by - 40 * sxRatio
-                -- Viewport clamp
-                local vw, vh = G.getDimensions()
-                if bx < 20 then bx = 20 end
-                if bx > vw - 20 then bx = vw - 20 end
-                if by < 20 then by = 20 end
-                if by > vh - 20 then by = vh - 20 end
-                drawCollisionBubble(npc, bx, by, sxRatio)
+              local gh = 0
+              local ghOk = false
+              if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
+                local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
+                if okH and type(h) == "number" and h ~= 0 then
+                  gh = h
+                  ghOk = true
+                end
               end
+              -- FIX: Always draw bubbles. gh=0 is correct for flat maps
+              -- (outdoors and indoors). Skipping broke all flat-map bubbles.
+              -- (Research: groundAt==0 does NOT mean indoors.)
+              if true then
+              -- Measure true pixel scale by projecting two points 12 world
+              -- units apart vertically. The raw perspective scale `s` from
+              -- project() is relative, not pixels — using it directly made
+              -- bubbles pin-sized. Bubble base height is 12px at scale=1;
+              -- scale so 12px = 12 world units (matches NPC scale).
+              -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
+              -- Camera pitch displaces high 3D points horizontally; at body
+              -- height the projected X matches the sprite's screen center.
+              -- Then apply screen-space Y offset (no pitch distortion).
+              local okP, bx3d, by3d = pcall(Voxel3D.project, px + 8, gh + 2, py + 8)
+              if okP and type(bx3d) == "number" and type(by3d) == "number"
+                 and math.abs(bx3d) < 10000 and math.abs(by3d) < 10000 then
+                local okP2, _, y2 = pcall(Voxel3D.project, px + 8, gh + 14, py + 8)
+                local scale = 1
+                if okP2 and type(y2) == "number" then
+                  local pxPer12 = math.abs(y2 - by3d)
+                  scale = pxPer12 / 12
+                  if scale < 0.5 then scale = 0.5 end
+                  if scale > 8 then scale = 8 end
+                end
+                local bx, by = bx3d * sxRatio, by3d * syRatio
+                -- Screen-space offset above body center
+                local yOff = 26 * scale * sxRatio
+                by = by - yOff
+                -- Viewport clamp (preserves 1.4.132 edge fix)
+                local vw, vh = G.getDimensions()
+                if bx < 8 then bx = 8 end
+                if bx > vw - 8 then bx = vw - 8 end
+                if by < 8 then by = 8 end
+                if by > vh - 8 then by = vh - 8 end
+                drawCollisionBubble(npc, bx, by, scale * sxRatio)
+              end
+              end  -- end if ghOk else
             end
           end
           pcall(G.setCanvas, prev)
@@ -6059,12 +6004,117 @@ local function nightlifeTick(world, dt)
     end
 
     local function installPublicVoxelBubbleRenderer()
-      -- DISABLED: Using 2D overlay instead (Pipelines.worldPresent).
-      -- The 3D billboard never worked reliably.
-      return
+      if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
+      pcall(function() fileLog("BUBBLE: attempting registration") end)
+      local okFind, battle = pcall(function()
+        return mod.find("BATTLE_ART_VOXEL_FORK")
+      end)
+      if not okFind or not battle then
+        okFind, battle = pcall(function()
+          return mod.find("BATTLE_ART_VOXEL")
+        end)
+      end
+      local api = okFind and battle and battle.exports
+        and battle.exports.characterRenderers or nil
+      if not api or type(api.register) ~= "function" then
+        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
+        return
+      end
+      local lib = battle.exports.lib
+      if not lib or type(lib.require) ~= "function" then return end
+      local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+      local okM, Mat4 = pcall(lib.require, "Mat4")
+      local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
+      if not (okV and okM and okB and Voxel3D and type(Voxel3D.draw) == "function"
+              and Mat4 and type(Mat4.mul) == "function"
+              and type(Mat4.translate) == "function"
+              and type(Mat4.rotateY) == "function"
+              and SpriteBillboards and type(SpriteBillboards.mesh) == "function") then
+        return
+      end
+      -- NOTE: Mesh is now built per-bubble via SpriteBillboards.mesh (proven
+      -- Zzz pipeline). No hand-rolled mesh, no scale in model matrix.
+
+      local function drawBubble3D(ctx)
+        local npc = ctx and (ctx.actor or ctx.entity)
+        if not npc then return false end
+        if opt("npc_collision_bubbles") == false then return false end
+        if npc.visible == false or npc.hidden then return false end
+        -- Skip in first-person mode (matches 2D bubble behavior).
+        local state = ctx and ctx.state
+        if state and state.firstPerson and state.firstPerson.active then
+          return false
+        end
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+        if untilAt <= now then return false end
+        local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+
+        -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
+        local entry = getBubbleImage(text)
+        if not entry or not entry.image then return false end
+        local def = {
+          id = "KANTO_LIFE_BUBBLE",
+          image = entry.path,
+          frames = 1,
+          frameWidth = entry.w,
+          frameHeight = entry.h,
+          trueColor = true,
+          walker = false,
+        }
+        -- Center anchor (entry.h / 2) like Zzz and accessories — fixes off-center placement
+        local mesh = SpriteBillboards.mesh(def, 0, entry.h / 2)
+        if not mesh then return false end
+
+        local px = tonumber(ctx.px) or tonumber(npc.px)
+          or tonumber((npc.cellX or 0) * 16) or 0
+        local py = tonumber(ctx.py) or tonumber(npc.py)
+          or tonumber((npc.cellY or 0) * 16) or 0
+        local gh = tonumber(ctx.groundHeight) or 0
+
+        -- Billboard yaw: face the camera (same approach as the Zzz).
+        local zyaw = 0
+        local host = ctx.host or {}
+        local fp = host.FirstPerson
+        if fp and type(fp.cardYaw) == "function" then
+          local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
+          if okYaw and tonumber(v) then zyaw = v end
+        end
+
+        -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
+        -- overlap (gh+26). World-space position: no projection needed.
+        -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
+        -- (same as Zzz). This was a key difference from the failed approach.
+        -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
+        -- then rotate, then translate.
+        local bubbleScale = 1.5
+        local model = Mat4.mul(
+          Mat4.translate(px + 8, gh + 26, py + 8),
+          Mat4.mul(
+            Mat4.rotateY(zyaw),
+            Mat4.scale(bubbleScale, bubbleScale, 1)
+          )
+        )
+        -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
+        pcall(Voxel3D.draw, mesh, entry.image, model, 0.5, model)
+        -- Return false: do NOT claim the actor; normal NPC rendering continues.
+        return false
+      end
+
+      local handle = api.register({
+        apiVersion = 1,
+        id = "KANTO_LIFE_BUBBLE_3D",
+        name = "Kanto Life Speech Bubbles",
+        priority = 5000,
+        drawEntity = drawBubble3D,
+      })
+      if handle and NPCMod then
+        NPCMod._kantoLifePublicBubbleRenderer = handle
+        pcall(function() fileLog("BUBBLE: renderer registered successfully") end)
+      end
     end
 
-    -- installPublicVoxelBubbleRenderer()  -- DISABLED: using 2D overlay instead
+    installPublicVoxelBubbleRenderer()
 
     -- IMPORTANT: voxel/Battle Art consumes NPC:pose(), not NPC:draw().
     -- Keep the working 2D draw path untouched; only make pose expose the
@@ -6079,8 +6129,10 @@ local function nightlifeTick(world, dt)
         if not NPCMod._kantoLifePublicSleepRenderer then
           pcall(installPublicVoxelSleepRenderer)
         end
-        -- Bubble renderer disabled: using 2D overlay instead
-        -- (was: lazy retry, but 3D billboard never worked)
+        -- Bubble renderer: same lazy retry (was missing — root cause of no bubbles)
+        if not NPCMod._kantoLifePublicBubbleRenderer then
+          pcall(installPublicVoxelBubbleRenderer)
+        end
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
             return basePose(self, ...)
@@ -6166,16 +6218,6 @@ local function nightlifeTick(world, dt)
           end
           if shouldSleepNow(self, isNight) then
             if not self.nightlifeSleeping then
-              -- Don't sleep on door/warp cells (blocks player)
-              local onWarp = false
-              pcall(function()
-                if map and self.cellX and self.cellY then
-                  onWarp = nearWarp(map, math.floor(self.cellX), math.floor(self.cellY))
-                end
-              end)
-              if onWarp then
-                -- On a door: don't sleep, just skip
-              else
               pcall(function()
                 if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then
                   local mapId = tostring(map.id or "")
@@ -6192,7 +6234,6 @@ local function nightlifeTick(world, dt)
                 end
               end)
               pcall(putToSleep, self)
-              end  -- if not onWarp
             end
             hardFreeze(self)
             -- CONSISTENT SKIP: 3-frame (clerk) and Pokemon-like skip the bake

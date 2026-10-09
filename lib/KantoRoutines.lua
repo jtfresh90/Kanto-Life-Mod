@@ -10,7 +10,6 @@ return function(ctx)
   local isRoute = ctx.isRoute or function() return false end
   local resolveDestMap = ctx.resolveDestMap
   local onRoutineExit = ctx.onRoutineExit
-  local getPokeSpriteObject = ctx.getPokeSpriteObject or function() return nil end
 
   local api = {}
   local enabled = true
@@ -197,14 +196,12 @@ return function(ctx)
       pcall(npc.scriptTeleport, npc, "from")
       return true
     end
-    -- Gen 1/3 custom: spin + rise with Abra (user requirement)
-    -- Swap to Abra sprite for the teleport animation
-    local abraSprite = nil
-    pcall(function() abraSprite = getPokeSpriteObject("ABRA") end)
+    -- Gen 1/3 custom: spin + rise
     npc.kantoLifeTeleport = {
       frame = 0,
+      total = 90,  -- 1.5s at 60fps (snappier than player's 135)
       mode = "out",
-      sprite = abraSprite,  -- Abra shown via pose wrapper (npc.sprite untouched)
+      origFacing = npc.facing or "down",
     }
     npc.frozen = true
     return true
@@ -222,8 +219,9 @@ return function(ctx)
     end
     npc.kantoLifeTeleport = {
       frame = 0,
+      total = 90,
       mode = "in",
-      sprite = nil,  -- Use NPC sprite for arrival
+      origFacing = npc.facing or "down",
     }
     npc.frozen = true
     return true
@@ -234,22 +232,21 @@ return function(ctx)
   local function npcFlyOut(npc)
     local species = randomFlyingSpecies()
     if not species then return false end
-    -- Get bird sprite object
-    local birdSprite = nil
-    pcall(function() birdSprite = getPokeSpriteObject(species) end)
-    if not birdSprite then return false end  -- No sprite, fall back to bubble
     -- Play sound
     pcall(function()
       local gd = _G._kantoLifeGameData
       if gd then require("src.core.Sound").play(gd, "Fly") end
     end)
-    -- Bird sprite shown via pose wrapper (npc.sprite untouched)
+    -- Store fly state; KantoMain draw hook will render the bird
     npc.kantoLifeFly = {
       species = species,
       frame = 0,
+      total = 90,  -- 1.5s
       mode = "out",
-      sprite = birdSprite,
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
     }
+    npc.kantoLifeFlyHidden = true  -- Draw hook skips NPC, draws bird instead
     npc.frozen = true
     return true
   end
@@ -265,8 +262,10 @@ return function(ctx)
     npc.kantoLifeFly = {
       species = species,
       frame = 0,
+      total = 90,
       mode = "in",
-      sprite = nil,  -- Use NPC sprite for arrival
+      startPx = npc.px or (npc.cellX or 0) * 16,
+      startPy = npc.py or (npc.cellY or 0) * 16,
     }
     npc.kantoLifeFlyHidden = true
     npc.frozen = true
@@ -276,118 +275,63 @@ return function(ctx)
   -- Update teleport/fly animations. Called every frame before the frozen check.
   -- Returns true if the NPC is currently animating (skip normal routine).
   local function updateTravelAnimation(npc, dt)
-    -- Travel animations: write directly to npc.py/px.
-    -- (NPC:pose wrapper removed in 1.4.153 - was breaking sleep rendering.
-    -- Direct writes work in 2D; voxel shows the movement via e.py.)
-    --
-    -- Teleport: spin + rise with engine timing (135f out, 43f in)
-    -- Fly: move along path with bird sprite
-
-    local SPIN_ORDER = {"down", "left", "up", "right"}
-
+    -- Teleport animation: spin + rise (Gen 1/3 custom; Gen 2 uses built-in)
     local tp = npc.kantoLifeTeleport
     if tp then
-      if tp.frame == nil then
-        tp.frame = 0
-        tp.spinStep = 0
-        if tp.mode == "out" then
-          tp.holds = {15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0, 3,3,3,3,3,0}
-          tp.total = 135
-          tp.riseFrom = 15
-        else
-          tp.holds = {3,3,3,3,3,0, 1,2,3,4,5,6,7,0}
-          tp.total = 43
-          tp.dropSteps = 6
-        end
-        tp.spinHold = tp.holds[1]
-        tp.origPy = npc.py
-        tp.origPx = npc.px
-        tp.origSprite = npc.sprite
-        tp.origFacing = npc.facing
-        -- DISABLED: Sprite swap was breaking sleep bake.
-        -- (Abra sprite leaked into sleep rendering)
-        -- if tp.mode == "out" and tp.sprite then
-        --   npc.sprite = tp.sprite
-        -- end
-        npc.frozen = true
-      end
-
       tp.frame = tp.frame + 1
-
-      -- Tick spin (engine Player:update)
-      tp.spinHold = tp.spinHold - 1
-      while tp.spinHold <= 0 and tp.spinStep < #tp.holds - 1 do
-        tp.spinStep = tp.spinStep + 1
-        tp.spinHold = tp.holds[tp.spinStep + 1]
-      end
-
-      -- Spin facing
-      npc.facing = SPIN_ORDER[tp.spinStep % 4 + 1]
-
-      -- Rise/drop (write directly to npc.py)
-      local lift = 0
-      if tp.mode == "out" then
-        if tp.spinStep > tp.riseFrom then
-          lift = (tp.spinStep - tp.riseFrom) * 16
-        end
-      else
-        local left = (tp.dropSteps or 6) - tp.spinStep
-        if left > 0 then lift = left * 16 end
-      end
-      if type(tp.origPy) == "number" then
-        npc.py = tp.origPy - lift
-      end
-
-      -- Done?
       if tp.frame >= tp.total then
-        -- Clear side-channel (npc.py was never modified)
-        npc.kantoLifeTeleportY = nil
-        if tp.origSprite then npc.sprite = tp.origSprite end
-        if tp.origFacing then npc.facing = tp.origFacing end
+        -- Animation complete
         npc.kantoLifeTeleport = nil
         npc.frozen = false
         if tp.mode == "out" then
-          npc._kantoLifeTravelHidden = true
-        end
-      end
-      return true
-    end
-
-    local fl = npc.kantoLifeFly
-    if fl then
-      if fl.frame == nil then
-        fl.frame = 0
-        fl.origPx = npc.px
-        fl.origPy = npc.py
-        fl.origSprite = npc.sprite
-        -- DISABLED: Sprite swap was breaking sleep bake.
-        -- if fl.sprite then
-        --   npc.sprite = fl.sprite
-        -- end
-        npc.frozen = true
-      end
-
-      fl.frame = fl.frame + 1
-      local total = 133  -- flap(24) + path1(36) + hold(40) + path2(33)
-
-      if fl.frame >= total then
-        if fl.origPx then npc.px = fl.origPx end
-        if fl.origPy then npc.py = fl.origPy end
-        if fl.origSprite then npc.sprite = fl.origSprite end
-        npc.kantoLifeFly = nil
-        npc.frozen = false
-        if fl.mode == "out" then
-          npc._kantoLifeTravelHidden = true
+          -- Teleported away: hide until arrival (handled by routine)
+          npc.kantoLifeTeleportedAway = true
         end
       else
-        -- DISABLED: Direct px/py writes may corrupt sleep bake.
-        -- (Fly movement re-add via side-channel later)
-        -- Wing flap only
-        npc.facing = (fl.frame % 16 < 8) and "right" or "left"
+        -- Spin: cycle facing every 2 frames
+        local spinOrder = {"down", "left", "up", "right"}
+        local idx = math.floor(tp.frame / 2) % 4 + 1
+        npc.facing = spinOrder[idx]
+        -- Rise (out) or descend (in): up to 24px vertical offset
+        local progress = tp.frame / tp.total
+        local offset = math.floor(progress * 24)
+        if tp.mode == "out" then
+          npc.kantoLifeTeleportY = -offset  -- Rise up
+        else
+          npc.kantoLifeTeleportY = -(24 - offset)  -- Start high, descend
+        end
       end
-      return true
+      return true  -- Animating, skip normal routine
     end
-
+    
+    -- Fly animation: bird flies up and away (out) or in from above (in)
+    local fl = npc.kantoLifeFly
+    if fl then
+      fl.frame = fl.frame + 1
+      if fl.frame >= fl.total then
+        -- Animation complete
+        npc.kantoLifeFly = nil
+        npc.kantoLifeFlyHidden = false
+        npc.frozen = false
+        if fl.mode == "out" then
+          npc.kantoLifeFlewAway = true
+        end
+      else
+        -- Bird position: up-right path (simplified FLY_PATH1)
+        local progress = fl.frame / fl.total
+        if fl.mode == "out" then
+          -- Start at NPC, fly up-right off screen
+          fl.px = fl.startPx + progress * 100  -- Move right
+          fl.py = fl.startPy - progress * 80   -- Move up
+        else
+          -- Start off-screen up-right, fly to NPC position
+          fl.px = fl.startPx + (1 - progress) * 100
+          fl.py = fl.startPy - (1 - progress) * 80
+        end
+      end
+      return true  -- Animating, skip normal routine
+    end
+    
     return false  -- Not animating
   end
 
@@ -759,9 +703,7 @@ return function(ctx)
     st.localRoamRadius = 70  -- 3x area (was 40)
     -- RESEARCH FIX: 30% of local NPCs roam far (map-wide) instead of ±40.
     -- They use wanderTarget() but never despawn at doors.
-    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area).
-    -- Note: Pokemon need to spawn indoors AND exit — the spawn system
-    -- must place them inside buildings, not just outdoors.
+    -- POKEMON: Always roam map-wide (user: vastly increase Pokemon wander area)
     local d2 = npc.def or {}
     local isPoke2 = npc.kantoLifePokeAmbient or d2.kantoLifePokeAmbient
     st.roamFar = isPoke2 or ((not traveling) and (math.random() < 0.3))
@@ -1164,37 +1106,12 @@ return function(ctx)
     -- 3x AREA: ±70 (140x140=19,600 cells vs 80x80=6,400)
     -- User requirement: routines cover 3x as much area
     -- POKEMON: ±200 (400x400=160,000 cells, ~8x human range)
-    -- HUMANS: ±200 outdoors/caves, ±70 in buildings (user request)
-    -- Note: isIndoor() returns false for caves (they use outdoor tilesets),
-    -- so "not indoor" covers both outdoor and caves.
     local d = npc.def or {}
     local isPoke = npc.kantoLifePokeAmbient or d.kantoLifePokeAmbient
-    local mapId = map and tostring(map.id or "") or ""
-    -- isIndoor is defined in KantoMain; use pcall-safe check
-    local indoor = false
-    pcall(function()
-      -- KantoRoutines doesn't have isIndoor; mirror KantoMain's logic.
-      -- Towns/routes/caves/overworld are NOT indoor (large radius).
-      -- Buildings (houses, Marts, Centers, etc.) ARE indoor (small radius).
-      local id = mapId:upper()
-      -- Towns and routes are outdoor
-      if id:match("^ROUTE_") or id:match("^TOWN_") then indoor = false; return end
-      -- Building indicators (from KantoMain's isIndoor)
-      indoor = id:find("HOUSE", 1, true) ~= nil
-        or id:find("GATE", 1, true) ~= nil
-        or id:find("_1F", 1, true) ~= nil or id:find("_2F", 1, true) ~= nil
-        or id:find("_3F", 1, true) ~= nil or id:find("_B1F", 1, true) ~= nil
-        or id:find("MART", 1, true) ~= nil or id:find("POKECENTER", 1, true) ~= nil
-        or id:find("POKEMON_CENTER", 1, true) ~= nil or id:find("GYM", 1, true) ~= nil
-        or id:find("LAB", 1, true) ~= nil or id:find("SILPH", 1, true) ~= nil
-        or id:find("DEPT", 1, true) ~= nil or id:find("MUSEUM", 1, true) ~= nil
-        or id:find("GAME_CORNER", 1, true) ~= nil or id:find("HOTEL", 1, true) ~= nil
-    end)
-    local useLargeRadius = isPoke or (not indoor)
-    local radiusVal = useLargeRadius and 200 or 70
-    local attempts = useLargeRadius and 60 or 40
+    local pokeRadius = 200
+    local attempts = isPoke and 60 or 40
     for _ = 1, attempts do
-      local radius = useLargeRadius and radiusVal or ((st and st.localRoamRadius) or 70)
+      local radius = isPoke and pokeRadius or ((st and st.localRoamRadius) or 70)
       local tx = cx + math.random(-radius, radius)
       local ty = cy + math.random(-radius, radius)
       if tx ~= cx or ty ~= cy then
