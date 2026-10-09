@@ -3151,6 +3151,25 @@ function putToSleep(npc)
     -- Clear travel-hidden flag: sleeping NPCs are visible
     -- (Fix: flag was never cleared after teleport/fly, causing invisible sleepers)
     npc._kantoLifeTravelHidden = nil
+    -- Clear teleport/fly animation state: the sprite swap (Abra/bird)
+    -- must not leak into the sleep bake. Restore original sprite first.
+    -- (Fix: NPCs that fell asleep mid-teleport baked the Abra sprite.)
+    if npc.kantoLifeTeleport then
+      local tp = npc.kantoLifeTeleport
+      if tp.origSprite then npc.sprite = tp.origSprite end
+      if tp.origPx then npc.px = tp.origPx end
+      if tp.origPy then npc.py = tp.origPy end
+      if tp.origFacing then npc.facing = tp.origFacing end
+      npc.kantoLifeTeleport = nil
+    end
+    if npc.kantoLifeFly then
+      local fl = npc.kantoLifeFly
+      if fl.origSprite then npc.sprite = fl.origSprite end
+      if fl.origPx then npc.px = fl.origPx end
+      if fl.origPy then npc.py = fl.origPy end
+      npc.kantoLifeFly = nil
+    end
+    npc._kantoTravelAnim = nil
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
