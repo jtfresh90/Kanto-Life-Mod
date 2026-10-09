@@ -5486,7 +5486,10 @@ local function nightlifeTick(world, dt)
       end)
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
-      if not api or type(api.register) ~= "function" then return end
+      if not api or type(api.register) ~= "function" then
+        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
+        return
+      end
 
       local lib = battle.exports.lib
       if not lib or type(lib.require) ~= "function" then return end
@@ -6005,6 +6008,7 @@ local function nightlifeTick(world, dt)
 
     local function installPublicVoxelBubbleRenderer()
       if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
+      pcall(function() fileLog("BUBBLE: attempting registration") end)
       local okFind, battle = pcall(function()
         return mod.find("BATTLE_ART_VOXEL_FORK")
       end)
@@ -6015,7 +6019,10 @@ local function nightlifeTick(world, dt)
       end
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
-      if not api or type(api.register) ~= "function" then return end
+      if not api or type(api.register) ~= "function" then
+        pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
+        return
+      end
       local lib = battle.exports.lib
       if not lib or type(lib.require) ~= "function" then return end
       local okV, Voxel3D = pcall(lib.require, "Voxel3D")
@@ -6106,6 +6113,7 @@ local function nightlifeTick(world, dt)
       })
       if handle and NPCMod then
         NPCMod._kantoLifePublicBubbleRenderer = handle
+        pcall(function() fileLog("BUBBLE: renderer registered successfully") end)
       end
     end
 
@@ -6123,6 +6131,10 @@ local function nightlifeTick(world, dt)
         -- mod load order.
         if not NPCMod._kantoLifePublicSleepRenderer then
           pcall(installPublicVoxelSleepRenderer)
+        end
+        -- Bubble renderer: same lazy retry (was missing — root cause of no bubbles)
+        if not NPCMod._kantoLifePublicBubbleRenderer then
+          pcall(installPublicVoxelBubbleRenderer)
         end
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
