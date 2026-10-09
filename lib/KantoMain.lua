@@ -150,7 +150,7 @@ return function(mod)
     { key = "indoor_npcs", type = "toggle", label = "INDOOR NPCS", default = true },
     { key = "indoor_npc_count", type = "number", label = "INDOOR NPC COUNT",
       default = 3, min = 0, max = 30, step = 1 },
-    { key = "poke_npcs", type = "toggle", label = "POKEMON NPCS", default = false },
+    { key = "poke_npcs", type = "toggle", label = "POKEMON NPCS", default = true },
     { key = "poke_npc_count", type = "number", label = "POKEMON NPC COUNT",
       default = 0, min = 0, max = 50, step = 1 },
     { key = "poke_random", type = "toggle", label = "RANDOM POKE NPCS", default = true },
@@ -5097,6 +5097,22 @@ local function nightlifeTick(world, dt)
           if npc.nightlifeSleeping then wakeNpc(npc) end
         elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
           if npc.nightlifeSleeping then wakeNpc(npc) end
+        elseif isPokeAmbient(npc) then
+          -- 1.0.0 behavior: ambient Pokemon sleep at night, no percentage
+          if isNight then
+            local cx, cy = npc.cellX, npc.cellY
+            local blocking = false
+            if type(cx) == "number" and type(cy) == "number" and world and world.map then
+              pcall(function()
+                blocking = nearWarp(world.map, math.floor(cx), math.floor(cy))
+              end)
+            end
+            if not blocking then
+              putToSleep(npc)
+            end
+          elseif npc.nightlifeSleeping then
+            wakeNpc(npc)
+          end
         elseif shouldSleepNow(npc, isNight) then
           -- Don't fall asleep in doorways/warps (blocks player)
           local cx, cy = npc.cellX, npc.cellY
