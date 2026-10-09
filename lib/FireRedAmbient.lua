@@ -789,6 +789,7 @@ return function(ctx)
     local lid = tonumber(npc.localId or (npc.def and npc.def.localId))
     if not lid then return false end
 
+<<<<<<< HEAD
     -- Cross-map check: if the door/warp the NPC is exiting through leads to
     -- a DIFFERENT map, record them as a traveler instead of doing same-map
     -- replacement. They will spawn at the paired entrance when the player
@@ -871,11 +872,58 @@ return function(ctx)
     end
 
     local replacement = chooseReplacementDoor(ow, oldX, oldY, avoidX, avoidY)
+=======
+    local replacement = chooseReplacementDoor(ow, _exitX, _exitY, avoidX, avoidY)
+    -- If no doorway is available (open route maps), still replace at a free cell.
+    if not replacement then
+      local cells = candidateCells(ow)
+      if #cells > 0 then
+        local c = cells[math.random(1, #cells)]
+        replacement = { x = c[1], y = c[2] }
+      end
+    end
+>>>>>>> origin/main
     if not replacement then return false end
+
+    -- Match kind: human out → random different human in; poke out → random different poke in.
     local isPoke = npc.kantoLifePokemon == true
-    local gid = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
-    if isPoke and not gid then gid = POKE_GFX[math.random(1, #POKE_GFX)] end
-    if not isPoke and not gid then gid = humanSprite(lid) end
+      or (npc.def and npc.def.kantoLifePokemon == true)
+    local oldGid = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
+    local gid, speciesName
+    if isPoke then
+      local pool = {}
+      for _, g in ipairs(POKE_GFX or {}) do
+        if tonumber(g) and tonumber(g) ~= oldGid then pool[#pool + 1] = tonumber(g) end
+      end
+      if #pool == 0 then
+        for _, g in ipairs(POKE_GFX or {}) do
+          if tonumber(g) then pool[#pool + 1] = tonumber(g) end
+        end
+      end
+      if #pool > 0 then
+        gid = pool[math.random(1, #pool)]
+      else
+        gid = oldGid or 116
+      end
+      speciesName = GFX_SPECIES[gid]
+      if type(rememberPokeGfx) == "function" then pcall(rememberPokeGfx, gid) end
+    else
+      local pool = {}
+      for _, g in ipairs(HUMAN_GFX or {}) do
+        if tonumber(g) and tonumber(g) ~= oldGid then pool[#pool + 1] = tonumber(g) end
+      end
+      if #pool == 0 then
+        for _, g in ipairs(HUMAN_GFX or {}) do
+          if tonumber(g) then pool[#pool + 1] = tonumber(g) end
+        end
+      end
+      if #pool > 0 then
+        gid = pool[math.random(1, #pool)]
+      else
+        gid = humanSprite(math.random(100000))
+      end
+      speciesName = nil
+    end
 
     -- Keep the population intact if the alternate door is usable: create the
     -- replacement first, then remove the departing actor.  If the only valid
@@ -895,7 +943,7 @@ return function(ctx)
     end
 
     local spawnX, spawnY = interiorCell(ow, replacement)
-    local replacementNpc = newObject(spawnX or replacement.x, spawnY or replacement.y, nil, gid, isPoke, npc.kantoLifeSpecies)
+    local replacementNpc = newObject(spawnX or replacement.x, spawnY or replacement.y, nil, gid, isPoke, speciesName)
     if not replacementNpc then
       -- Do not silently lose a population member. If we had not removed the
       -- old actor yet it remains in place; same-door fallback is the only case
