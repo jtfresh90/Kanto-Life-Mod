@@ -150,7 +150,7 @@ return function(mod)
     { key = "indoor_npcs", type = "toggle", label = "INDOOR NPCS", default = true },
     { key = "indoor_npc_count", type = "number", label = "INDOOR NPC COUNT",
       default = 3, min = 0, max = 30, step = 1 },
-    { key = "poke_npcs", type = "toggle", label = "POKEMON NPCS", default = true },
+    { key = "poke_npcs", type = "toggle", label = "POKEMON NPCS", default = false },
     { key = "poke_npc_count", type = "number", label = "POKEMON NPC COUNT",
       default = 0, min = 0, max = 50, step = 1 },
     { key = "poke_random", type = "toggle", label = "RANDOM POKE NPCS", default = true },
@@ -3153,135 +3153,6 @@ local nm = storyDisplayName(talker)
     return sid == "SPRITE_GAMBLER_ASLEEP" and id:find("VIRIDIAN_CITY_OBJ_", 1, true) ~= nil
   end
 
-  -- Gold: Bake sleeping sprite with accessory and Zzz into a single canvas.
-  -- "Bake, don't draw" approach: eliminates all render-time coordinate math.
-  -- The engine (2D and voxel) renders sprite.image normally.
-  local function bakeGoldSleepSprite(npc)
-    if not npc or not npc.sprite then return false end
-    local sprite = npc.sprite
-    if sprite._kantoGoldBaked then return true end
-    local G = love.graphics
-    if not G then return false end
-    
-    local ok = pcall(function()
-      local fw = tonumber(sprite.frameWidth) or 16
-      local fh = tonumber(sprite.frameHeight) or 16
-      local angle = npc.kantoLifeSleepAngle or (math.pi / 2)
-      
-      -- Get sleep style and accessory images
-      local style = 0
-      pcall(function() style = resolveSleepStyle(npc) end)
-      local baseImg = nil
-      local overlayImg = nil
-      if style == 2 or style == 3 then
-        pcall(function()
-          baseImg = sleepAccessoryBaseImage(style)
-          overlayImg = sleepAccessoryImage(style)
-        end)
-      end
-      
-      -- Canvas size: fit accessory or NPC
-      local cw, ch = fw + 16, fh + 16
-      if baseImg then
-        local bw, bh = baseImg:getDimensions()
-        cw, ch = math.max(cw, bw + 8), math.max(ch, bh + 8)
-      end
-      
-      local canvas = G.newCanvas(cw, ch)
-      local prev = G.getCanvas()
-      G.setCanvas(canvas)
-      G.clear(0, 0, 0, 0)
-      G.setColor(1, 1, 1, 1)
-      
-      -- Draw base (bed/sleeping bag) centered
-      if baseImg then
-        local bw, bh = baseImg:getDimensions()
-        G.push()
-        G.translate(cw/2, ch/2)
-        G.rotate(angle)
-        G.translate(-bw/2, -bh/2)
-        G.draw(baseImg, 0, 0)
-        G.pop()
-      end
-      
-      -- Draw rotated gray NPC
-      local srcImg = sprite.image
-      if srcImg then
-        G.push()
-        G.translate(cw/2, ch/2)
-        G.rotate(angle)
-        -- Gray shader
-        local gray = nil
-        pcall(function()
-          gray = G.newShader([[
-            vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
-              vec4 c = Texel(tex, uv) * color;
-              float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-              return vec4(g, g, g, c.a);
-            }
-          ]])
-        end)
-        if gray then G.setShader(gray) end
-        G.translate(-fw/2, -fh/2)
-        -- Draw current frame
-        local quad = nil
-        pcall(function()
-          quad = G.newQuad(0, 0, fw, fh, srcImg:getDimensions())
-        end)
-        if quad then
-          G.draw(srcImg, quad, 0, 0)
-        else
-          G.draw(srcImg, 0, 0)
-        end
-        if gray then G.setShader() end
-        G.pop()
-      end
-      
-      -- Draw overlay (transparent bed/bag top)
-      if overlayImg then
-        local ow, oh = overlayImg:getDimensions()
-        G.push()
-        G.translate(cw/2, ch/2)
-        G.rotate(angle)
-        G.translate(-ow/2, -oh/2)
-        G.draw(overlayImg, 0, 0)
-        G.pop()
-      end
-      
-      -- Draw Zzz text at top
-      G.setColor(1, 1, 1, 1)
-      local font = G.getFont()
-      if font then
-        G.setFont(font)
-        G.print("Z", cw - 14, 2)
-        G.print("z", cw - 10, 10)
-      end
-      
-      G.setCanvas(prev)
-      
-      -- Replace sprite image, store originals
-      if sprite._kantoOrigImage == nil then
-        sprite._kantoOrigImage = sprite.image
-      end
-      sprite.image = canvas
-      sprite._kantoGoldBaked = true
-      sprite._kantoSleepBaked = true
-    end)
-    return ok
-  end
-  
-  local function restoreGoldSleepSprite(npc)
-    if not npc or not npc.sprite then return end
-    local sprite = npc.sprite
-    if not sprite._kantoGoldBaked then return end
-    if sprite._kantoOrigImage ~= nil then
-      sprite.image = sprite._kantoOrigImage
-      sprite._kantoOrigImage = nil
-    end
-    sprite._kantoGoldBaked = nil
-    sprite._kantoSleepBaked = nil
-  end
-
 function putToSleep(npc)
     if not npc or isPlayerActor(npc) then return end
     if isPokemonFollower(npc) then return end
@@ -3290,12 +3161,6 @@ function putToSleep(npc)
     if npc.nightlifeSleeping then return end
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
-    -- Clear Gen 2 spriteYOffset (prevents accessory misalignment)
-    npc.spriteYOffset = 0
-    -- Gold: bake sleeping sprite (accessory + Zzz) - "bake, don't draw"
-    if not gen1 then
-      pcall(bakeGoldSleepSprite, npc)
-    end
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
     if npc.direction ~= nil then npc.kantoLifeSleepDir = npc.direction end
     local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
@@ -3344,8 +3209,6 @@ function putToSleep(npc)
     npc.sleepPose = nil
     npc.kantoLifeSleepAngle = nil
     restoreSleepSprite(npc)
-    -- Gold: restore baked sprite
-    pcall(restoreGoldSleepSprite, npc)
     if npc.sprite then
       npc.sprite._sleepScreenX = nil
       npc.sprite._sleepScreenY = nil
@@ -3773,55 +3636,26 @@ function putToSleep(npc)
   end
 
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
-  local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","BATTLE_ART_VOXEL_GEN2","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel","potato_voxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
+  local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
     -- Try multiple paths for platform compatibility.
-    -- In Gold (gen1=false), use the Gen 2 NPC class (src.world.gen2.Npc).
     local NPCMod = NPC
     if not (NPCMod and type(NPCMod.draw) == "function") then
-      local paths
-      if gen1 then
-        paths = {"src.world.NPC", "src.world.npc", "world.NPC"}
-      else
-        -- Gold: Gen 2 NPC class first, then fallbacks
-        paths = {"src.world.gen2.Npc", "src.world.gen2.npc",
-                 "src.world.NPC", "src.world.npc", "world.NPC"}
-      end
-      for _, path in ipairs(paths) do
+      for _, path in ipairs({"src.world.NPC", "src.world.npc", "world.NPC"}) do
         local m = safeRequire(path)
         if m and type(m.draw) == "function" then NPCMod = m; break end
       end
     end
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
-      -- Gen 1: draw(camX, camY) where camX/camY are camera coordinates
-      -- Gen 2: draw(ox, oy, scale, oamRow) where ox/oy are pre-calculated
-      --   screen offsets (ox = -cam.x * scale). Use correct math per gen.
-      local isGen2Draw = not gen1
-      NPCMod.draw = function(self, a, b, c, d)
-        -- Gold: sleep visuals are baked into sprite.image at sleep time.
-        -- Skip render-time accessory drawing (would double-draw/misalign).
-        if not gen1 and self.nightlifeSleeping and self.sprite
-           and self.sprite._kantoGoldBaked then
-          return baseNpcDraw(self, a, b, c, d)
-        end
-        local camX, camY = a, b
-        -- Helper: convert world px to screen px
-        local function toScreen(px, py)
-          if isGen2Draw then
-            local s = tonumber(c) or 1
-            return (tonumber(a) or 0) + px * s, (tonumber(b) or 0) + py * s
-          else
-            return px - (tonumber(a) or 0), py - (tonumber(b) or 0)
-          end
-        end
+      NPCMod.draw = function(self, camX, camY)
         -- Teleport animation: apply vertical offset (rise/descend)
         local tpY = self.kantoLifeTeleportY
         if tpY then
           -- Temporarily offset py for the draw, restore after
           local origPy = self.py
           if type(self.py) == "number" then self.py = self.py + tpY end
-          local ok, res = pcall(baseNpcDraw, self, a, b, c, d)
+          local ok, res = pcall(baseNpcDraw, self, camX, camY)
           if type(origPy) == "number" then self.py = origPy end
           if not ok then error(res) end
           return
@@ -3846,7 +3680,7 @@ function putToSleep(npc)
             -- Draw base layer before NPC
             local basePx = self.px or self.x or ((self.cellX or 0) * 16) or 0
             local basePy = self.py or self.y or ((self.cellY or 0) * 16) or 0
-            local baseSx, baseSy = toScreen(basePx, basePy)
+            local baseSx, baseSy = basePx - (camX or 0), basePy - (camY or 0)
             if self.sprite and type(self.sprite.getScreenOrigin) == "function" then
               local ok, ox, oy = pcall(function()
                 return self.sprite:getScreenOrigin(basePx, basePy, camX or 0, camY or 0)
@@ -3964,7 +3798,7 @@ function putToSleep(npc)
           end
           pcall(drawCollisionBubble, self, sx, sy, 1)
         end
-        return baseNpcDraw(self, a, b, c, d)
+        return baseNpcDraw(self, camX, camY)
       end
       NPC = NPCMod
       NPCMod._kantoLifeSleepWrapped = true
@@ -3985,7 +3819,7 @@ function putToSleep(npc)
           return battleLib
         end
         if type(mod.find) == "function" then
-          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL" }) do
+          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL" }) do
             local ok, m = pcall(mod.find, id)
             local lib = ok and m and m.exports and m.exports.lib or nil
             if lib and type(lib.require) == "function" then
@@ -4006,13 +3840,9 @@ function putToSleep(npc)
         if not out then
           return out
         end
-        -- Voxel bubbles: engine-faithful projection (research-backed fix).
-        -- ROOT CAUSES FIXED:
-        -- 1. Voxel3D.project returns supersampled coords (x AA factor);
-        --    out is the downsampled display canvas. Divide by AA.
-        -- 2. Old clamp used window points (3x smaller on iOS), pinning bubbles.
-        --    Now clamps in out's canvas pixels.
-        -- 3. Old drew at scale=1 (tiny). Now uses ctx.scale like the engine.
+        -- Voxel bubbles: match engine/Battle Art approach.
+        -- Project FOOT position (world coords), then offset in screen space.
+        -- Battle Art: Voxel3D.project(wx, 0, wy) — height handled in 2D.
         local pipelineId = nil
         if type(Pipelines.worldPipeline) == "function" then
           local ok, v = pcall(Pipelines.worldPipeline)
@@ -4108,39 +3938,21 @@ function putToSleep(npc)
               -- scale so 12px = 12 world units (matches NPC scale).
               -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
               -- Match engine/Battle Art: project FOOT (ground level),
-              -- ENGINE-FAITHFUL VOXEL BUBBLE PROJECTION (research-backed)
-              -- Voxel3D.project returns 3D-pass canvas px (supersampled by
-              -- AntiAlias.factor()); `out` is the AntiAlias-resolved canvas
-              -- (display px). Convert, then draw under engine-equivalent scale.
-              local aa = 1
-              pcall(function()
-                local AALib = lib.require("AntiAlias")
-                if AALib and type(AALib.factor) == "function" then
-                  aa = tonumber(AALib.factor()) or 1
-                end
-              end)
-              if not (aa >= 1) then aa = 1 end
-              local wscale = tonumber(ctx and ctx.scale) or 1
-              if not (wscale > 0) then wscale = 1 end
+              -- then offset bubble in screen space above.
+              -- Battle Art: Voxel3D.project(wx, 0, wy)
               local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
-              if okP and type(sx) == "number" and type(sy) == "number" then
-                -- Foot anchor in `out` canvas px:
-                local ox, oy = sx / aa, sy / aa
-                -- Viewport clamp in OUT's pixel space (not window points!)
-                local vwo, vho = nil, nil
-                pcall(function() vwo, vho = out:getDimensions() end)
-                vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
-                if vwo > 16 and vho > 16 then
-                  if ox < 8 then ox = 8 elseif ox > vwo - 8 then ox = vwo - 8 end
-                  if oy < 8 then oy = 8 elseif oy > vho - 8 then oy = vho - 8 end
-                end
-                -- Draw in world-px units under engine-equivalent scale.
-                -- Bubble sits above the HEAD. Increased offset: user reports
-                -- bubbles 3 sprite lengths too low.
-                G.push()
-                G.scale(wscale, wscale)
-                drawCollisionBubble(npc, ox / wscale, oy / wscale - 100, 1)
-                G.pop()
+              if okP and type(sx) == "number" and type(sy) == "number"
+                 and math.abs(sx) < 10000 and math.abs(sy) < 10000 then
+                -- Screen-space: bubble sits above the foot position
+                -- (engine fxEmote draws at ey = py - 20)
+                local bx, by = sx, sy - 28
+                -- Viewport clamp
+                local vw, vh = G.getDimensions()
+                if bx < 8 then bx = 8 end
+                if bx > vw - 8 then bx = vw - 8 end
+                if by < 8 then by = 8 end
+                if by > vh - 8 then by = vh - 8 end
+                drawCollisionBubble(npc, bx, by, 1)
               end
               end  -- end if ghOk else
             end
@@ -5238,22 +5050,6 @@ local function nightlifeTick(world, dt)
           if npc.nightlifeSleeping then wakeNpc(npc) end
         elseif (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then
           if npc.nightlifeSleeping then wakeNpc(npc) end
-        elseif isPokeAmbient(npc) then
-          -- 1.0.0 behavior: ambient Pokemon sleep at night, no percentage
-          if isNight then
-            local cx, cy = npc.cellX, npc.cellY
-            local blocking = false
-            if type(cx) == "number" and type(cy) == "number" and world and world.map then
-              pcall(function()
-                blocking = nearWarp(world.map, math.floor(cx), math.floor(cy))
-              end)
-            end
-            if not blocking then
-              putToSleep(npc)
-            end
-          elseif npc.nightlifeSleeping then
-            wakeNpc(npc)
-          end
         elseif shouldSleepNow(npc, isNight) then
           -- Don't fall asleep in doorways/warps (blocks player)
           local cx, cy = npc.cellX, npc.cellY
@@ -5301,17 +5097,6 @@ local function nightlifeTick(world, dt)
       local base = Overworld.interact
       Overworld.interact = function(self)
         if courtesyInteract(self) then return end
-        -- Allow talking to NPCs that are mid-step: freeze them so the engine's
-        -- `not npc.moving` gate in OverworldState:interact doesn't eat the A press.
-        pcall(function()
-          if self and self.player and type(self.player.facingCell) == "function" then
-            local fx, fy = self.player:facingCell()
-            if fx and type(self.npcAtCell) == "function" then
-              local npc = self:npcAtCell(fx, fy)
-              if npc and npc.moving then npc.moving = false end
-            end
-          end
-        end)
         return base(self)
       end
     end
@@ -5398,31 +5183,6 @@ local function nightlifeTick(world, dt)
           return nil
         end
       end
-      -- Gold: wrap Gen2World.npcAt to find mid-step NPCs by target cell.
-      -- Gold's World:interactBody uses npcAt (not npcAtCell), and NPC:covers()
-      -- only checks cellX/cellY, missing NPCs walking INTO the faced cell.
-      pcall(function()
-        local Gen2World = safeRequire("src.world.gen2.World")
-        if Gen2World and type(Gen2World.npcAt) == "function"
-           and not Gen2World._kantoLifeNpcAtWrapped then
-          local baseNpcAt = Gen2World.npcAt
-          Gen2World._kantoLifeNpcAtWrapped = true
-          Gen2World.npcAt = function(self, cx, cy)
-            local npc = baseNpcAt(self, cx, cy)
-            if npc then return npc end
-            -- Find mid-step NPCs by target cell
-            local npcs = self.npcs
-            if type(npcs) == "table" then
-              for _, n in ipairs(npcs) do
-                if type(n) == "table" and n.targetX == cx and n.targetY == cy then
-                  return n
-                end
-              end
-            end
-            return nil
-          end
-        end
-      end)
       if OWS and type(OWS.interact) == "function" and not OWS._kantoLifeInteractWrapped then
         local baseOWSInteract = OWS.interact
         OWS._kantoLifeInteractWrapped = true
@@ -5746,13 +5506,7 @@ local function nightlifeTick(world, dt)
       npc.timer = 99999
     end
 
-    -- In Gold, use Gen 2 NPC class
-    local NPCMod
-    if gen1 then
-      NPCMod = NPC or safeRequire("src.world.NPC")
-    else
-      NPCMod = safeRequire("src.world.gen2.Npc") or safeRequire("src.world.NPC")
-    end
+    local NPCMod = NPC or safeRequire("src.world.NPC")
 
     ----------------------------------------------------------------
     -- Public voxel renderer bridge for Porygonal-compatible sleep.
@@ -5772,9 +5526,7 @@ local function nightlifeTick(world, dt)
       if NPCMod and NPCMod._kantoLifePublicSleepRenderer then return end
 
       local okFind, battle = pcall(function()
-        local m = mod.find("BATTLE_ART_VOXEL_FORK")
-        if not m then m = mod.find("BATTLE_ART_VOXEL_GEN2") end
-        return m
+        return mod.find("BATTLE_ART_VOXEL_FORK")
       end)
       local api = okFind and battle and battle.exports
         and battle.exports.characterRenderers or nil
@@ -6302,9 +6054,7 @@ local function nightlifeTick(world, dt)
       if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
       pcall(function() fileLog("BUBBLE: attempting registration") end)
       local okFind, battle = pcall(function()
-        local m = mod.find("BATTLE_ART_VOXEL_FORK")
-        if not m then m = mod.find("BATTLE_ART_VOXEL_GEN2") end
-        return m
+        return mod.find("BATTLE_ART_VOXEL_FORK")
       end)
       if not okFind or not battle then
         okFind, battle = pcall(function()
@@ -6623,14 +6373,9 @@ local function nightlifeTick(world, dt)
 
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseDraw = NPCMod.draw
-      function NPCMod:draw(camX, camY, scale, oamRow)
+      function NPCMod:draw(camX, camY)
         if not self.nightlifeSleeping then
-          return baseDraw(self, camX, camY, scale, oamRow)
-        end
-        -- Gold: sleep visuals are baked into sprite.image (1.4.180).
-        -- Skip render-time drawing to avoid double-draw/misalignment.
-        if not gen1 and self.sprite and self.sprite._kantoGoldBaked then
-          return baseDraw(self, camX, camY, scale, oamRow)
+          return baseDraw(self, camX, camY)
         end
         hardFreeze(self)
         -- Always try bake once (helps voxel / true sprite path)
