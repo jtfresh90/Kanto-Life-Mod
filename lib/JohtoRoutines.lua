@@ -84,7 +84,17 @@ return function(ctx)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._johtoLifeDepartMethod = method
     npc._johtoLifeDepartStart = now
+    npc._johtoLifeDepartFrame = 0
     npc._johtoLifeDepartUntil = now + 1.2
+    -- Keep the NPC object persistent; only its rendered pose temporarily uses
+    -- a Pokémon sprite. These pools contain Pokémon compatible with the moves.
+    if method == "fly" then
+      local flyers = {"PIDGEY","SPEAROW","FARFETCHD","DODUO","CHARIZARD","AERODACTYL","DRAGONITE","ARTICUNO","ZAPDOS","MOLTRES","LUGIA","HO_OH"}
+      npc._johtoLifeDepartSpecies = flyers[math.random(#flyers)]
+    elseif method == "teleport" then
+      local psychics = {"ABRA","KADABRA","ALAKAZAM","DROWZEE","HYPNO","MR_MIME","JYNX","ESPEON","MEW","MEWTWO"}
+      npc._johtoLifeDepartSpecies = psychics[math.random(#psychics)]
+    end
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
@@ -1018,11 +1028,14 @@ return function(ctx)
         -- Teleport uses NPC:scriptTeleport above, preserving the engine's
         -- native spin/fade animation and keeping the actor entity persistent
         -- until the routine completes.
-        if npc._johtoLifeDepartMethod == "fly" then
+        if npc._johtoLifeDepartMethod == "fly" or npc._johtoLifeDepartMethod == "teleport" then
+          npc._johtoLifeDepartFrame = (tonumber(npc._johtoLifeDepartFrame) or 0) + math.max(1, (tonumber(dt) or 0) * 60)
           local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
           local elapsed = math.max(0, math.min(1.2, now - (tonumber(npc._johtoLifeDepartStart) or now)))
           local t = elapsed / 1.2
-          npc.spriteYOffset = -math.floor(t * t * 60)
+          if npc._johtoLifeDepartMethod == "fly" then
+            npc.spriteYOffset = -math.floor(t * t * 60)
+          end
         end
         if st.wait <= 0 then
           local dest = destinationFor(world, npc, nil, "door")
@@ -1034,6 +1047,8 @@ return function(ctx)
           npc.spriteYOffset = 0
           npc._johtoLifeDepartMethod = nil
           npc._johtoLifeDepartStart = nil
+          npc._johtoLifeDepartFrame = nil
+          npc._johtoLifeDepartSpecies = nil
         end
         goto continue
       end
