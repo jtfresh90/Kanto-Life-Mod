@@ -779,48 +779,39 @@ return function(ctx)
     return true
   end
 
-  function api:handleRoutineExit(npc, exitX, exitY, avoidX, avoidY)
+
+  function api:handleRoutineExit(npc, doorX, doorY, avoidX, avoidY) -- doorX/doorY = exit doorway cell
     if type(npc) ~= "table" or npc.kantoLifeAmbient ~= true then return false end
     local ow = world()
     if not ow or not ow.map then return false end
-    local oldX, oldY = tonumber(npc.cellX), tonumber(npc.cellY)
+    local oldX, oldY = tonumber(npc.cellX), tonumber(npc.cellY); local _exitX, _exitY = tonumber(doorX) or oldX, tonumber(doorY) or oldY; local _curId = ow.map.gen3Id or ow.map.id; local _isExit = false; local _exitDestId = nil; for _, _d in ipairs(routineDoorCells(ow)) do if _d.x == _exitX and _d.y == _exitY then local _destId = _d.destMap or (_d.warp and destinationMapId(_d.warp)); if _destId ~= nil and _curId ~= nil and tostring(_destId):upper() ~= tostring(_curId):upper() then _isExit = true; _exitDestId = _destId end; break end end
     local Objects = engine("src.core.game3.objects")
     if not Objects or type(Objects.removeObject) ~= "function" then return false end
     local lid = tonumber(npc.localId or (npc.def and npc.def.localId))
     if not lid then return false end
 
-<<<<<<< HEAD
-    -- Cross-map check: if the door/warp the NPC is exiting through leads to
-    -- a DIFFERENT map, record them as a traveler instead of doing same-map
-    -- replacement. They will spawn at the paired entrance when the player
-    -- enters the destination map.
-    local currentMapId = tostring(ow.map.gen3Id or ow.map.id or "")
-    do
-      local dx, dy = tonumber(exitX) or oldX, tonumber(exitY) or oldY
-      local destMapId = nil
-      -- Find the door at the exit coordinates and resolve its destination.
-      for _, d in ipairs(routineDoorCells(ow)) do
-        if d.x == dx and d.y == dy then
-          -- Route connections store destMap directly; warps resolve via def.
-          destMapId = d.destMap and tostring(d.destMap) or warpDestMapId(d.warp)
-          break
-        end
-      end
-      if destMapId and destMapId ~= "" and destMapId ~= currentMapId then
-        -- Cross-map exit: record traveler, remove NPC from this map.
-        local isPoke = npc.kantoLifePokemon == true
-        local gid = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
+    -- FORK: cross-map traveler. If the exit leads to a different map, record
+    -- the traveler so they spawn at the paired entrance when the player enters
+    -- the destination map (see traveler spawner below). No same-map replacement
+    -- here — the NPC genuinely traveled. (Merged from the fork's pre-1.4.200
+    -- handleRoutineExit during the 1.4.200 sync.)
+    if _isExit and _exitDestId ~= nil then
+      local destMapId = tostring(_exitDestId)
+      local currentMapId = tostring(_curId or "")
+      if destMapId ~= "" and destMapId ~= currentMapId then
+        local isPokeT = npc.kantoLifePokemon == true
+        local gidT = tonumber(npc.graphicsId or (npc.def and npc.def.graphicsId))
         travelers[destMapId] = travelers[destMapId] or {}
         table.insert(travelers[destMapId], {
-          graphicsId = gid,
-          isPoke = isPoke,
+          graphicsId = gidT,
+          isPoke = isPokeT,
           species = npc.kantoLifeSpecies,
           agenda = npc._kantoLifeFRAgenda,
           fromMap = currentMapId,
           timestamp = os.time(),
         })
         pruneTravelers()
-        -- EXPERIMENTAL: farewell waves — nearby NPCs wave goodbye to the
+        -- EXPERIMENTAL (fork): farewell waves — nearby NPCs wave goodbye to the
         -- departing traveler.
         pcall(function()
           local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
@@ -867,12 +858,8 @@ return function(ctx)
         if okF and FieldView then FieldView._nativeDirty = true end
         return true
       end
-      -- Same map, unknown destination, or no door found: fall through to the
-      -- existing same-map replacement logic below (unchanged behavior).
     end
 
-    local replacement = chooseReplacementDoor(ow, oldX, oldY, avoidX, avoidY)
-=======
     local replacement = chooseReplacementDoor(ow, _exitX, _exitY, avoidX, avoidY)
     -- If no doorway is available (open route maps), still replace at a free cell.
     if not replacement then
@@ -882,7 +869,6 @@ return function(ctx)
         replacement = { x = c[1], y = c[2] }
       end
     end
->>>>>>> origin/main
     if not replacement then return false end
 
     -- Match kind: human out → random different human in; poke out → random different poke in.
@@ -928,7 +914,7 @@ return function(ctx)
     -- Keep the population intact if the alternate door is usable: create the
     -- replacement first, then remove the departing actor.  If the only valid
     -- doorway is the same cell, remove first so that doorway can be reused.
-    local sameDoor = replacement.x == oldX and replacement.y == oldY
+    local sameDoor = _isExit or (replacement.x == _exitX and replacement.y == _exitY)
     if sameDoor then
       Objects._tracks[lid] = nil
       Objects._byId[lid] = nil
@@ -948,7 +934,7 @@ return function(ctx)
       -- Do not silently lose a population member. If we had not removed the
       -- old actor yet it remains in place; same-door fallback is the only case
       -- where it was necessarily removed first.
-      if sameDoor then
+      if sameDoor and not _isExit then
         local restored = newObject(oldX, oldY, nil, gid, isPoke)
         return restored ~= nil
       end
@@ -984,6 +970,8 @@ return function(ctx)
     if okF and FieldView then FieldView._nativeDirty = true end
     return true
   end
+
+  function api:update()
 
   -- Spawn pending travelers when the player enters their destination map.
   -- Each traveler appears at the entrance (door/warp) that connects back to

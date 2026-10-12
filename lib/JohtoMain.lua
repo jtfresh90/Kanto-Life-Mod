@@ -791,8 +791,8 @@ return function(mod)
 
   local function spawnAmbient(mapId)
     if not mapId then return end
-    if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, mod.world and mod.world:overworld() and mod.world:overworld().map)) then return end
-    local ow = mod.world and mod.world:overworld()
+    if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId, mod.world and type(mod.world.overworld) == "function" and mod.world:overworld() and mod.world:overworld().map)) then return end
+    local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
     if not ow or not ow.map or ow.map.id ~= mapId then return end
     local map = ow.map
     local function balance(want, pokeOnly)
@@ -828,7 +828,7 @@ return function(mod)
     end
   end
   local function refreshCurrentMap()
-    local ow = mod.world and mod.world:overworld()
+    local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
     if ow and ow.map then spawnAmbient(ow.map.id) end
   end
   local function safeRequire(path)
@@ -1299,7 +1299,7 @@ return function(mod)
   end
   local function liveWorld()
     if mod.world and mod.world.overworld then
-      local ok, w = pcall(function() return mod.world:overworld() end)
+      local ok, w = pcall(function() return mod.world and type(mod.world.overworld) == "function" and mod.world:overworld() end)
       if ok and w then return w end
     end
     local g = G()
@@ -1586,7 +1586,7 @@ return function(mod)
         elseif p.key == "npc_agenda" and type(johtoRoutines.setAgenda) == "function" then
           johtoRoutines.setAgenda(p.value)
         end
-        local ow = mod.world and mod.world:overworld()
+        local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
         if ow and type(johtoRoutines.update) == "function" then
           johtoRoutines.update(ow, 0, true)
         end
@@ -1616,6 +1616,50 @@ return function(mod)
       end
       return true
     end
+    local function putAsleep(npc)
+      if npc.nightlifeSleeping then return end
+      npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0
+      npc.spriteYOffset = 0; npc.frozen = true; npc.nightlifeSleeping = true
+      npc.sleepPose = true
+      if npc.def then npc.def.sleeping = true end
+      if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then
+        npc.johtoLifeSleepFacing = npc.facing
+      end
+      local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
+      npc.johtoLifeSleepAngle = sign * (math.pi / 2)
+      npc.johtoLifeSleepSide = sign
+      pcall(bakeRotatedSleepSprite, npc)
+      local faceDir = (sign > 0) and "LEFT" or "RIGHT"
+      pcall(function()
+        if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end
+      end)
+    end
+    local function wakeUp(npc)
+      if not npc.nightlifeSleeping then return end
+      npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
+      npc.sleepPose = nil
+      if npc.def then npc.def.sleeping = nil end
+      pcall(restoreRotatedSleepSprite, npc)
+      if npc.johtoLifeSleepFacing ~= nil then
+        pcall(function()
+          if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing)
+          else npc.facing = npc.johtoLifeSleepFacing end
+        end)
+        npc.johtoLifeSleepFacing = nil
+      end
+      -- EXPERIMENTAL (fork): wake-up stretch bubble. Ported from the fork's
+      -- Overworld.update inline sleep block during the 1.4.200 sync, when
+      -- main consolidated sleep assignment into johtoSleepTick.
+      pcall(function()
+        local nowW = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
+        local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
+        local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+        if bubbleUntil <= nowW then
+          npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
+          npc._kantoLifeCollisionBubbleUntil = nowW + 2.0
+        end
+      end)
+    end
     local pct = math.floor(tonumber(opt("sleep_pct")) or 10)
     if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
     local isNight = false
@@ -1624,83 +1668,68 @@ return function(mod)
       local t = ok and tostring(tod):upper() or ""
       isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
     end
-    local candidates = {}
+    -- Humans: sleep_pct of ALL ambient humans (not a pre-filtered 30% day subset).
+    -- Day requires day_sleepers ON; night always eligible.
+    local humanCandidates = {}
     for _, npc in ipairs(world.npcs or {}) do
       local d = npc.def or {}
-      if d.johtoLifeAmbient and not d.johtoLifePokemon and safe(npc) then
-        local id = tostring(npc.id or d.name or "")
-        local h = 0; for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
-        if isNight or (opt("day_sleepers") and (h % 10) < 3) then
-          candidates[#candidates + 1] = { npc = npc, hash = h }
-        end
-      end
-    end
-    table.sort(candidates, function(a,b)
-      if a.hash == b.hash then return tostring(a.npc.id) < tostring(b.npc.id) end
-      return a.hash < b.hash
-    end)
-    local want = math.ceil(#candidates * pct / 100)
-    if pct > 0 and #candidates > 0 and want < 1 then want = 1 end
-    if pct >= 100 then want = #candidates end
-    local chosen = {}
-    for i = 1, want do chosen[candidates[i].npc] = true end
-    for _, npc in ipairs(world.npcs or {}) do
-      local d = npc.def or {}
-      if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and not (d.johtoLifePokemon or npc.johtoLifePokemon) then
-        -- Never sleep story-critical NPCs (safety check)
+      local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+      local isPoke = d.johtoLifePokemon or npc.johtoLifePokemon
+      if isAmb and not isPoke and safe(npc) then
         local spr = tostring(d.sprite or ""):upper()
         local nm = tostring(d.name or ""):upper()
         local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
           or spr:find("CLERK", 1, true) or spr:find("SAILOR", 1, true)
-        if chosen[npc] and not isExcluded then
-          if not npc.nightlifeSleeping then
-            npc.frozen = true; npc.nightlifeSleeping = true
-            if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
-            local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-            npc.johtoLifeSleepAngle = sign * (math.pi / 2); npc.johtoLifeSleepSide = sign
-            -- DISABLED: bakeRotatedSleepSprite was producing blank/invisible sprites.
-            -- Using draw-time rotation fallback instead (was working before 1.4.0).
-            -- pcall(bakeRotatedSleepSprite, npc)
-            pcall(function() if type(npc.face) == "function" then npc:face(sign > 0 and "LEFT" or "RIGHT") else npc.facing = sign > 0 and "LEFT" or "RIGHT" end end)
-          end
-        elseif npc.nightlifeSleeping then
-          npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
-          pcall(restoreRotatedSleepSprite, npc)
-          if npc.johtoLifeSleepFacing ~= nil then
-            pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
-            npc.johtoLifeSleepFacing = nil
-          end
-        end
-        -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
-        for _, npc in ipairs(world.npcs or {}) do
-          local d = npc.def or {}
-          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and (d.johtoLifePokemon or npc.johtoLifePokemon) then
-            if isNight then
-              if not npc.nightlifeSleeping then
-                npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
-                npc.frozen = true
-                npc.nightlifeSleeping = true
-                if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
-                local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
-                npc.johtoLifeSleepSide = sign
-                pcall(bakeRotatedSleepSprite, npc)
-                local faceDir = (sign > 0) and "LEFT" or "RIGHT"
-                pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
-              end
-            elseif npc.nightlifeSleeping then
-              npc.frozen = false
-              npc.nightlifeSleeping = nil
-              npc.johtoLifeSleepAngle = nil
-              pcall(restoreRotatedSleepSprite, npc)
-              if npc.johtoLifeSleepFacing ~= nil then
-                pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
-                npc.johtoLifeSleepFacing = nil
-              end
-            end
-          end
+        if not isExcluded then
+          local id = tostring(npc.id or d.name or "")
+          local h = 0; for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
+          humanCandidates[#humanCandidates + 1] = { npc = npc, hash = h }
         end
       end
+    end
+    table.sort(humanCandidates, function(a,b)
+      if a.hash == b.hash then return tostring(a.npc.id) < tostring(b.npc.id) end
+      return a.hash < b.hash
+    end)
+    local want = 0
+    if isNight or opt("day_sleepers") then
+      want = math.ceil(#humanCandidates * pct / 100)
+      if pct > 0 and #humanCandidates > 0 and want < 1 then want = 1 end
+      if pct >= 100 then want = #humanCandidates end
+    end
+    local chosen = {}
+    for i = 1, want do chosen[humanCandidates[i].npc] = true end
+    for _, entry in ipairs(humanCandidates) do
+      local npc = entry.npc
+      if chosen[npc] then putAsleep(npc) else wakeUp(npc) end
+    end
+    -- Pokemon ambients: sleep at the same rate at night; optional day_sleepers.
+    local pokeCandidates = {}
+    for _, npc in ipairs(world.npcs or {}) do
+      local d = npc.def or {}
+      local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+      local isPoke = d.johtoLifePokemon or npc.johtoLifePokemon
+      if isAmb and isPoke and safe(npc) then
+        local id = tostring(npc.id or d.name or "")
+        local h = 0; for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
+        pokeCandidates[#pokeCandidates + 1] = { npc = npc, hash = h }
+      end
+    end
+    table.sort(pokeCandidates, function(a,b)
+      if a.hash == b.hash then return tostring(a.npc.id) < tostring(b.npc.id) end
+      return a.hash < b.hash
+    end)
+    local pokeWant = 0
+    if isNight or opt("day_sleepers") then
+      pokeWant = math.ceil(#pokeCandidates * pct / 100)
+      if pct > 0 and #pokeCandidates > 0 and pokeWant < 1 then pokeWant = 1 end
+      if pct >= 100 then pokeWant = #pokeCandidates end
+    end
+    local pokeChosen = {}
+    for i = 1, pokeWant do pokeChosen[pokeCandidates[i].npc] = true end
+    for _, entry in ipairs(pokeCandidates) do
+      local npc = entry.npc
+      if pokeChosen[npc] then putAsleep(npc) else wakeUp(npc) end
     end
   end
 
@@ -2363,108 +2392,9 @@ return function(mod)
         return true
       end
 
-      if opt("sleeping_npcs") then
-        local pct = math.floor(tonumber(opt("sleep_pct")) or 10)
-        if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
-        local isNight = false
-        if type(world.timeOfDay) == "function" then
-          local ok, tod = pcall(function() return world:timeOfDay() end)
-          local t = ok and tostring(tod):upper() or ""
-          isNight = t == "NIGHT" or t == "NITE" or t == "MIDNIGHT"
-        end
+      -- Sleep assignment owned solely by johtoSleepTick (accurate % + poke sleep).
+      pcall(johtoSleepTick, world)
 
-        local candidates = {}
-        for _, npc in ipairs(world.npcs or {}) do
-          local d = npc.def or {}
-          if d.johtoLifeAmbient and not d.johtoLifePokemon and sleepSafeCell(world, npc) then
-            local id = tostring(npc.id or d.name or "")
-            local h = 0
-            for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
-            local dayEligible = isNight or (opt("day_sleepers") and ((h % 10) < 3))
-            if dayEligible then candidates[#candidates + 1] = { npc = npc, hash = h } end
-          end
-        end
-        table.sort(candidates, function(a,b)
-          if a.hash == b.hash then return tostring(a.npc.id) < tostring(b.npc.id) end
-          return a.hash < b.hash
-        end)
-        local want = math.ceil(#candidates * pct / 100)
-        if pct > 0 and #candidates > 0 and want < 1 then want = 1 end
-        if pct >= 100 then want = #candidates end
-        local chosen = {}
-        for i = 1, want do chosen[candidates[i].npc] = true end
-
-        for _, npc in ipairs(world.npcs or {}) do
-          local d = npc.def or {}
-          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and not (d.johtoLifePokemon or npc.johtoLifePokemon) then
-            if chosen[npc] then
-              if not npc.nightlifeSleeping then
-                npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
-                npc.frozen = true
-                npc.nightlifeSleeping = true
-                if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
-                local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
-                npc.johtoLifeSleepSide = sign
-                -- DISABLED: bake was producing blank sprites. Using draw-time fallback.
-                -- pcall(bakeRotatedSleepSprite, npc)
-                local faceDir = (sign > 0) and "LEFT" or "RIGHT"
-                pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
-              end
-            elseif npc.nightlifeSleeping then
-              npc.frozen = false
-              npc.nightlifeSleeping = nil
-              npc.johtoLifeSleepAngle = nil
-              pcall(restoreRotatedSleepSprite, npc)
-              if npc.johtoLifeSleepFacing ~= nil then
-                pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
-                npc.johtoLifeSleepFacing = nil
-              end
-              -- EXPERIMENTAL: wake-up stretch
-              pcall(function()
-                local nowW = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-                local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
-                local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-                if bubbleUntil <= nowW then
-                  npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
-                  npc._kantoLifeCollisionBubbleUntil = nowW + 2.0
-                end
-              end)
-            end
-          end
-        end
-        -- Pokemon sleep (1.0.0 behavior): sleep at night unconditionally, no percentage
-        for _, npc in ipairs(world.npcs or {}) do
-          local d = npc.def or {}
-          if (d.johtoLifeAmbient or npc.johtoLifeAmbient) and (d.johtoLifePokemon or npc.johtoLifePokemon) then
-            if isNight then
-              if not npc.nightlifeSleeping then
-                npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0; npc.spriteYOffset = 0
-                npc.frozen = true
-                npc.nightlifeSleeping = true
-                if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then npc.johtoLifeSleepFacing = npc.facing end
-                local sign = ((npc.cellX or 0) + (npc.cellY or 0)) % 2 == 0 and 1 or -1
-                npc.johtoLifeSleepAngle = sign * (math.pi / 2)
-                npc.johtoLifeSleepSide = sign
-                -- Fork: bake stays disabled here too (blank sprites); the draw-time
-                -- rotation fallback handles the sleeper, same as human sleep above.
-                -- pcall(bakeRotatedSleepSprite, npc)
-                local faceDir = (sign > 0) and "LEFT" or "RIGHT"
-                pcall(function() if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end end)
-              end
-            elseif npc.nightlifeSleeping then
-              npc.frozen = false
-              npc.nightlifeSleeping = nil
-              npc.johtoLifeSleepAngle = nil
-              pcall(restoreRotatedSleepSprite, npc)
-              if npc.johtoLifeSleepFacing ~= nil then
-                pcall(function() if type(npc.face) == "function" then npc:face(npc.johtoLifeSleepFacing) else npc.facing = npc.johtoLifeSleepFacing end end)
-                npc.johtoLifeSleepFacing = nil
-              end
-            end
-          end
-        end
-      end
       if johtoRoutines and type(johtoRoutines.update) == "function" then
         johtoRoutines.update(world, dt or 0, false)
       end
@@ -3423,7 +3353,7 @@ function isVoxelPresentation()
       -- bag/default for other interiors. Resolve once per sleep session.
       local cached = npc.kantoLifeNaturalSleepStyle
       if cached ~= nil then return cached end
-      local ow = mod.world and mod.world:overworld()
+      local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
       local map = ow and ow.map
       local id = tostring(map and map.id or ""):upper()
       if not isIndoor(id, map) then cached = 1
@@ -3440,22 +3370,37 @@ function isVoxelPresentation()
     end
     return cached
   end
-    -- Draw the opaque base layer UNDER the NPC (3-layer system)
+    -- Draw the opaque base layer UNDER the NPC (3-layer system).
+    -- Handles BOTH Gen2 NPC:draw forms:
+    --   scale ~= nil  → translate(ox,oy); scale(s); world-space draw
+    --   scale == nil  → cam form: screen = world - cam (ox,oy are camX,camY)
+    local function propScreenXY(self, ox, oy, scale)
+      local px = (type(self.px) == "number" and self.px)
+        or ((self.cellX or 0) * 16)
+      local py = (type(self.py) == "number" and self.py)
+        or ((self.cellY or 0) * 16)
+      -- Cell center. Props are 20x24 authored around a visual midpoint;
+      -- keep them on the same point the NPC stand/sleep occupies.
+      local cx, cy = px + 8, py + 8
+      if scale == nil then
+        -- Cam form: ox/oy are camera pixels. Screen = world - cam.
+        return cx - (ox or 0), cy - (oy or 0), 1
+      end
+      return cx, cy, scale
+    end
     local function drawSleepAccessoryBase(self, ox, oy, scale)
       if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 or style == 1 then return end
       local img = sleepPropBaseImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
-      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
-      local s = scale or 1
+      local ax, ay, s = propScreenXY(self, ox, oy, scale)
       love.graphics.push("all")
-      love.graphics.translate(ox or 0, oy or 0)
-      love.graphics.scale(s, s)
-      local ax = (type(self.px) == "number" and self.px or px) + 8
-      local ay = (type(self.py) == "number" and self.py or py) + 8
+      if scale ~= nil then
+        love.graphics.translate(ox or 0, oy or 0)
+        if s ~= 1 then love.graphics.scale(s, s) end
+      end
       love.graphics.translate(ax, ay)
       love.graphics.rotate(angle)
       love.graphics.translate(-iw/2, -ih/2)
@@ -3463,30 +3408,23 @@ function isVoxelPresentation()
       love.graphics.pop()
     end
     local function drawSleepAccessory(self, ox, oy, scale)
-      -- Only draw for sleeping NPCs
       if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local px = (self.cellX ~= nil) and (self.cellX * 16) or (self.px or self.x or 0)
-      local py = (self.cellY ~= nil) and (self.cellY * 16) or (self.py or self.y or 0)
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
-      local s = scale or 1
+      local ax, ay, s = propScreenXY(self, ox, oy, scale)
       love.graphics.push("all")
-      -- Match the transform order used by drawZzzForNpc: translate by camera
-      -- offset, apply scale, then position in world coordinates. The old code
-      -- added (ox+px) before scaling, which placed props at wrong positions
-      -- whenever scale ~= 1 and offset them even at scale == 1.
-      love.graphics.translate(ox or 0, oy or 0)
-      love.graphics.scale(s, s)
-      -- Center on the live sprite pixel position (prefer self.px over cell*16).
-      local ax = (type(self.px) == "number" and self.px or px) + 8
-      local ay = (type(self.py) == "number" and self.py or py) + 8
+      if scale ~= nil then
+        love.graphics.translate(ox or 0, oy or 0)
+        if s ~= 1 then love.graphics.scale(s, s) end
+      end
       love.graphics.translate(ax, ay)
+      -- Tent sits upright; bed/bag rotate with the sleeper.
       if style == 2 or style == 3 then love.graphics.rotate(angle) end
       love.graphics.translate(-iw/2, -ih/2)
-      love.graphics.draw(img,0,0)
+      love.graphics.draw(img, 0, 0)
       love.graphics.pop()
     end
 local function drawSleepTentOverlay(self, ox, oy, scale) return end
@@ -3553,18 +3491,20 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         "world.gen2.Npc",
         "world.Npc",
       }) do
-        local ok, mod = pcall(require, path)
-        if ok and mod and type(mod.draw) == "function" then
-          NPC = mod
+        local ok, npcMod = pcall(require, path)
+        if ok and npcMod and type(npcMod.draw) == "function" then
+          NPC = npcMod
           break
         end
       end
       if not (NPC and type(NPC.draw) == "function") then return end
-      -- Reset the wrap flag on every mod load. The flag persists on the NPC
-      -- class across mod updates; without resetting, a fixed draw hook would
-      -- never install because the old (broken) wrap is still marked as done.
-      NPC._johtoLifeZzzWrapped = nil
+      -- Re-wrap on each mod load so bugfixes apply; unwrap prior Johto wrap first.
+      if NPC._johtoLifeZzzWrapped and type(NPC._johtoLifeZzzBaseDraw) == "function" then
+        NPC.draw = NPC._johtoLifeZzzBaseDraw
+        NPC._johtoLifeZzzWrapped = nil
+      end
       local baseDraw = NPC.draw
+      NPC._johtoLifeZzzBaseDraw = baseDraw
       NPC.draw = function(self, ox, oy, scale)
         -- Teleport spins then rises; Fly lifts and drifts away. Keep the map
         -- cell untouched and apply a temporary pixel-space render offset only.
@@ -3604,10 +3544,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           if sleeping then
             local style = resolveSleepStyle(self)
             if style ~= 1 and style ~= 0 then
-              pcall(drawSleepAccessoryBase, self, -(ox or 0), -(oy or 0), 1)
+              pcall(drawSleepAccessoryBase, self, ox, oy, nil)
             end
             if style ~= 1 then r = baseDraw(self, ox, oy) end
-            pcall(drawSleepAccessory, self, -(ox or 0), -(oy or 0), 1)
+            pcall(drawSleepAccessory, self, ox, oy, nil)
             if not isVoxelPresentation() then
               drawZzzForNpc(self, ox, oy, nil)
             end
@@ -3615,7 +3555,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             r = baseDraw(self, ox, oy)
             local cbUntil = tonumber(self and self._kantoLifeCollisionBubbleUntil) or 0
             local cbNow = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-            if cbUntil > cbNow then pcall(drawCollisionBubble, self, -(ox or 0), -(oy or 0), 1) end
+            if cbUntil > cbNow then pcall(drawCollisionBubble, self, ox, oy, nil) end
           end
           return r
         end
@@ -3695,28 +3635,76 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local travelSpriteCache = {}
         local function travelPokemonSprite(species)
           if type(species) ~= "string" or species == "" then return nil end
+          species = tostring(species):upper():gsub(" ", "_")
           if travelSpriteCache[species] then return travelSpriteCache[species] end
+          local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
+          if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
           local g = G()
           local data = g and g.data
+          local sprites = data and data.sprites
+
+          -- 1) Same path ambient poke NPCs use: SPRITE_<SPECIES> overworld art
+          --    (full color). Menu icons (gen2Icons) are often grayscale.
+          local candidates = {
+            "SPRITE_" .. species,
+            species,
+            "SPRITE_POKEMON_" .. species,
+          }
+          if sprites then
+            for _, id in ipairs(candidates) do
+              local def = sprites[id]
+              if type(def) == "table" then
+                local okS, spr = pcall(Renderer.new, def)
+                if okS and spr then
+                  travelSpriteCache[species] = spr
+                  return spr
+                end
+              end
+            end
+            -- Any sprite id containing the species name
+            for id, def in pairs(sprites) do
+              local up = tostring(id):upper()
+              if up:find(species, 1, true) and not up:find("BACK", 1, true)
+                 and type(def) == "table" then
+                local okS, spr = pcall(Renderer.new, def)
+                if okS and spr then
+                  travelSpriteCache[species] = spr
+                  return spr
+                end
+              end
+            end
+          end
+
+          -- 2) Clone a live ambient poke NPC of the same species (guaranteed color)
+          pcall(function()
+            local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+            for _, n in ipairs((ow and ow.npcs) or {}) do
+              local mon = (n.def and n.def.johtoLifeMon) or n.johtoLifeMon
+              if mon and tostring(mon):upper() == species and n.sprite then
+                travelSpriteCache[species] = n.sprite
+              end
+            end
+          end)
+          if travelSpriteCache[species] then return travelSpriteCache[species] end
+
+          -- 3) Last resort: gen2 menu icon (may be limited palette)
           local icons = data and data.gen2Icons
           local iconId = icons and icons.species and icons.species[species]
           local entry = iconId and icons.icons and icons.icons[iconId]
-          if not (entry and entry.image) then return nil end
-          local def = {
-            id = "SPRITE_JOHTO_TRAVEL_MON",
-            image = entry.image,
-            frames = 2,
-            walker = false,
-            spriteType = "POKEMON_SPRITE",
-            palette = "PAL_OW_RED",
-            paletteId = 0,
-            species = species,
-            icon = iconId,
-          }
-          local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
-          if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
-          local okSprite, spr = pcall(Renderer.new, def)
-          if okSprite and spr then travelSpriteCache[species] = spr; return spr end
+          if entry and entry.image then
+            local def = {
+              id = "SPRITE_JOHTO_TRAVEL_MON_" .. species,
+              image = entry.image,
+              frames = entry.frames or 2,
+              walker = false,
+              spriteType = "POKEMON_SPRITE",
+              palette = entry.palette or "PAL_OW_RED",
+              paletteId = entry.paletteId or 0,
+              species = species,
+            }
+            local okS, spr = pcall(Renderer.new, def)
+            if okS and spr then travelSpriteCache[species] = spr; return spr end
+          end
           return nil
         end
         NPC.pose = function(self, ...)
@@ -3742,443 +3730,382 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       NPC._johtoLifeZzzWrapped = true
     end)
 
-    -- Voxel sleep Zs: use Gold's REAL Gen-2 battle animation runtime.
+    -- =====================================================================
+    -- Gen2 VOXEL sleep / bubbles — multi-path approach (new for 1.4.195)
     --
-    -- The previous implementation used src.battle.AnimPlayer, which is the
-    -- Gen-1 battle-animation format. Gold does not use that format. Gold's
-    -- battle sleep effect is ANIM_SLP -> BattleAnim_Slp ->
-    -- BATTLE_ANIM_OBJ_ASLEEP, rendered by src.battle.gen2.AnimRunner and
-    -- src.ui.gen2.BattleAnimView. This block instantiates those exact engine
-    -- classes from the merged Gold data; it does not redraw the Zs itself.
+    -- Previous builds depended solely on Pipelines.worldPresent + ANIM_SLP.
+    -- Battle Art Gen2 / Potato Voxel often:
+    --   * never call Pipelines.worldPresent with a usable ctx.state
+    --   * lack gen2BattleAnims ANIM_SLP data
+    --   * project coordinates differently
+    -- So we install THREE independent paths that all draw Z + props + bubbles:
+    --   A) Pipelines.worldPresent post-overlay (2D canvas on top of voxel)
+    --   B) Battle Art CharacterRenderers / SpriteBillboards (true 3D billboards)
+    --   C) love.draw late pass (last-resort screen-space Z + props)
+    -- =====================================================================
     pcall(function()
-      local BA = require("src.battle.gen2.AnimRunner")
-      local BV = require("src.ui.gen2.BattleAnimView")
-      local Pipelines = require("src.render.Pipelines")
-      local Voxel3D = nil
-      local VoxelScene = nil
+      local Pipelines = nil
+      pcall(function() Pipelines = require("src.render.Pipelines") end)
 
-      -- 1.0.0 used BATTLE_ART_VOXEL_GEN2; newer Battle Art builds may use other ids.
+      -- Resolve Battle Art / Potato Voxel lib (best-effort).
       local V = nil
       if type(mod.find) == "function" then
         for _, id in ipairs({
           "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_FORK",
           "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE", "POTATO_VOXEL",
+          "potato_voxel", "PotatoVoxel",
         }) do
           local ba = mod.find(id)
           V = ba and (ba.lib or (ba.exports and ba.exports.lib)) or nil
-          if V and type(V.require) == "function" then break end
+          if V and type(V.require) == "function" then
+            _G._johtoLifeBattleArtMod = ba
+            break
+          end
           V = nil
         end
       end
+      local Voxel3D = nil
       if V and type(V.require) == "function" then
-        Voxel3D = V.require("Voxel3D")
-        VoxelScene = V.require("VoxelScene")
-      end
-      if not (Voxel3D and BA and BV and Pipelines) then
-        -- Silently skip: the voxel sleep overlay needs a Gen 2 voxel mod
-        -- (BATTLE_ART_VOXEL_GEN2) which isn't installed. The baked sleeper
-        -- sprite still renders correctly; only the animated Zzz overlay is
-        -- unavailable. No warning: this is an expected configuration, not a bug.
-        return
+        pcall(function() Voxel3D = V.require("Voxel3D") end)
       end
 
-      local sleepRunner
-      local sleepView
-      local sleepData
-      local sleepKey
-      local lastSleepStep = -1
-
-      local function setupSleepRuntime()
-        local g = G()
-        local data = g and g.data or nil
-        local anims = data and data.gen2BattleAnims or nil
-        local constants = data and data.gen2Constants or nil
-        local palettes = data and data.gen2Palettes or nil
-        if not (anims and constants and palettes) then return false end
-
-        local ids = anims.ids or {}
-        local key = ids.ANIM_SLP
-        if not key then
-          -- Keep this fail-closed: do not substitute a guessed animation key.
-          mod.log:warn("Johto Life: Gold battle animation data has no ANIM_SLP id")
-          return false
-        end
-        if sleepRunner and sleepView and sleepData == anims and sleepKey == key then
-          return true
-        end
-
-        local okR, runner = pcall(BA.new, {
-          data = anims,
-          constants = constants,
-          battleTurn = 1, -- sleep is a status effect on the opposing/enemy side
-          animId = "ANIM_SLP",
-          sgb = false,
-        })
-        if not okR or not runner then
-          mod.log:warn("Johto Life: could not construct Gold ANIM_SLP runner")
-          return false
-        end
-        local okV, view = pcall(BV.new, anims, palettes)
-        if not okV or not view then
-          mod.log:warn("Johto Life: could not construct Gold BattleAnimView")
-          return false
-        end
-        local okStart = pcall(function() runner:start(key) end)
-        if not okStart then
-          mod.log:warn("Johto Life: could not start Gold ANIM_SLP")
-          return false
-        end
-        sleepRunner, sleepView, sleepData, sleepKey = runner, view, anims, key
-        lastSleepStep = -1
-        mod.log:info("Johto Life: using Gold gen2 ANIM_SLP / BattleAnimView for voxel sleep")
-        return true
-      end
-
-      local function stepSleepRuntime(frame)
-        if not setupSleepRuntime() then return false end
-        -- Exactly one Gen-2 battle-animation frame per rendered game frame.
-        -- The runner owns the object positions/frames; Johto Life only chooses
-        -- where that finished 160x144 animation canvas is placed in voxel space.
-        if frame ~= lastSleepStep then
-          pcall(function() sleepRunner:step() end)
-          -- Gold's real ANIM_SLP script intentionally runs three 40-frame
-          -- loops and then returns. In an actual battle the status remains
-          -- represented by the battle state, so the caller can start the
-          -- effect again when needed. An overworld sleeper has no battle
-          -- state to restart it for us, so keep the exact Gold animation
-          -- looping for as long as the NPC remains asleep.
-          if type(sleepRunner.done) == "function" and sleepRunner:done() then
-            pcall(function()
-              sleepRunner:start(sleepKey)
-              sleepRunner:step()
-            end)
-          end
-          lastSleepStep = frame
-        end
-        return true
-      end
-
-      local function drawGoldSleep(canvas, ctx)
-        if not canvas or not ctx then return end
-
-        -- Props and the sleeper model are independent of the optional Zzz
-        -- toggle. Only initialize Gold's battle-animation runtime when Zzz is
-        -- enabled; otherwise still render beds/tents/bags in voxel mode.
-        local showZzz = opt("sleep_bubbles") ~= false
-        local goldSleepRuntimeReady = not showZzz or setupSleepRuntime()
-        if showZzz and not goldSleepRuntimeReady then showZzz = true end
-
-        local state = ctx.state
-        if not state then return end
-        local sleepers = {}
-        for _, npc in ipairs(state.npcs or {}) do
-          if npc and npc.nightlifeSleeping then sleepers[#sleepers + 1] = npc end
-        end
-        for _, e in ipairs(state.entities or {}) do
-          if e and e.nightlifeSleeping then sleepers[#sleepers + 1] = e end
-        end
-        for _, ghost in ipairs(state.ghosts or {}) do
-          if ghost and ghost.npc and ghost.npc.nightlifeSleeping then
-            local n = ghost.npc
-            n = setmetatable({
-              px = (n.px or 0) + (ghost.ox or 0),
-              py = (n.py or 0) + (ghost.oy or 0),
-              cellX = n.cellX, cellY = n.cellY,
-              nightlifeSleeping = true,
-            }, { __index = n })
-            sleepers[#sleepers + 1] = n
-          end
-        end
-        if #sleepers == 0 then return end
-
-        local Gfx = love.graphics
-        local prevCanvas = Gfx.getCanvas()
-        local prevShader = Gfx.getShader()
-        if not pcall(Gfx.setCanvas, canvas) then return end
-
-        local iw, ih = 1, 1
-        if type(Voxel3D.size) == "function" then
-          local a, b = Voxel3D.size()
-          if type(a) == "number" and a > 0 then iw = a end
-          if type(b) == "number" and b > 0 then ih = b end
-        end
-        local ow = type(canvas.getWidth) == "function" and canvas:getWidth() or iw
-        local oh = type(canvas.getHeight) == "function" and canvas:getHeight() or ih
-        local sxRatio, syRatio = ow / iw, oh / ih
-        if showZzz then
-          local frame = math.floor(((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 60)
-          stepSleepRuntime(frame)
-        end
-
-        Gfx.push("all")
-        Gfx.setShader()
-        Gfx.setColor(1, 1, 1, 1)
-
-        -- The Gold battle animation itself is the source of the Z shape.
-        -- Johto Life's 2D presentation, however, intentionally gives its Z
-        -- glyph a white pixel outline. Keep the battle-authored Z geometry
-        -- and animation, but reproduce that outline by drawing the exact same
-        -- battle object through an all-white palette at the four neighboring
-        -- pixel positions before drawing the real object on top.
-        local originalObjPalette = sleepView.objPalette
-        local WHITE_PALETTE = {
-          { 255, 255, 255 }, { 255, 255, 255 },
-          { 255, 255, 255 }, { 255, 255, 255 },
-        }
-        local function drawSleepObjectsWithOutline(x, y, scale)
-          -- Palette substitution is how the engine renders the actual
-          -- 2bpp battle sheet; no bitmap or Z glyph is fabricated here.
-          sleepView.objPalette = function() return WHITE_PALETTE end
-          local outlinePx = 1 / math.max(scale, 0.001)
-          for _, d in ipairs({
-            {-outlinePx, 0}, {outlinePx, 0},
-            {0, -outlinePx}, {0, outlinePx},
-          }) do
-            Gfx.push()
-            Gfx.translate(x + d[1] * scale, y + d[2] * scale)
-            pcall(function() sleepView:drawObjects(sleepRunner, nil) end)
-            Gfx.pop()
-          end
-          sleepView.objPalette = originalObjPalette
-
-          -- The real battle palette/graphics go on last, preserving the exact
-          -- Gold animation in the center of the outline.
-          Gfx.push()
-          Gfx.translate(x, y)
-          pcall(function() sleepView:drawObjects(sleepRunner, nil) end)
-          Gfx.pop()
-        end
-
-        -- Gold's ANIM_SLP object is authored at battle OAM (64,80). The
-        -- renderer converts that to draw-space (56,64), then FLOAT_UP moves
-        -- it. We map that exact battle anchor to a point just above each
-        -- sleeper's projected head. No glyphs, font calls, or guessed frames.
-        local BATTLE_ANCHOR_X = 56
-        local BATTLE_ANCHOR_Y = 64
-        local drawn = {}
-
-        for _, npc in ipairs(sleepers) do
-          if npc and not drawn[npc] then
-            drawn[npc] = true
-            local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
-            local pz = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
-            local gh = 0
-            if VoxelScene and type(VoxelScene.groundAt) == "function" then
-              local gok, h = pcall(VoxelScene.groundAt, state.map,
-                                    npc.cellX, npc.cellY)
-              if gok and type(h) == "number" then gh = h end
-            end
-
-            local x, y, perspective
-            local groundX, groundY
-            -- Match the camera mode to Battle Art's actual world renderer.
-            -- Do not infer free-camera state from Voxel3D.camera: that field
-            -- is nil for the normal orbit and populated only by the placed
-            -- first/third-person rigs.
-            local freeCamera = (Voxel3D.camera ~= nil)
-            local okState, VoxelState = pcall(V.require, "VoxelState")
-            if type(Voxel3D.project) == "function" then
-              -- Use the exact screen-space position of Battle Art's NPC card,
-              -- rather than inventing a world-space Z offset. VoxelScene's
-              -- drawEntity places a 16x16 card at (px+8, gh, py+8), pivots it
-              -- at the feet, then applies the same pitch used by the camera.
-              -- Reproduce that transform for the card's TOP CENTER.  We keep
-              -- the projected ground-center X so the Z can never drift sideways
-              -- from the NPC it belongs to.
-              local cx, cy, cp = Voxel3D.project(px + 8, gh, pz + 8)
-              groundX, groundY = cx, cy
-              local angle = nil
-              if VoxelScene and VoxelScene.spriteLean ~= nil then
-                angle = tonumber(VoxelScene.spriteLean)
-              end
-              if not angle then
-                local okVS, VS = pcall(V.require, "VoxelState")
-                if okVS and VS then angle = tonumber(VS.angle) end
-              end
-              angle = angle or (math.pi / 2)
-
-              -- Battle Art's billboardMatrix rotates local +Y around the feet
-              -- by (angle - pi/2). The top-center vector (0,16,0) therefore
-              -- becomes (0, 16*cos(theta), 16*sin(theta)).
-              local theta = angle - math.pi / 2
-              local topWorldY = gh + 16 * math.cos(theta)
-              local topWorldZ = pz + 8 + 16 * math.sin(theta)
-              local tx, ty, tp = Voxel3D.project(px + 8, topWorldY, topWorldZ)
-              x, y, perspective = cx, ty, cp or tp
-            end
-            if x and y then
-              perspective = tonumber(perspective) or 1
-              if perspective < 0.35 then perspective = 0.35 end
-              if perspective > 3.0 then perspective = 3.0 end
-              x, y = x * sxRatio, y * syRatio
-
-              -- Size must NOT include sxRatio (1/(AA*renderScale)): it would
-              -- shrink bubbles at 2x AA. Position conversion uses sxRatio/syRatio.
-              -- 1.0.0 formula: include sxRatio so ANIM_SLP Zs match the voxel canvas.
-              local scale = (tonumber(ctx.scale) or 1) * perspective * (sxRatio or 1)
-              if freeCamera then scale = scale * 2.0 end
-              if scale < 0.35 then scale = 0.35 end
-              if scale > 8.0 then scale = 8.0 end
-              -- Determine prop style first (tent replaces, others go on top).
-              -- Accessories re-enabled (1.4.45)
-              local propStyle = 0
-              pcall(function() propStyle = resolveSleepStyle(npc) end)
-              propStyle = math.floor(tonumber(propStyle) or 0)
-              -- Tent (style 1) REPLACES the default sprite; skip it.
-              -- Bed/bag (2,3) and default (0) draw the sprite.
-              -- Always draw a floating Z so voxel sleep is visible even when ANIM_SLP fails.
-              if showZzz then
-                if goldSleepRuntimeReady and sleepRunner and sleepView then
-                  local tx = x - BATTLE_ANCHOR_X * scale
-                  local ty = y - BATTLE_ANCHOR_Y * scale
-                  Gfx.push()
-                  Gfx.scale(scale, scale)
-                  pcall(drawSleepObjectsWithOutline, tx / scale, ty / scale, scale)
-                  Gfx.pop()
-                end
-                local phase = (((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 1.2) % 2.4
-                local zx, zy = x + 4, y - 18 - phase * 6
-                local zScale = math.max(1.2, (scale or 1) * 0.9)
-                Gfx.push("all")
-                Gfx.setColor(1,1,1,0.95)
-                Gfx.print("Z", zx - 1, zy, 0, zScale, zScale)
-                Gfx.print("Z", zx + 1, zy, 0, zScale, zScale)
-                Gfx.setColor(0.15, 0.05, 0.35, 0.95)
-                Gfx.print("Z", zx, zy, 0, zScale, zScale)
-                Gfx.pop()
-              end
-
-              -- Sleep accessories in voxel (tent / bag / bed + underlay).
-              -- groundX/groundY are Voxel3D.project results in supersample space.
-              local prop = propStyle > 0 and sleepPropImage(propStyle) or nil
-              local propBase = (propStyle == 2 or propStyle == 3) and sleepPropBaseImage(propStyle) or nil
-              local propX = (groundX and (groundX * sxRatio)) or x
-              local propY = (groundY and (groundY * syRatio)) or y
-              if (prop or propBase) and propX and propY then
-                local pscale = math.max(1.8, (scale or 1) * 2.0)
-                local pang = (propStyle == 1) and 0 or (math.pi / 2)
-                Gfx.push("all")
-                Gfx.setColor(1, 1, 1, 1)
-                if propBase then
-                  local bw, bh = propBase:getDimensions()
-                  Gfx.draw(propBase, propX, propY, pang, pscale, pscale, bw / 2, bh / 2)
-                end
-                if prop then
-                  local pw, ph = prop:getDimensions()
-                  Gfx.draw(prop, propX, propY, pang, pscale, pscale, pw / 2, ph / 2)
-                end
-                Gfx.pop()
-              end
+      local function collectSleepers()
+        local out, seen = {}, {}
+        local function add(list)
+          for _, n in ipairs(list or {}) do
+            if n and n.nightlifeSleeping and not seen[n] then
+              seen[n] = true; out[#out + 1] = n
             end
           end
         end
-
-        Gfx.pop()
-        pcall(Gfx.setShader, prevShader)
-        pcall(Gfx.setCanvas, prevCanvas)
-      end
-
-      if type(Pipelines.worldPresent) ~= "function" then return end
-      -- Always re-wrap on mod reload so updated Zzz/prop code is installed.
-      -- (The flag lives on the Pipelines module across mod updates.)
-      if Pipelines._johtoLifeSleepWorldPresentWrapped and type(Pipelines._johtoLifeSleepWorldPresentBase) == "function" then
-        Pipelines.worldPresent = Pipelines._johtoLifeSleepWorldPresentBase
-        Pipelines._johtoLifeSleepWorldPresentWrapped = nil
-      end
-      local baseWorldPresent = Pipelines.worldPresent
-      Pipelines._johtoLifeSleepWorldPresentBase = baseWorldPresent
-      -- Voxel bubble overlay: draw collision bubbles in screen space
-      local function drawGoldBubbles(canvas, ctx)
-        if opt("npc_collision_bubbles") == false then return end
-        local state = ctx and ctx.state
-        if not state then return end
-        local Gfx = love.graphics
-        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-        local scale = tonumber(ctx.scale) or 1
-        -- Get camera position from ctx
-        local camX, camY = 0, 0
         pcall(function()
-          if ctx.cam then camX, camY = ctx.cam.x or 0, ctx.cam.y or 0 end
+          local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+          if ow then add(ow.npcs); add(ow.entities) end
         end)
-        local prevCanvas = Gfx.getCanvas()
-        if not pcall(Gfx.setCanvas, canvas) then return end
-        Gfx.push("all")
-        local bubbleActors, seenBubbleActors = {}, {}
-        for _, list in ipairs({state.npcs or {}, state.entities or {}}) do
-          for _, actor in ipairs(list) do
-            if actor and not seenBubbleActors[actor] then
-              seenBubbleActors[actor] = true
-              bubbleActors[#bubbleActors + 1] = actor
-            end
-          end
-        end
-        for _, npc in ipairs(bubbleActors) do
-          local untilAt = tonumber(npc and npc._kantoLifeCollisionBubbleUntil) or 0
-          if untilAt > now then
-            local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
-            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
-            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
-            -- In voxel mode, NPC world coordinates are not screen coordinates.
-            -- Project the same foot anchor the voxel renderer uses; fall back to
-            -- the 2D camera transform only if the renderer cannot project it.
-            local sx, sy
-            local projected = false
-            if Voxel3D and type(Voxel3D.project) == "function" then
-              local okP, pxs, pys = pcall(Voxel3D.project, px + 8, 0, py + 8)
-              if okP and type(pxs) == "number" and type(pys) == "number" then
-                local aa = 1
-                pcall(function()
-                  local AALib = V.require("AntiAlias")
-                  if AALib and type(AALib.factor) == "function" then aa = tonumber(AALib.factor()) or 1 end
-                end)
-                if aa < 1 then aa = 1 end
-                sx, sy, projected = pxs / aa, pys / aa, true
-              end
-            end
-            if not projected then
-              sx, sy = (px - camX) * scale, (py - camY) * scale
-            end
-            local font = Gfx.getFont()
-            local tw = 12
-            pcall(function() if font then tw = font:getWidth(text) end end)
-            local w, h = math.max(24, tw + 10), 16
-            local bx, by = sx + 8 * (projected and 1 or scale) - w/2, sy - 30 * (projected and 1 or scale)
-            Gfx.setColor(1, 1, 1, 1)
-            Gfx.rectangle("fill", bx, by, w, h, 3, 3)
-            Gfx.setColor(0.1, 0.1, 0.1, 1)
-            Gfx.rectangle("line", bx, by, w, h, 3, 3)
-            if font then
-              Gfx.print(text, bx + (w - tw)/2, by + 2)
-            end
-          end
-        end
-        Gfx.pop()
-        pcall(Gfx.setCanvas, prevCanvas)
-      end
-      Pipelines.worldPresent = function(canvas, ctx)
-        local out = baseWorldPresent(canvas, ctx)
-        local id = nil
-        if type(Pipelines.worldPipeline) == "function" then
-          local ok, v = pcall(Pipelines.worldPipeline)
-          if ok then id = v end
-        end
-        -- Battle Art Gen2, Potato Voxel, and any voxel-like pipeline.
-        local isVoxel = (id == "voxel")
-          or (type(id) == "string" and (
-               id:lower():find("voxel", 1, true)
-            or id:lower():find("potato", 1, true)
-            or id:lower():find("battle", 1, true)
-          ) ~= nil)
-          or (ctx and (ctx.voxel == true or ctx.pipeline == "voxel"))
-          or isVoxelPresentation()
-        if out and (isVoxel or (Voxel3D and type(Voxel3D.project) == "function")) then
-          pcall(function() drawGoldSleep(out, ctx) end)
-          pcall(function() drawGoldBubbles(out, ctx) end)
-        end
         return out
       end
-      Pipelines._johtoLifeSleepWorldPresentWrapped = true
-      mod.log:info("Johto Life: voxel sleep overlay uses 1.0.0 ANIM_SLP + accessory props")
+
+      -- NPC Bubbles 2.3.12 engine-faithful projection:
+      --   project feet (px+8, 0, py+16), divide by sceneW/canvasW (AA + render-scale),
+      --   place at (sx - 4*s, sy - 30*s) matching OverworldController emote anchors.
+      local function sceneProjDiv(canvas)
+        local projDiv = 1
+        if not (canvas and Voxel3D and type(Voxel3D.size) == "function") then return projDiv end
+        local okC, cw = pcall(canvas.getWidth, canvas)
+        if not (okC and tonumber(cw) and cw > 0) then return projDiv end
+        local okS, sceneW = pcall(Voxel3D.size)
+        if okS and tonumber(sceneW) and sceneW > 0 then
+          projDiv = sceneW / cw
+        end
+        if not (projDiv > 0) then projDiv = 1 end
+        return projDiv
+      end
+
+      local function projectNpc(npc, canvas)
+        local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
+        local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
+        if not (Voxel3D and type(Voxel3D.project) == "function") then
+          return nil, nil, false, 1
+        end
+        -- Ground / feet point — same as engine emote and NPC Bubbles.
+        local ok, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 16)
+        if not (ok and type(sx) == "number" and type(sy) == "number") then
+          return nil, nil, false, 1
+        end
+        local projDiv = sceneProjDiv(canvas)
+        return sx / projDiv, sy / projDiv, true, projDiv
+      end
+
+      local function canvasScale(canvas, ctx)
+        if not canvas then return 1 end
+        local ok, w = pcall(canvas.getWidth, canvas)
+        local vw = ctx and tonumber(ctx.vw)
+        if not (vw and vw > 0) then vw = 160 end
+        if ok and tonumber(w) and w > 0 then
+          local s = w / vw
+          if s > 0 then return math.max(1.5, s) end
+        end
+        return math.max(1.5, tonumber(ctx and ctx.scale) or 1)
+      end
+
+      local function drawFloatingZ(Gfx, sx, sy, scale)
+        local phase = (((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 1.2) % 2.4
+        local zx, zy = sx + 2, sy - 22 - phase * 6
+        local zScale = math.max(0.9, (scale or 1) * 0.95)
+        Gfx.push("all")
+        Gfx.setColor(1, 1, 1, 0.95)
+        Gfx.print("Z", zx - 1, zy, 0, zScale, zScale)
+        Gfx.print("Z", zx + 1, zy, 0, zScale, zScale)
+        Gfx.setColor(0.15, 0.05, 0.35, 0.95)
+        Gfx.print("Z", zx, zy, 0, zScale, zScale)
+        Gfx.pop()
+      end
+
+      local function drawPropAt(Gfx, npc, sx, sy, scale)
+        local style = 0
+        pcall(function() style = resolveSleepStyle(npc) end)
+        style = math.floor(tonumber(style) or 0)
+        if style <= 0 then return end
+        local prop = sleepPropImage(style)
+        local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
+        if not prop and not propBase then return end
+        -- Props are 20x24; NPC cells are 16x16. Match NPC footprint on the
+        -- projected canvas (no 1.6/1.8 inflation that made tents house-sized).
+        local pscale = math.max(0.75, (tonumber(scale) or 1) * (16 / 20))
+        local pang = (style == 1) and 0 or (npc.johtoLifeSleepAngle or (math.pi / 2))
+        Gfx.push("all")
+        Gfx.setColor(1, 1, 1, 1)
+        -- 3-layer composite on the post-world canvas:
+        --   1) underlay  2) NPC sprite  3) overlay (+ Zzz outside)
+        if propBase then
+          local bw, bh = propBase:getDimensions()
+          Gfx.draw(propBase, sx, sy, pang, pscale, pscale, bw / 2, bh / 2)
+        end
+        -- Redraw the sleeper on top of the underlay so they sit "in" the bed/bag.
+        pcall(function()
+          local spr = npc.sprite
+          if not spr then return end
+          local img = spr.image or (spr.sheet and spr.sheet.image)
+          local quad = spr.quad
+          if type(spr.resolveImage) == "function" then
+            local ok, r = pcall(spr.resolveImage, spr)
+            if ok and r then img = r end
+          end
+          if not img then return end
+          local iw, ih = 16, 16
+          pcall(function()
+            if quad and quad.getViewport then
+              local qx, qy, qw, qh = quad:getViewport()
+              iw, ih = qw or 16, qh or 16
+            elseif img.getDimensions then
+              iw, ih = img:getDimensions()
+            end
+          end)
+          local nscale = pscale * (20 / 16) * (16 / math.max(iw, ih))
+          nscale = math.max(0.6, (tonumber(scale) or 1))
+          if quad then
+            Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+          else
+            Gfx.draw(img, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+          end
+        end)
+        if prop then
+          local pw, ph = prop:getDimensions()
+          Gfx.draw(prop, sx, sy, pang, pscale, pscale, pw / 2, ph / 2)
+        end
+        Gfx.pop()
+      end
+
+      local function drawVoxelOverlays(canvas, ctx)
+        local Gfx = love.graphics
+        local prev = Gfx.getCanvas()
+        if canvas then
+          if not pcall(Gfx.setCanvas, canvas) then return end
+        end
+        Gfx.push("all")
+        local sleepers = collectSleepers()
+        -- Also pull from ctx.state if present (some pipelines only expose it there).
+        if ctx and ctx.state then
+          local seen = {}
+          for _, n in ipairs(sleepers) do seen[n] = true end
+          for _, list in ipairs({ctx.state.npcs or {}, ctx.state.entities or {}}) do
+            for _, n in ipairs(list) do
+              if n and n.nightlifeSleeping and not seen[n] then
+                sleepers[#sleepers + 1] = n; seen[n] = true
+              end
+            end
+          end
+        end
+        local showZzz = opt("sleep_bubbles") ~= false
+        -- Match NPC Bubbles: canvas pixels per world pixel.
+        local scale = 1
+        pcall(function()
+          local cw = canvas and canvas.getWidth and canvas:getWidth()
+          local vw = ctx and tonumber(ctx.vw)
+          if not (vw and vw > 0) then vw = 160 end
+          if tonumber(cw) and cw > 0 then scale = cw / vw end
+          if scale < 1 then scale = tonumber(ctx and ctx.scale) or 1 end
+        end)
+        for _, npc in ipairs(sleepers) do
+          local sx, sy, projected = projectNpc(npc, canvas)
+          if not projected then
+            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
+            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
+            local camX, camY = 0, 0
+            if ctx and ctx.cam then camX, camY = ctx.cam.x or 0, ctx.cam.y or 0 end
+            sx = (px - camX) * scale + 8 * scale
+            sy = (py - camY) * scale + 8 * scale
+          end
+          if sx and sy then
+            drawPropAt(Gfx, npc, sx, sy, scale)
+            if showZzz then drawFloatingZ(Gfx, sx, sy, scale) end
+          end
+        end
+        -- Speech / collision bubbles in voxel (NPC Bubbles 2.3.12 math).
+        if opt("npc_collision_bubbles") ~= false then
+          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+          local actors, seenA = {}, {}
+          pcall(function()
+            local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+            for _, list in ipairs({(ow and ow.npcs) or {}, (ow and ow.entities) or {}}) do
+              for _, a in ipairs(list) do
+                if a and not seenA[a] then seenA[a] = true; actors[#actors + 1] = a end
+              end
+            end
+          end)
+          if ctx and ctx.state then
+            for _, list in ipairs({ctx.state.npcs or {}, ctx.state.entities or {}}) do
+              for _, a in ipairs(list) do
+                if a and not seenA[a] then seenA[a] = true; actors[#actors + 1] = a end
+              end
+            end
+          end
+          local bubScale = canvasScale(canvas, ctx)
+          for _, npc in ipairs(actors) do
+            local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+            if untilAt > now then
+              local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+              local sx, sy, projected = projectNpc(npc, canvas)
+              if projected and sx and sy then
+                -- Emote-space draw scaled by s (NPC Bubbles size).
+                local s = math.max(1.5, tonumber(bubScale) or 1)
+                local font = Gfx.getFont()
+                local tw, th = 12, 10
+                pcall(function()
+                  if font then tw = font:getWidth(text); th = font:getHeight() end
+                end)
+                Gfx.push("all")
+                Gfx.translate(sx, sy)
+                Gfx.scale(s, s)
+                local bw = math.max(18, tw + 10)
+                local bh = math.max(14, th + 6)
+                local bx, by = -bw / 2, -30 - bh
+                Gfx.setColor(1, 1, 1, 1)
+                Gfx.rectangle("fill", bx, by, bw, bh, 2, 2)
+                Gfx.setColor(0.1, 0.1, 0.1, 1)
+                Gfx.rectangle("line", bx, by, bw, bh, 2, 2)
+                Gfx.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
+                if font then Gfx.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
+                Gfx.pop()
+              end
+            end
+          end
+        end
+        Gfx.pop()
+        if canvas then pcall(Gfx.setCanvas, prev) end
+      end
+
+      -- Path A: Pipelines.worldPresent
+      if Pipelines and type(Pipelines.worldPresent) == "function" then
+        if Pipelines._johtoLifeSleepWorldPresentWrapped
+           and type(Pipelines._johtoLifeSleepWorldPresentBase) == "function" then
+          Pipelines.worldPresent = Pipelines._johtoLifeSleepWorldPresentBase
+          Pipelines._johtoLifeSleepWorldPresentWrapped = nil
+        end
+        local baseWorldPresent = Pipelines.worldPresent
+        Pipelines._johtoLifeSleepWorldPresentBase = baseWorldPresent
+        Pipelines.worldPresent = function(canvas, ctx)
+          local out = baseWorldPresent(canvas, ctx)
+          pcall(drawVoxelOverlays, out or canvas, ctx)
+          return out
+        end
+        Pipelines._johtoLifeSleepWorldPresentWrapped = true
+        mod.log:info("Johto Life: voxel overlay path A (Pipelines.worldPresent) installed")
+      end
+
+      -- Path B: Battle Art CharacterRenderers / SpriteBillboards (true 3D)
+      pcall(function()
+        local ba = _G._johtoLifeBattleArtMod
+        local api = ba and ba.exports and ba.exports.characterRenderers
+        if not (api and type(api.register) == "function" and V) then return end
+        local okM, Mat4 = pcall(V.require, "Mat4")
+        local okB, SpriteBillboards = pcall(V.require, "SpriteBillboards")
+        if not (okM and Mat4 and okB and SpriteBillboards
+                and type(SpriteBillboards.mesh) == "function") then
+          return
+        end
+        if api._johtoLifeSleepRegistered then return end
+        api.register("johto_life_sleep_overlay", function(drawCtx)
+          -- Claim nothing about the body (let Battle Art draw the NPC).
+          -- Only emit accessory/Z billboards above sleeping ambients.
+          local sleepers = collectSleepers()
+          for _, npc in ipairs(sleepers) do
+            local px = (tonumber(npc.px) or ((npc.cellX or 0) * 16)) / 16
+            local py = (tonumber(npc.py) or ((npc.cellY or 0) * 16)) / 16
+            -- World-space billboard for Z
+            pcall(function()
+              if opt("sleep_bubbles") == false then return end
+              -- Use a simple text-free marker mesh if available; otherwise skip
+              -- (Path A/C still draw the floating Z on the 2D canvas).
+            end)
+          end
+          return false -- do not claim the entity
+        end)
+        api._johtoLifeSleepRegistered = true
+        mod.log:info("Johto Life: voxel overlay path B (CharacterRenderers) installed")
+      end)
+
+      -- Path C: love.draw late pass. Only draws when Voxel3D.project works
+      -- so we never scatter Zs at raw world coordinates over the HUD.
+      if not _G._johtoLifeLoveDrawWrapped then
+        local prevDraw = love.draw
+        love.draw = function(...)
+          if type(prevDraw) == "function" then prevDraw(...) end
+          if not isVoxelPresentation() then return end
+          if not (Voxel3D and type(Voxel3D.project) == "function") then return end
+          pcall(function()
+            local Gfx = love.graphics
+            Gfx.push("all")
+            local sleepers = collectSleepers()
+            local showZzz = opt("sleep_bubbles") ~= false
+            for _, npc in ipairs(sleepers) do
+              local sx, sy, ok = projectNpc(npc)
+              if ok and sx and sy then
+                drawPropAt(Gfx, npc, sx, sy, 1)
+                if showZzz then drawFloatingZ(Gfx, sx, sy, 1) end
+              end
+            end
+            if opt("npc_collision_bubbles") ~= false then
+              local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+              local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+              local bubScale = 1
+              pcall(function()
+                local w = love.graphics.getWidth()
+                if w and w > 0 then bubScale = math.max(1.5, w / 160) end
+              end)
+              for _, npc in ipairs((ow and ow.npcs) or {}) do
+                local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+                if untilAt > now then
+                  local sx, sy, ok = projectNpc(npc, nil)
+                  if ok and sx and sy then
+                    local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+                    local font = Gfx.getFont()
+                    local tw, th = 12, 10
+                    pcall(function()
+                      if font then tw = font:getWidth(text); th = font:getHeight() end
+                    end)
+                    local s = bubScale
+                    Gfx.push("all")
+                    Gfx.translate(sx, sy)
+                    Gfx.scale(s, s)
+                    local bw = math.max(18, tw + 10)
+                    local bh = math.max(14, th + 6)
+                    local bx, by = -bw / 2, -30 - bh
+                    Gfx.setColor(1,1,1,1); Gfx.rectangle("fill", bx, by, bw, bh, 2, 2)
+                    Gfx.setColor(0.1,0.1,0.1,1); Gfx.rectangle("line", bx, by, bw, bh, 2, 2)
+                    Gfx.polygon("fill", bx+bw/2-2, by+bh, bx+bw/2+2, by+bh, bx+bw/2, by+bh+3)
+                    if font then Gfx.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
+                    Gfx.pop()
+                  end
+                end
+              end
+            end
+            Gfx.pop()
+          end)
+        end
+        _G._johtoLifeLoveDrawWrapped = true
+        mod.log:info("Johto Life: voxel overlay path C (love.draw) installed")
+      end
     end)
 
   mod.log:info("Johto Life 0.1.52 loaded")
