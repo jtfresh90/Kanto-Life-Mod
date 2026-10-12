@@ -443,7 +443,7 @@ return function(mod)
     end
     -- Reuse a live ambient poke's sprite (same art pipeline as spawned mon NPCs).
     pcall(function()
-      local ow = mod.world and mod.world:overworld and mod.world:overworld()
+      local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
       for _, n in ipairs((ow and ow.npcs) or {}) do
         if n and (n.kantoLifePokeAmbient or (n.def and n.def.kantoLifePokeAmbient))
            and n.sprite and type(n.sprite.draw) == "function" then
@@ -1114,7 +1114,7 @@ return function(mod)
   local lastPokeRandomMode = nil
 
   local function syncAmbientToTarget(mapId, map)
-    local ow = mod.world:overworld()
+    local ow = (mod.world and type(mod.world.overworld) == "function") and mod.world:overworld() or nil
     if not ow then return end
     if not map then map = ow.map end
     if not map or (map.id and map.id ~= mapId) then
@@ -1477,7 +1477,7 @@ return function(mod)
         local text = table.concat(debugLogBuffer, "\n")
         if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
         -- Show in text box (user can screenshot)
-        local ow = mod.world and mod.world:overworld()
+        local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
         if ow then
           -- Use pushText to display (truncate to fit)
           local lines = {}
@@ -1503,7 +1503,7 @@ return function(mod)
       end)
       return
     end
-    local ow = mod.world and mod.world:overworld()
+    local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
     if not ow or not ow.map then return end
     local mapId = ow.map.id
     if not (isTown(mapId) or isRoute(mapId) or isIndoor(mapId)) then return end
@@ -1546,7 +1546,7 @@ return function(mod)
   local OPTIONS_SCREEN = "KantoLifeOptions"
 
   local function refreshAmbientNow()
-    local ow = mod.world and mod.world:overworld()
+    local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
     if not ow or not ow.map then return end
     local mapId = ow.map.id
     if isTown(mapId) or isRoute(mapId) or isIndoor(mapId) then
@@ -1563,7 +1563,7 @@ return function(mod)
     if ow and ow.npcs then return ow end
     pcall(function()
       if mod.world and type(mod.world.overworld) == "function" then
-        ow = mod.world:overworld()
+        ow = (mod.world and type(mod.world.overworld) == "function") and mod.world:overworld() or nil
       end
     end)
     if ow and ow.npcs then return ow end
@@ -1631,7 +1631,7 @@ return function(mod)
 
   local function applySleepOff()
     if opt("sleeping_npcs") then return end
-    local ow = mod.world and mod.world:overworld()
+    local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
     if not ow then return end
     for _, npc in ipairs(ow.npcs or {}) do
       if npc.nightlifeSleeping then wakeNpc(npc) end
@@ -1768,7 +1768,7 @@ return function(mod)
             if v then
               local cur = math.floor(tonumber(opt("extra_npc_count")) or 0)
               if cur <= 0 then
-                local ow = mod.world and mod.world:overworld()
+                local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
                 local mapId = ow and ow.map and ow.map.id
                 local d = mapId and defaultCount(mapId) or 0
                 if d > 0 then setOpt("extra_npc_count", d) end
@@ -1882,7 +1882,7 @@ return function(mod)
           right = opt("day_sleepers") and "ON" or "OFF",
           apply = function(v)
             setOpt("day_sleepers", v and true or false)
-            local ow = mod.world and mod.world.overworld and mod.world:overworld()
+            local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
             if ow then
               for _, npc in ipairs(ow.npcs or {}) do
                 npc.kantoLifeSleepSchedule = nil
@@ -2380,7 +2380,7 @@ local nm = storyDisplayName(talker)
     local d = type(npc.def) == "table" and npc.def or {}
     if d.player == true or d.isPlayer == true then return true end
     local g = G and G() or game
-    local ow = (g and g.overworld) or (mod.world and mod.world.overworld and mod.world:overworld())
+    local ow = (g and g.overworld) or (mod.world and type(mod.world.overworld) == "function" and mod.world:overworld())
     if ow and ow.player == npc then return true end
     if g and g.player == npc then return true end
     return false
@@ -2490,7 +2490,7 @@ local nm = storyDisplayName(talker)
         elseif payload.key == "npc_agenda" and type(kantoRoutines.setAgenda) == "function" then
           kantoRoutines.setAgenda(payload.value)
         end
-        local ow = mod.world and mod.world:overworld()
+        local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
         if ow and type(kantoRoutines.update) == "function" then
           kantoRoutines.update(ow, 0, true)
         end
@@ -3902,12 +3902,25 @@ function putToSleep(npc)
       local battleLib = nil
       local function battleVoxelLib()
         if battleLib ~= nil then
-          return battleLib
+          return battleLib ~= false and battleLib or nil
         end
         if type(mod.find) == "function" then
-          for _, id in ipairs({ "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL" }) do
+          local ids = {
+            "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
+            "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE",
+            "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
+          }
+          -- Prefer whoever owns the "voxel" pipeline (NPC Bubbles approach).
+          pcall(function()
+            local Pipelines = require("src.render.Pipelines")
+            local owners = Pipelines and Pipelines.owners
+            if type(owners) == "table" and type(owners.voxel) == "string" and owners.voxel ~= "" then
+              table.insert(ids, 1, owners.voxel)
+            end
+          end)
+          for _, id in ipairs(ids) do
             local ok, m = pcall(mod.find, id)
-            local lib = ok and m and m.exports and m.exports.lib or nil
+            local lib = ok and m and (m.lib or (m.exports and m.exports.lib)) or nil
             if lib and type(lib.require) == "function" then
               local okV, V3 = pcall(lib.require, "Voxel3D")
               if okV and V3 and type(V3.project) == "function" then
@@ -3943,129 +3956,143 @@ function putToSleep(npc)
         if pipelineId ~= "voxel" then
           return out
         end
+        -- NPC Bubbles 2.3.12 mechanics (size + indoor):
+        --   scale = canvasW / ctx.vw  (emote is 16px drawn at scale s → 16*s px)
+        --   projDiv = sceneW / canvasW  (AA + Potato render-scale)
+        --   project(px+8, groundH, py+16) feet; indoor uses groundHeight when set
+        --   draw at (sx - 4*s, sy - 30*s) with the whole glyph scaled by s
         pcall(function()
-          if opt("npc_collision_bubbles") == false then
-            return
-          end
+          if opt("npc_collision_bubbles") == false then return end
           local lib = battleVoxelLib()
-          if not lib then
-            return
-          end
+          if not lib then return end
           local okV, Voxel3D = pcall(lib.require, "Voxel3D")
-          if not (okV and Voxel3D and type(Voxel3D.project) == "function") then
-            return
-          end
-          local okS, VS = pcall(lib.require, "VoxelScene")
-          local VoxelScene = (okS and VS) or nil
+          if not (okV and Voxel3D and type(Voxel3D.project) == "function") then return end
           local state = ctx and ctx.state
-          if state and state.firstPerson and state.firstPerson.active then
-            return
-          end
+          if state and state.firstPerson and state.firstPerson.active then return end
           local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
           local actors, seen = {}, {}
           local function addActor(n)
-            if n and not seen[n] then
-              seen[n] = true
-              actors[#actors + 1] = n
-            end
+            if n and not seen[n] then seen[n] = true; actors[#actors + 1] = n end
           end
           local ow = liveWorld()
           if ow then
-            for _, n in ipairs(ow.npcs or {}) do
-              addActor(n)
-            end
-            for _, e in ipairs(ow.entities or {}) do
-              addActor(e)
-            end
+            for _, n in ipairs(ow.npcs or {}) do addActor(n) end
+            for _, e in ipairs(ow.entities or {}) do addActor(e) end
           end
           if state then
-            for _, n in ipairs(state.npcs or {}) do
-              addActor(n)
-            end
-            for _, e in ipairs(state.entities or {}) do
-              addActor(e)
-            end
+            for _, n in ipairs(state.npcs or {}) do addActor(n) end
+            for _, e in ipairs(state.entities or {}) do addActor(e) end
           end
-          if #actors == 0 then
-            return
-          end
-          local sxRatio, syRatio = 1, 1
-          if type(Voxel3D.size) == "function" then
-            local a, b = Voxel3D.size()
-            if tonumber(a) and a > 0 and tonumber(b) and b > 0 then
-              local cw = (out.getWidth and out:getWidth()) or a
-              local ch = (out.getHeight and out:getHeight()) or b
-              sxRatio, syRatio = cw / a, ch / b
-            end
-          end
+          if #actors == 0 then return end
+
           local G = love.graphics
           local prev = G.getCanvas()
-          if not pcall(G.setCanvas, out) then
-            return
+          if not pcall(G.setCanvas, out) then return end
+          pcall(function() if G.setShader then G.setShader() end end)
+          pcall(function() if G.setDepthMode then G.setDepthMode() end end)
+
+          local okW, cw = pcall(out.getWidth, out)
+          local okH, ch = pcall(out.getHeight, out)
+          if not (okW and tonumber(cw) and cw > 0) then
+            pcall(G.setCanvas, prev); return
           end
+          ch = (okH and tonumber(ch)) or cw
+          -- NPC Bubbles: scale = canvasW / ctx.vw. Fall back to Gen1 native 160
+          -- so mobile never ends up with s≈1 (pin-sized bubbles).
+          local vw = tonumber(ctx and ctx.vw)
+          if not (vw and vw > 0) then
+            vw = tonumber(ctx and ctx.worldWidth) or 160
+          end
+          local scale = cw / vw
+          if not (scale > 0) then scale = 1 end
+          -- Floor so bubbles never go sub-pixel on tiny canvases
+          if scale < 1.5 then scale = math.max(scale, cw / 160) end
+
+          local projDiv = 1
+          if type(Voxel3D.size) == "function" then
+            local okS, sceneW = pcall(Voxel3D.size)
+            if okS and tonumber(sceneW) and sceneW > 0 then
+              projDiv = sceneW / cw
+            end
+          end
+          if not (projDiv > 0) then projDiv = 1 end
+
+          -- Free-cam magnification (NPC Bubbles pixelsPerWorldPixel)
+          local freeCam = false
+          pcall(function()
+            local fp = lib.require("FirstPerson")
+            if fp and type(fp.engaged) == "function" then
+              local okE, on = pcall(fp.engaged)
+              freeCam = okE and on == true
+            end
+          end)
+          local function pixelsPerWorld(npc, flat)
+            if not freeCam then return flat end
+            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
+            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
+            local gh = tonumber(npc.groundHeight) or 0
+            local ok1, _, fy = pcall(Voxel3D.project, px + 8, gh, py + 16)
+            local ok2, _, hy = pcall(Voxel3D.project, px + 8, gh + 16, py + 16)
+            if not (ok1 and ok2 and fy and hy) then return flat end
+            local pps = math.abs(fy - hy) / 16 / projDiv
+            if not (pps > 0) then return flat end
+            return math.max(flat * 0.25, math.min(flat * 16, pps))
+          end
+
           for _, npc in ipairs(actors) do
             local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
             if untilAt > now and npc.visible ~= false and not npc.hidden then
-              local px = tonumber(npc.px or npc.x or ((npc.cellX or 0) * 16)) or 0
-              local py = tonumber(npc.py or npc.y or ((npc.cellY or 0) * 16)) or 0
-              local gh = 0
-              local ghOk = false
-              if VoxelScene and type(VoxelScene.groundAt) == "function" and npc.cellX and npc.cellY then
-                local okH, h = pcall(VoxelScene.groundAt, state and state.map, npc.cellX, npc.cellY)
-                if okH and type(h) == "number" and h ~= 0 then
-                  gh = h
-                  ghOk = true
-                end
+              local px = tonumber(npc.px or npc.x)
+              local py = tonumber(npc.py or npc.y)
+              if not px then px = (tonumber(npc.cellX) or 0) * 16 end
+              if not py then py = (tonumber(npc.cellY) or 0) * 16 end
+              -- Indoor voxel floors often sit above y=0; match CharacterRenderers.
+              local gh = tonumber(npc.groundHeight)
+                or tonumber(npc._groundHeight)
+                or tonumber(npc.elevation)
+                or 0
+              local okP, sx, sy = pcall(Voxel3D.project, px + 8, gh, py + 16)
+              -- If groundHeight projection fails or lands off-canvas, retry at 0
+              -- (outdoor / flat maps).
+              if not (okP and type(sx) == "number" and type(sy) == "number") and gh ~= 0 then
+                okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 16)
               end
-              -- FIX: Always draw bubbles. gh=0 is correct for flat maps
-              -- (outdoors and indoors). Skipping broke all flat-map bubbles.
-              -- (Research: groundAt==0 does NOT mean indoors.)
-              if true then
-              -- Measure true pixel scale by projecting two points 12 world
-              -- units apart vertically. The raw perspective scale `s` from
-              -- project() is relative, not pixels — using it directly made
-              -- bubbles pin-sized. Bubble base height is 12px at scale=1;
-              -- scale so 12px = 12 world units (matches NPC scale).
-              -- RESEARCH FIX: Project BODY CENTER (gh+2) for accurate X.
-              -- Match engine/Battle Art: project FOOT (ground level),
-              -- ENGINE-FAITHFUL VOXEL BUBBLE PROJECTION (research-backed)
-              -- Voxel3D.project returns 3D-pass canvas px (supersampled by
-              -- AntiAlias.factor()); `out` is the AntiAlias-resolved canvas
-              -- (display px). Convert, then draw under engine-equivalent scale.
-              local aa = 1
-              pcall(function()
-                local AALib = lib.require("AntiAlias")
-                if AALib and type(AALib.factor) == "function" then
-                  aa = tonumber(AALib.factor()) or 1
-                end
-              end)
-              if not (aa >= 1) then aa = 1 end
-              local wscale = tonumber(ctx and ctx.scale) or 1
-              if not (wscale > 0) then wscale = 1 end
-              local okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 8)
               if okP and type(sx) == "number" and type(sy) == "number" then
-                -- Foot anchor in `out` canvas px (project is supersampled by aa).
-                local ox, oy = sx / aa, sy / aa
-                -- Skip off-screen projections rather than clamping (clamping
-                -- pinned indoor bubbles many cells below the sprites).
-                local vwo, vho = nil, nil
-                pcall(function() vwo, vho = out:getDimensions() end)
-                vwo, vho = tonumber(vwo) or 0, tonumber(vho) or 0
-                local offscreen = vwo > 16 and vho > 16 and
-                  (ox < -40 or ox > vwo + 40 or oy < -40 or oy > vho + 40)
-                if not offscreen then
-                  -- Project is near the foot; bubbles must sit well above the head
-                  -- in voxel (any camera angle). Prior 22px left them far below.
-                  local headOff = 96
-                  G.push()
-                  G.scale(wscale, wscale)
-                  drawCollisionBubble(npc, ox / wscale, oy / wscale - headOff, 1)
+                sx, sy = sx / projDiv, sy / projDiv
+                -- Reject projections that land in the letterbox / far outside
+                -- the 3D scene (the indoor "scatter under the mart" bug).
+                if sx > -40 and sy > -40 and sx < cw + 40 and sy < ch + 40 then
+                  local s = pixelsPerWorld(npc, scale)
+                  local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+                  local font = G.getFont()
+                  local tw, th = 12, 10
+                  pcall(function()
+                    if font then tw = font:getWidth(text); th = font:getHeight() end
+                  end)
+                  -- Draw in emote space (16px) then scale by s — same as NPC
+                  -- Bubbles' g.draw(image, quad, x, y, 0, s, s) on a 16x16 crop.
+                  G.push("all")
+                  G.translate(sx, sy)
+                  G.scale(s, s)
+                  -- Emote top-left relative to projected feet: (-4, -30)
+                  local bw = math.max(18, tw + 10)
+                  local bh = math.max(14, th + 6)
+                  local bx = -4 + 8 - bw / 2   -- center on the 16px emote column
+                  local by = -30 - bh
+                  G.setColor(1, 1, 1, 1)
+                  G.rectangle("fill", bx, by, bw, bh, 2, 2)
+                  G.setColor(0.1, 0.1, 0.1, 1)
+                  G.rectangle("line", bx, by, bw, bh, 2, 2)
+                  G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
+                  if font then
+                    G.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2)
+                  end
                   G.pop()
                 end
               end
-              end  -- end if ghOk else
             end
           end
+          G.setColor(1, 1, 1, 1)
           pcall(G.setCanvas, prev)
         end)
         return out
@@ -6271,7 +6298,7 @@ local function nightlifeTick(world, dt)
         -- (same as Zzz). This was a key difference from the failed approach.
         -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
         -- then rotate, then translate.
-        local bubbleScale = 1.5
+        local bubbleScale = 2.0  -- match NPC Bubbles outdoor size
         local model = Mat4.mul(
           Mat4.translate(px + 8, gh + 19, py + 8),
           Mat4.mul(
@@ -6413,7 +6440,7 @@ local function nightlifeTick(world, dt)
             local shortText = table.concat(lines, "\n")
             -- Show via pushText if available (modal, press A to dismiss)
             if type(pushText) == "function" then
-              local ow = mod.world and mod.world:overworld()
+              local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
               if ow then
                 local g = nil
                 pcall(function() g = G() end)
