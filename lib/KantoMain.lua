@@ -3890,214 +3890,207 @@ function putToSleep(npc)
       NPCMod._kantoLifeSleepWrapped = true
     end
   end
-  -- Voxel/Battle Art mode: NPCs render via NPC:pose(), never NPC:draw(), so
-  -- the 2D draw wrapper above never runs there. Mirror the FireRed
-  -- FieldView-level hook at the world-view stage instead: after the voxel
-  -- world is presented, draw active collision bubbles in screen space using
-  -- Battle Art projection (same Pipelines.worldPresent pattern as the
-  -- FireRed voxel sleep props and the Johto voxel sleep overlay).
+  -- Voxel speech bubbles: NPC Bubbles 2.3.12 approach.
+  -- CRITICAL: do NOT wrap Pipelines.worldPresent — that draws into the wrong
+  -- canvas fold and makes bubbles sit in the letterbox and slide with the
+  -- camera. Register a presentation pipeline instead (same seam the engine
+  -- "!" uses), and keep CharacterRenderers for true world-space billboards.
   do
-    local Pipelines = safeRequire("src.render.Pipelines")
-    if Pipelines and type(Pipelines.worldPresent) == "function" and not Pipelines._kantoLifeCollisionBubbleWrapped then
-      local battleLib = nil
-      local function battleVoxelLib()
-        if battleLib ~= nil then
-          return battleLib ~= false and battleLib or nil
+    local PIPELINE_ID = "kanto_life_bubbles_overlay"
+    local warnedScene = false
+    local voxelLib, voxel3d, voxelTried = nil, nil, false
+
+    local function voxelOwner()
+      local owner = "DRAMATIC_SHAPE"
+      pcall(function()
+        local data = game and game.data
+        local defs = data and data.render_pipelines
+        local owners = defs and defs._owners
+        if type(owners) == "table" and type(owners.voxel) == "string" and owners.voxel ~= "" then
+          owner = owners.voxel
         end
-        if type(mod.find) == "function" then
-          local ids = {
-            "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
-            "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE",
-            "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
-          }
-          -- Prefer whoever owns the "voxel" pipeline (NPC Bubbles approach).
-          pcall(function()
-            local Pipelines = require("src.render.Pipelines")
-            local owners = Pipelines and Pipelines.owners
-            if type(owners) == "table" and type(owners.voxel) == "string" and owners.voxel ~= "" then
-              table.insert(ids, 1, owners.voxel)
-            end
-          end)
-          for _, id in ipairs(ids) do
-            local ok, m = pcall(mod.find, id)
-            local lib = ok and m and (m.lib or (m.exports and m.exports.lib)) or nil
-            if lib and type(lib.require) == "function" then
-              local okV, V3 = pcall(lib.require, "Voxel3D")
-              if okV and V3 and type(V3.project) == "function" then
-                battleLib = lib
-                return battleLib
-              end
+      end)
+      return owner
+    end
+
+    local function voxel3D()
+      if voxelTried then return voxel3d end
+      voxelTried = true
+      if type(mod.find) ~= "function" then return nil end
+      local ids = {
+        voxelOwner(),
+        "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "DRAMATIC_SHAPE",
+        "POTATO_VOXEL", "PotatoVoxel", "potato_voxel", "battle_art_voxel",
+      }
+      for _, id in ipairs(ids) do
+        if id then
+          local ok, handle = pcall(mod.find, id)
+          local lib = ok and handle and (handle.lib or (handle.exports and handle.exports.lib))
+          if lib and type(lib.require) == "function" then
+            local okV, v = pcall(lib.require, "Voxel3D")
+            if okV and type(v) == "table" and type(v.project) == "function" then
+              voxelLib, voxel3d = lib, v
+              if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: voxel arena for bubbles: " .. tostring(id)) end
+              return voxel3d
             end
           end
         end
-        battleLib = false
-        return nil
       end
-      local baseWorldPresent = Pipelines.worldPresent
-      Pipelines.worldPresent = function(canvas, ctx)
-        local out = baseWorldPresent(canvas, ctx)
-        if not out then
-          return out
+      return nil
+    end
+
+    local function drawBubblesOnCanvas(canvas, ctx)
+      local v = voxel3D()
+      if not (v and canvas and ctx and tonumber(ctx.vw) and ctx.vw > 0) then
+        return canvas
+      end
+      if opt("npc_collision_bubbles") == false then return canvas end
+      local state = ctx.state
+      if state and state.firstPerson and state.firstPerson.active then return canvas end
+
+      local okW, cw = pcall(canvas.getWidth, canvas)
+      if not (okW and tonumber(cw) and cw > 0) then return canvas end
+      local okH, ch = pcall(canvas.getHeight, canvas)
+      ch = (okH and tonumber(ch)) or cw
+
+      -- canvas px per world px (NPC Bubbles)
+      local scale = cw / ctx.vw
+      if not (scale > 0) then return canvas end
+
+      local projDiv = 1
+      if type(v.size) == "function" then
+        local okS, sceneW = pcall(v.size)
+        if okS and tonumber(sceneW) and sceneW > 0 then
+          projDiv = sceneW / cw
+        elseif not warnedScene then
+          warnedScene = true
+          if mod.log then pcall(mod.log.warn, mod.log, "Kanto Life: Voxel3D.size missing; bubble AA may drift") end
         end
-        -- Voxel bubbles: engine-faithful projection (research-backed fix).
-        -- ROOT CAUSES FIXED:
-        -- 1. Voxel3D.project returns supersampled coords (x AA factor);
-        --    out is the downsampled display canvas. Divide by AA.
-        -- 2. Old clamp used window points (3x smaller on iOS), pinning bubbles.
-        --    Now clamps in out's canvas pixels.
-        -- 3. Old drew at scale=1 (tiny). Now uses ctx.scale like the engine.
-        local pipelineId = nil
-        if type(Pipelines.worldPipeline) == "function" then
-          local ok, v = pcall(Pipelines.worldPipeline)
-          if ok then
-            pipelineId = v
-          end
-        end
-        if pipelineId ~= "voxel" then
-          return out
-        end
-        -- NPC Bubbles 2.3.12 mechanics (size + indoor):
-        --   scale = canvasW / ctx.vw  (emote is 16px drawn at scale s → 16*s px)
-        --   projDiv = sceneW / canvasW  (AA + Potato render-scale)
-        --   project(px+8, groundH, py+16) feet; indoor uses groundHeight when set
-        --   draw at (sx - 4*s, sy - 30*s) with the whole glyph scaled by s
+      end
+      if not (projDiv > 0) then projDiv = 1 end
+
+      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+      local actors, seen = {}, {}
+      local function add(n)
+        if n and not seen[n] then seen[n] = true; actors[#actors + 1] = n end
+      end
+      local ow = liveWorld and liveWorld() or nil
+      if not ow then
         pcall(function()
-          if opt("npc_collision_bubbles") == false then return end
-          local lib = battleVoxelLib()
-          if not lib then return end
-          local okV, Voxel3D = pcall(lib.require, "Voxel3D")
-          if not (okV and Voxel3D and type(Voxel3D.project) == "function") then return end
-          local state = ctx and ctx.state
-          if state and state.firstPerson and state.firstPerson.active then return end
-          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-          local actors, seen = {}, {}
-          local function addActor(n)
-            if n and not seen[n] then seen[n] = true; actors[#actors + 1] = n end
-          end
-          local ow = liveWorld()
-          if ow then
-            for _, n in ipairs(ow.npcs or {}) do addActor(n) end
-            for _, e in ipairs(ow.entities or {}) do addActor(e) end
-          end
-          if state then
-            for _, n in ipairs(state.npcs or {}) do addActor(n) end
-            for _, e in ipairs(state.entities or {}) do addActor(e) end
-          end
-          if #actors == 0 then return end
-
-          local G = love.graphics
-          local prev = G.getCanvas()
-          if not pcall(G.setCanvas, out) then return end
-          pcall(function() if G.setShader then G.setShader() end end)
-          pcall(function() if G.setDepthMode then G.setDepthMode() end end)
-
-          local okW, cw = pcall(out.getWidth, out)
-          local okH, ch = pcall(out.getHeight, out)
-          if not (okW and tonumber(cw) and cw > 0) then
-            pcall(G.setCanvas, prev); return
-          end
-          ch = (okH and tonumber(ch)) or cw
-          -- NPC Bubbles: scale = canvasW / ctx.vw. Fall back to Gen1 native 160
-          -- so mobile never ends up with s≈1 (pin-sized bubbles).
-          local vw = tonumber(ctx and ctx.vw)
-          if not (vw and vw > 0) then
-            vw = tonumber(ctx and ctx.worldWidth) or 160
-          end
-          local scale = cw / vw
-          if not (scale > 0) then scale = 1 end
-          -- Floor so bubbles never go sub-pixel on tiny canvases
-          if scale < 1.5 then scale = math.max(scale, cw / 160) end
-
-          local projDiv = 1
-          if type(Voxel3D.size) == "function" then
-            local okS, sceneW = pcall(Voxel3D.size)
-            if okS and tonumber(sceneW) and sceneW > 0 then
-              projDiv = sceneW / cw
-            end
-          end
-          if not (projDiv > 0) then projDiv = 1 end
-
-          -- Free-cam magnification (NPC Bubbles pixelsPerWorldPixel)
-          local freeCam = false
-          pcall(function()
-            local fp = lib.require("FirstPerson")
-            if fp and type(fp.engaged) == "function" then
-              local okE, on = pcall(fp.engaged)
-              freeCam = okE and on == true
-            end
-          end)
-          local function pixelsPerWorld(npc, flat)
-            if not freeCam then return flat end
-            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
-            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
-            local gh = tonumber(npc.groundHeight) or 0
-            local ok1, _, fy = pcall(Voxel3D.project, px + 8, gh, py + 16)
-            local ok2, _, hy = pcall(Voxel3D.project, px + 8, gh + 16, py + 16)
-            if not (ok1 and ok2 and fy and hy) then return flat end
-            local pps = math.abs(fy - hy) / 16 / projDiv
-            if not (pps > 0) then return flat end
-            return math.max(flat * 0.25, math.min(flat * 16, pps))
-          end
-
-          for _, npc in ipairs(actors) do
-            local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-            if untilAt > now and npc.visible ~= false and not npc.hidden then
-              local px = tonumber(npc.px or npc.x)
-              local py = tonumber(npc.py or npc.y)
-              if not px then px = (tonumber(npc.cellX) or 0) * 16 end
-              if not py then py = (tonumber(npc.cellY) or 0) * 16 end
-              -- Indoor voxel floors often sit above y=0; match CharacterRenderers.
-              local gh = tonumber(npc.groundHeight)
-                or tonumber(npc._groundHeight)
-                or tonumber(npc.elevation)
-                or 0
-              local okP, sx, sy = pcall(Voxel3D.project, px + 8, gh, py + 16)
-              -- If groundHeight projection fails or lands off-canvas, retry at 0
-              -- (outdoor / flat maps).
-              if not (okP and type(sx) == "number" and type(sy) == "number") and gh ~= 0 then
-                okP, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 16)
-              end
-              if okP and type(sx) == "number" and type(sy) == "number" then
-                sx, sy = sx / projDiv, sy / projDiv
-                -- Reject projections that land in the letterbox / far outside
-                -- the 3D scene (the indoor "scatter under the mart" bug).
-                if sx > -40 and sy > -40 and sx < cw + 40 and sy < ch + 40 then
-                  local s = pixelsPerWorld(npc, scale)
-                  local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
-                  local font = G.getFont()
-                  local tw, th = 12, 10
-                  pcall(function()
-                    if font then tw = font:getWidth(text); th = font:getHeight() end
-                  end)
-                  -- Draw in emote space (16px) then scale by s — same as NPC
-                  -- Bubbles' g.draw(image, quad, x, y, 0, s, s) on a 16x16 crop.
-                  G.push("all")
-                  G.translate(sx, sy)
-                  G.scale(s, s)
-                  -- Emote top-left relative to projected feet: (-4, -30)
-                  local bw = math.max(18, tw + 10)
-                  local bh = math.max(14, th + 6)
-                  local bx = -4 + 8 - bw / 2   -- center on the 16px emote column
-                  local by = -30 - bh
-                  G.setColor(1, 1, 1, 1)
-                  G.rectangle("fill", bx, by, bw, bh, 2, 2)
-                  G.setColor(0.1, 0.1, 0.1, 1)
-                  G.rectangle("line", bx, by, bw, bh, 2, 2)
-                  G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
-                  if font then
-                    G.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2)
-                  end
-                  G.pop()
-                end
-              end
-            end
-          end
-          G.setColor(1, 1, 1, 1)
-          pcall(G.setCanvas, prev)
+          ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
         end)
-        return out
       end
-      Pipelines._kantoLifeCollisionBubbleWrapped = true
+      if ow then
+        for _, n in ipairs(ow.npcs or {}) do add(n) end
+        for _, e in ipairs(ow.entities or {}) do add(e) end
+      end
+      if state then
+        for _, n in ipairs(state.npcs or {}) do add(n) end
+        for _, e in ipairs(state.entities or {}) do add(e) end
+      end
+      if #actors == 0 then return canvas end
+
+      local G = love.graphics
+      local prev = G.getCanvas()
+      if not pcall(G.setCanvas, canvas) then return canvas end
+      pcall(function() if G.setShader then G.setShader() end end)
+      pcall(function() if G.setDepthMode then G.setDepthMode() end end)
+
+      -- Emote-sized: NPC Bubbles draws a 16x16 quad at scale s.
+      -- Keep our text bubble close to that (~18 world px), not inflated.
+      local emotePad = 1.0
+
+      for _, npc in ipairs(actors) do
+        local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
+        if untilAt > now and npc.visible ~= false and not npc.hidden then
+          local px = tonumber(npc.px or npc.x)
+          local py = tonumber(npc.py or npc.y)
+          if not px then px = (tonumber(npc.cellX) or 0) * 16 end
+          if not py then py = (tonumber(npc.cellY) or 0) * 16 end
+          local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
+          -- Ground/feet point — engine emote + NPC Bubbles
+          local okP, sx, sy = pcall(v.project, px + 8, gh, py + 16)
+          if not (okP and type(sx) == "number") and gh ~= 0 then
+            okP, sx, sy = pcall(v.project, px + 8, 0, py + 16)
+          end
+          if okP and type(sx) == "number" and type(sy) == "number" then
+            sx, sy = sx / projDiv, sy / projDiv
+            -- Must land inside the 3D scene, not the letterbox
+            if sx > 0 and sy > 0 and sx < cw and sy < ch then
+              local s = scale * emotePad
+              local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+              local font = G.getFont()
+              local tw, th = 12, 10
+              pcall(function()
+                if font then tw = font:getWidth(text); th = font:getHeight() end
+              end)
+              G.push("all")
+              G.translate(sx, sy)
+              G.scale(s, s)
+              -- Emote top-left is (-4, -30) in world px at this scale
+              local bw = math.max(16, tw + 8)
+              local bh = math.max(12, th + 4)
+              local bx, by = -bw / 2, -30 - bh
+              G.setColor(1, 1, 1, 1)
+              G.rectangle("fill", bx, by, bw, bh, 2, 2)
+              G.setColor(0.1, 0.1, 0.1, 1)
+              G.rectangle("line", bx, by, bw, bh, 2, 2)
+              G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
+              if font then G.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
+              G.pop()
+            end
+          end
+        end
+      end
+      G.setColor(1, 1, 1, 1)
+      pcall(G.setCanvas, prev)
+      return canvas
+    end
+
+    -- Preferred: register a real presentation pipeline (NPC Bubbles method).
+    local registered = false
+    pcall(function()
+      if not (mod.content and mod.content.render_pipelines
+              and type(mod.content.render_pipelines.register) == "function") then
+        return
+      end
+      mod.content.render_pipelines:register(PIPELINE_ID, {
+        label = "KANTO LIFE BUBBLES 3D",
+        default = 1,
+        worldPresent = function(canvas, ctx)
+          return drawBubblesOnCanvas(canvas, ctx) or canvas
+        end,
+      })
+      -- Force on so restore-to-0 does not silence us
+      pcall(function()
+        local Pipelines = require("src.render.Pipelines")
+        if Pipelines and type(Pipelines.setLevel) == "function" then
+          if (Pipelines.level and Pipelines.level(PIPELINE_ID) or 0) <= 0 then
+            Pipelines.setLevel(PIPELINE_ID, 1)
+          end
+        end
+      end)
+      registered = true
+      if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: bubble pipeline registered") end
+    end)
+
+    -- Last-resort only if content API is missing: wrap worldPresent once.
+    -- Prefer registered pipeline; wrapping is known to misplace on some arenas.
+    if not registered then
+      pcall(function()
+        local Pipelines = safeRequire("src.render.Pipelines")
+        if not (Pipelines and type(Pipelines.worldPresent) == "function") then return end
+        if Pipelines._kantoLifeCollisionBubbleWrapped then return end
+        local base = Pipelines.worldPresent
+        Pipelines.worldPresent = function(canvas, ctx)
+          local out = base(canvas, ctx)
+          if out and ctx then
+            pcall(drawBubblesOnCanvas, out, ctx)
+          end
+          return out
+        end
+        Pipelines._kantoLifeCollisionBubbleWrapped = true
+      end)
     end
   end
 
@@ -6298,9 +6291,9 @@ local function nightlifeTick(world, dt)
         -- (same as Zzz). This was a key difference from the failed approach.
         -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
         -- then rotate, then translate.
-        local bubbleScale = 2.0  -- match NPC Bubbles outdoor size
+        local bubbleScale = 1.15  -- ~emote size; 2.0 was too large
         local model = Mat4.mul(
-          Mat4.translate(px + 8, gh + 19, py + 8),
+          Mat4.translate(px + 8, gh + 22, py + 8),
           Mat4.mul(
             Mat4.rotateY(zyaw),
             Mat4.scale(bubbleScale, bubbleScale, 1)
