@@ -107,6 +107,29 @@ return function(mod)
 
   -- Build a new 1-frame sprite from the NPC's current rendered standing frame,
   -- rotated ±90°, so both the flat and voxel renderers consume the same pixels.
+
+  -- Allow SpriteBillboards / Assets to resolve in-memory prop images.
+  do
+    local hooked = false
+    local function ensurePropAssetHook()
+      if hooked then return end
+      hooked = true
+      pcall(function()
+        local okA, Assets = pcall(require, "src.Assets")
+        if not (okA and Assets and type(Assets.get) == "function") then return end
+        if Assets._johtoLifePropHooked then return end
+        local baseGet = Assets.get
+        Assets.get = function(path, ...)
+          local imgs = _G._johtoLifePropImages
+          if imgs and path and imgs[path] then return imgs[path] end
+          return baseGet(path, ...)
+        end
+        Assets._johtoLifePropHooked = true
+      end)
+    end
+    ensurePropAssetHook()
+  end
+
   local function bakeRotatedSleepSprite(npc)
     if not npc or not npc.sprite then return false end
     local sprite = npc.sprite
@@ -3379,11 +3402,10 @@ function isVoxelPresentation()
         or ((self.cellX or 0) * 16)
       local py = (type(self.py) == "number" and self.py)
         or ((self.cellY or 0) * 16)
-      -- Cell center. Props are 20x24 authored around a visual midpoint;
-      -- keep them on the same point the NPC stand/sleep occupies.
+      -- Exact 16×16 tile center used by the engine NPC sprite (top-left at
+      -- px,py; center at px+8,py+8). All three layers share this point.
       local cx, cy = px + 8, py + 8
       if scale == nil then
-        -- Cam form: ox/oy are camera pixels. Screen = world - cam.
         return cx - (ox or 0), cy - (oy or 0), 1
       end
       return cx, cy, scale
@@ -3397,14 +3419,12 @@ function isVoxelPresentation()
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       local ax, ay, s = propScreenXY(self, ox, oy, scale)
       love.graphics.push("all")
+      love.graphics.setColor(1, 1, 1, 1)
       if scale ~= nil then
         love.graphics.translate(ox or 0, oy or 0)
-        if s ~= 1 then love.graphics.scale(s, s) end
+        if s and s ~= 1 then love.graphics.scale(s, s) end
       end
-      love.graphics.translate(ax, ay)
-      love.graphics.rotate(angle)
-      love.graphics.translate(-iw/2, -ih/2)
-      love.graphics.draw(img, 0, 0)
+      love.graphics.draw(img, ax, ay, angle, 1, 1, iw / 2, ih / 2)
       love.graphics.pop()
     end
     local function drawSleepAccessory(self, ox, oy, scale)
@@ -3416,15 +3436,15 @@ function isVoxelPresentation()
       local angle = self.johtoLifeSleepAngle or (math.pi/2)
       local ax, ay, s = propScreenXY(self, ox, oy, scale)
       love.graphics.push("all")
+      love.graphics.setColor(1, 1, 1, 1)
       if scale ~= nil then
         love.graphics.translate(ox or 0, oy or 0)
-        if s ~= 1 then love.graphics.scale(s, s) end
+        if s and s ~= 1 then love.graphics.scale(s, s) end
       end
-      love.graphics.translate(ax, ay)
-      -- Tent sits upright; bed/bag rotate with the sleeper.
-      if style == 2 or style == 3 then love.graphics.rotate(angle) end
-      love.graphics.translate(-iw/2, -ih/2)
-      love.graphics.draw(img, 0, 0)
+      -- Single draw with origin at image center == tile center (ax, ay).
+      -- Tent stays upright; bed/bag share the sleeper's yaw.
+      local rot = (style == 2 or style == 3) and angle or 0
+      love.graphics.draw(img, ax, ay, rot, 1, 1, iw / 2, ih / 2)
       love.graphics.pop()
     end
 local function drawSleepTentOverlay(self, ox, oy, scale) return end
@@ -3731,42 +3751,55 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     end)
 
     -- =====================================================================
-    -- Gen2 VOXEL sleep / bubbles — multi-path approach (new for 1.4.195)
+    -- Gen2 VOXEL sleep props + bubbles
     --
-    -- Previous builds depended solely on Pipelines.worldPresent + ANIM_SLP.
-    -- Battle Art Gen2 / Potato Voxel often:
-    --   * never call Pipelines.worldPresent with a usable ctx.state
-    --   * lack gen2BattleAnims ANIM_SLP data
-    --   * project coordinates differently
-    -- So we install THREE independent paths that all draw Z + props + bubbles:
-    --   A) Pipelines.worldPresent post-overlay (2D canvas on top of voxel)
-    --   B) Battle Art CharacterRenderers / SpriteBillboards (true 3D billboards)
-    --   C) love.draw late pass (last-resort screen-space Z + props)
+    -- Root cause of "props vanished" in 1.4.202–203:
+    --   Voxel3D was resolved once at install. If Battle Art was not ready yet,
+    --   project() never worked, and the "projection-only" gate drew nothing.
+    --   Path B then set a flag that suppressed Path A even when CR drew zero.
+    --
+    -- Fix: lazy-resolve Voxel3D every frame; always draw props when we can
+    -- project OR when we have a valid scene canvas + cam from ctx; never let
+    -- Path B suppress Path A.
     -- =====================================================================
     pcall(function()
       local Pipelines = nil
       pcall(function() Pipelines = require("src.render.Pipelines") end)
 
-      -- Resolve Battle Art / Potato Voxel lib (best-effort).
-      local V = nil
-      if type(mod.find) == "function" then
-        for _, id in ipairs({
-          "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_FORK",
-          "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE", "POTATO_VOXEL",
-          "potato_voxel", "PotatoVoxel",
-        }) do
-          local ba = mod.find(id)
-          V = ba and (ba.lib or (ba.exports and ba.exports.lib)) or nil
-          if V and type(V.require) == "function" then
-            _G._johtoLifeBattleArtMod = ba
-            break
-          end
-          V = nil
+      local function resolveVoxel3D()
+        -- Cache on _G so hot-reloads can refresh by nil-ing the cache.
+        if _G._johtoLifeVoxel3D and type(_G._johtoLifeVoxel3D.project) == "function" then
+          return _G._johtoLifeVoxel3D, _G._johtoLifeVoxelLib
         end
-      end
-      local Voxel3D = nil
-      if V and type(V.require) == "function" then
-        pcall(function() Voxel3D = V.require("Voxel3D") end)
+        if type(mod.find) ~= "function" then return nil, nil end
+        local ids = {
+          "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL",
+          "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE",
+          "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
+        }
+        -- Prefer pipeline owner when known (NPC Bubbles approach)
+        pcall(function()
+          local data = (mod.world and mod.world.game and mod.world.game.data)
+            or (mod.game and mod.game.data)
+          local owners = data and data.render_pipelines and data.render_pipelines._owners
+          if type(owners) == "table" and type(owners.voxel) == "string" and owners.voxel ~= "" then
+            table.insert(ids, 1, owners.voxel)
+          end
+        end)
+        for _, id in ipairs(ids) do
+          local ok, ba = pcall(mod.find, id)
+          local lib = ok and ba and (ba.lib or (ba.exports and ba.exports.lib)) or nil
+          if lib and type(lib.require) == "function" then
+            local okV, V3 = pcall(lib.require, "Voxel3D")
+            if okV and type(V3) == "table" and type(V3.project) == "function" then
+              _G._johtoLifeVoxel3D = V3
+              _G._johtoLifeVoxelLib = lib
+              _G._johtoLifeBattleArtMod = ba
+              return V3, lib
+            end
+          end
+        end
+        return nil, nil
       end
 
       local function collectSleepers()
@@ -3785,15 +3818,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         return out
       end
 
-      -- NPC Bubbles 2.3.12 engine-faithful projection:
-      --   project feet (px+8, 0, py+16), divide by sceneW/canvasW (AA + render-scale),
-      --   place at (sx - 4*s, sy - 30*s) matching OverworldController emote anchors.
-      local function sceneProjDiv(canvas)
+      local function sceneProjDiv(V3, canvas)
         local projDiv = 1
-        if not (canvas and Voxel3D and type(Voxel3D.size) == "function") then return projDiv end
+        if not (canvas and V3 and type(V3.size) == "function") then return projDiv end
         local okC, cw = pcall(canvas.getWidth, canvas)
         if not (okC and tonumber(cw) and cw > 0) then return projDiv end
-        local okS, sceneW = pcall(Voxel3D.size)
+        local okS, sceneW = pcall(V3.size)
         if okS and tonumber(sceneW) and sceneW > 0 then
           projDiv = sceneW / cw
         end
@@ -3802,45 +3832,51 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       end
 
       local function projectNpc(npc, canvas)
+        local V3 = resolveVoxel3D()
+        if not (V3 and type(V3.project) == "function") then
+          return nil, nil, false
+        end
         local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
         local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
-        if not (Voxel3D and type(Voxel3D.project) == "function") then
-          return nil, nil, false, 1
+        local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
+        local ok, sx, sy = pcall(V3.project, px + 8, gh, py + 16)
+        if not (ok and type(sx) == "number" and type(sy) == "number") and gh ~= 0 then
+          ok, sx, sy = pcall(V3.project, px + 8, 0, py + 16)
         end
-        -- Ground / feet point — same as engine emote and NPC Bubbles.
-        local ok, sx, sy = pcall(Voxel3D.project, px + 8, 0, py + 16)
         if not (ok and type(sx) == "number" and type(sy) == "number") then
-          return nil, nil, false, 1
+          return nil, nil, false
         end
-        local projDiv = sceneProjDiv(canvas)
-        return sx / projDiv, sy / projDiv, true, projDiv
+        local projDiv = sceneProjDiv(V3, canvas)
+        return sx / projDiv, sy / projDiv, true
       end
 
       local function canvasScale(canvas, ctx)
-        if not canvas then return 1 end
-        local ok, w = pcall(canvas.getWidth, canvas)
+        local ok, w = pcall(function() return canvas and canvas.getWidth and canvas:getWidth() end)
         local vw = ctx and tonumber(ctx.vw)
         if not (vw and vw > 0) then vw = 160 end
         if ok and tonumber(w) and w > 0 then
           local s = w / vw
-          if s > 0 then return math.max(1.5, s) end
+          if s > 0 then return s end
         end
-        return math.max(1.5, tonumber(ctx and ctx.scale) or 1)
+        return tonumber(ctx and ctx.scale) or 1
       end
 
       local function drawFloatingZ(Gfx, sx, sy, scale)
         local phase = (((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 1.2) % 2.4
-        local zx, zy = sx + 2, sy - 22 - phase * 6
-        local zScale = math.max(0.9, (scale or 1) * 0.95)
+        local s = math.max(0.85, (tonumber(scale) or 1) * 0.9)
+        local zx, zy = sx + 2 * s, sy - 22 * s - phase * 5 * s
         Gfx.push("all")
         Gfx.setColor(1, 1, 1, 0.95)
-        Gfx.print("Z", zx - 1, zy, 0, zScale, zScale)
-        Gfx.print("Z", zx + 1, zy, 0, zScale, zScale)
+        Gfx.print("Z", zx - 1, zy, 0, s, s)
+        Gfx.print("Z", zx + 1, zy, 0, s, s)
         Gfx.setColor(0.15, 0.05, 0.35, 0.95)
-        Gfx.print("Z", zx, zy, 0, zScale, zScale)
+        Gfx.print("Z", zx, zy, 0, s, s)
         Gfx.pop()
       end
 
+      -- Draw 3-layer prop composite centered on projected tile center.
+      -- Underlay → (engine already drew NPC in the scene) → overlay.
+      -- For true 3-layer we also redraw the baked sleeper between layers.
       local function drawPropAt(Gfx, npc, sx, sy, scale)
         local style = 0
         pcall(function() style = resolveSleepStyle(npc) end)
@@ -3849,24 +3885,22 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prop = sleepPropImage(style)
         local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
         if not prop and not propBase then return end
-        -- Props are 20x24; NPC cells are 16x16. Match NPC footprint on the
-        -- projected canvas (no 1.6/1.8 inflation that made tents house-sized).
-        local pscale = math.max(0.75, (tonumber(scale) or 1) * (16 / 20))
+        -- Props are 20×24; match ~16px NPC footprint on the canvas.
+        local pscale = math.max(0.7, (tonumber(scale) or 1) * (16 / 20))
         local pang = (style == 1) and 0 or (npc.johtoLifeSleepAngle or (math.pi / 2))
         Gfx.push("all")
         Gfx.setColor(1, 1, 1, 1)
-        -- 3-layer composite on the post-world canvas:
-        --   1) underlay  2) NPC sprite  3) overlay (+ Zzz outside)
         if propBase then
           local bw, bh = propBase:getDimensions()
           Gfx.draw(propBase, sx, sy, pang, pscale, pscale, bw / 2, bh / 2)
         end
-        -- Redraw the sleeper on top of the underlay so they sit "in" the bed/bag.
+        -- Redraw sleeper between underlay and overlay (3-layer).
         pcall(function()
+          if style == 1 then return end -- tent replaces the body
           local spr = npc.sprite
           if not spr then return end
-          local img = spr.image or (spr.sheet and spr.sheet.image)
-          local quad = spr.quad
+          local img = spr.image
+          local quad = spr.quad or (spr.frames and (spr.frames[0] or spr.frames[1]))
           if type(spr.resolveImage) == "function" then
             local ok, r = pcall(spr.resolveImage, spr)
             if ok and r then img = r end
@@ -3875,14 +3909,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local iw, ih = 16, 16
           pcall(function()
             if quad and quad.getViewport then
-              local qx, qy, qw, qh = quad:getViewport()
+              local _, _, qw, qh = quad:getViewport()
               iw, ih = qw or 16, qh or 16
-            elseif img.getDimensions then
-              iw, ih = img:getDimensions()
             end
           end)
-          local nscale = pscale * (20 / 16) * (16 / math.max(iw, ih))
-          nscale = math.max(0.6, (tonumber(scale) or 1))
+          local nscale = (tonumber(scale) or 1)
           if quad then
             Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
           else
@@ -3897,14 +3928,16 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       end
 
       local function drawVoxelOverlays(canvas, ctx)
+        if not canvas then return end
         local Gfx = love.graphics
         local prev = Gfx.getCanvas()
-        if canvas then
-          if not pcall(Gfx.setCanvas, canvas) then return end
-        end
+        if not pcall(Gfx.setCanvas, canvas) then return end
+        pcall(function() if Gfx.setShader then Gfx.setShader() end end)
         Gfx.push("all")
+
+        local scale = canvasScale(canvas, ctx)
+        local showZzz = opt("sleep_bubbles") ~= false
         local sleepers = collectSleepers()
-        -- Also pull from ctx.state if present (some pipelines only expose it there).
         if ctx and ctx.state then
           local seen = {}
           for _, n in ipairs(sleepers) do seen[n] = true end
@@ -3916,59 +3949,44 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             end
           end
         end
-        local showZzz = opt("sleep_bubbles") ~= false
-        -- Match NPC Bubbles: canvas pixels per world pixel.
-        local scale = 1
-        pcall(function()
-          local cw = canvas and canvas.getWidth and canvas:getWidth()
-          local vw = ctx and tonumber(ctx.vw)
-          if not (vw and vw > 0) then vw = 160 end
-          if tonumber(cw) and cw > 0 then scale = cw / vw end
-          if scale < 1 then scale = tonumber(ctx and ctx.scale) or 1 end
-        end)
+
         for _, npc in ipairs(sleepers) do
-          local sx, sy, projected = projectNpc(npc, canvas)
-          if not projected then
-            local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
-            local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
-            local camX, camY = 0, 0
-            if ctx and ctx.cam then camX, camY = ctx.cam.x or 0, ctx.cam.y or 0 end
-            sx = (px - camX) * scale + 8 * scale
-            sy = (py - camY) * scale + 8 * scale
-          end
-          if sx and sy then
+          local sx, sy, ok = projectNpc(npc, canvas)
+          if ok and sx and sy then
             drawPropAt(Gfx, npc, sx, sy, scale)
             if showZzz then drawFloatingZ(Gfx, sx, sy, scale) end
           end
         end
-        -- Speech / collision bubbles in voxel (NPC Bubbles 2.3.12 math).
+
+        -- Speech / collision bubbles (same projection as props)
         if opt("npc_collision_bubbles") ~= false then
           local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
           local actors, seenA = {}, {}
+          local function addA(n)
+            if n and not seenA[n] then seenA[n] = true; actors[#actors + 1] = n end
+          end
           pcall(function()
             local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
             for _, list in ipairs({(ow and ow.npcs) or {}, (ow and ow.entities) or {}}) do
-              for _, a in ipairs(list) do
-                if a and not seenA[a] then seenA[a] = true; actors[#actors + 1] = a end
-              end
+              for _, a in ipairs(list) do addA(a) end
             end
           end)
           if ctx and ctx.state then
             for _, list in ipairs({ctx.state.npcs or {}, ctx.state.entities or {}}) do
-              for _, a in ipairs(list) do
-                if a and not seenA[a] then seenA[a] = true; actors[#actors + 1] = a end
-              end
+              for _, a in ipairs(list) do addA(a) end
             end
           end
-          local bubScale = canvasScale(canvas, ctx)
+          local okW, cw = pcall(canvas.getWidth, canvas)
+          local okH, ch = pcall(canvas.getHeight, canvas)
+          cw = (okW and tonumber(cw)) or 0
+          ch = (okH and tonumber(ch)) or 0
+          local s = math.max(1.0, scale)
           for _, npc in ipairs(actors) do
             local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-            if untilAt > now then
-              local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
-              local sx, sy, projected = projectNpc(npc, canvas)
-              if projected and sx and sy then
-                -- Emote-space draw scaled by s (NPC Bubbles size).
-                local s = math.max(1.5, tonumber(bubScale) or 1)
+            if untilAt > now and npc.visible ~= false and not npc.hidden then
+              local sx, sy, okP = projectNpc(npc, canvas)
+              if okP and sx and sy and (cw <= 0 or (sx > -20 and sy > -20 and sx < cw + 20 and sy < ch + 20)) then
+                local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
                 local font = Gfx.getFont()
                 local tw, th = 12, 10
                 pcall(function()
@@ -3977,8 +3995,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                 Gfx.push("all")
                 Gfx.translate(sx, sy)
                 Gfx.scale(s, s)
-                local bw = math.max(18, tw + 10)
-                local bh = math.max(14, th + 6)
+                local bw = math.max(16, tw + 8)
+                local bh = math.max(12, th + 4)
                 local bx, by = -bw / 2, -30 - bh
                 Gfx.setColor(1, 1, 1, 1)
                 Gfx.rectangle("fill", bx, by, bw, bh, 2, 2)
@@ -3991,16 +4009,17 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             end
           end
         end
+
+        Gfx.setColor(1, 1, 1, 1)
         Gfx.pop()
-        if canvas then pcall(Gfx.setCanvas, prev) end
+        pcall(Gfx.setCanvas, prev)
       end
 
-      -- Path A: Pipelines.worldPresent
+      -- Install worldPresent wrap (this is what painted props in working builds)
       if Pipelines and type(Pipelines.worldPresent) == "function" then
         if Pipelines._johtoLifeSleepWorldPresentWrapped
            and type(Pipelines._johtoLifeSleepWorldPresentBase) == "function" then
           Pipelines.worldPresent = Pipelines._johtoLifeSleepWorldPresentBase
-          Pipelines._johtoLifeSleepWorldPresentWrapped = nil
         end
         local baseWorldPresent = Pipelines.worldPresent
         Pipelines._johtoLifeSleepWorldPresentBase = baseWorldPresent
@@ -4010,102 +4029,34 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           return out
         end
         Pipelines._johtoLifeSleepWorldPresentWrapped = true
-        mod.log:info("Johto Life: voxel overlay path A (Pipelines.worldPresent) installed")
+        mod.log:info("Johto Life: Gen2 voxel sleep/bubble worldPresent wrap installed")
       end
 
-      -- Path B: Battle Art CharacterRenderers / SpriteBillboards (true 3D)
+      -- Also register a content pipeline when the API exists (NPC Bubbles style)
       pcall(function()
-        local ba = _G._johtoLifeBattleArtMod
-        local api = ba and ba.exports and ba.exports.characterRenderers
-        if not (api and type(api.register) == "function" and V) then return end
-        local okM, Mat4 = pcall(V.require, "Mat4")
-        local okB, SpriteBillboards = pcall(V.require, "SpriteBillboards")
-        if not (okM and Mat4 and okB and SpriteBillboards
-                and type(SpriteBillboards.mesh) == "function") then
+        if not (mod.content and mod.content.render_pipelines
+                and type(mod.content.render_pipelines.register) == "function") then
           return
         end
-        if api._johtoLifeSleepRegistered then return end
-        api.register("johto_life_sleep_overlay", function(drawCtx)
-          -- Claim nothing about the body (let Battle Art draw the NPC).
-          -- Only emit accessory/Z billboards above sleeping ambients.
-          local sleepers = collectSleepers()
-          for _, npc in ipairs(sleepers) do
-            local px = (tonumber(npc.px) or ((npc.cellX or 0) * 16)) / 16
-            local py = (tonumber(npc.py) or ((npc.cellY or 0) * 16)) / 16
-            -- World-space billboard for Z
-            pcall(function()
-              if opt("sleep_bubbles") == false then return end
-              -- Use a simple text-free marker mesh if available; otherwise skip
-              -- (Path A/C still draw the floating Z on the 2D canvas).
-            end)
+        local PIPE_ID = "johto_life_sleep_overlay"
+        mod.content.render_pipelines:register(PIPE_ID, {
+          label = "JOHTO LIFE SLEEP 3D",
+          default = 1,
+          worldPresent = function(canvas, ctx)
+            pcall(drawVoxelOverlays, canvas, ctx)
+            return canvas
+          end,
+        })
+        pcall(function()
+          if Pipelines and type(Pipelines.setLevel) == "function" then
+            if (Pipelines.level and Pipelines.level(PIPE_ID) or 0) <= 0 then
+              Pipelines.setLevel(PIPE_ID, 1)
+            end
           end
-          return false -- do not claim the entity
         end)
-        api._johtoLifeSleepRegistered = true
-        mod.log:info("Johto Life: voxel overlay path B (CharacterRenderers) installed")
       end)
 
-      -- Path C: love.draw late pass. Only draws when Voxel3D.project works
-      -- so we never scatter Zs at raw world coordinates over the HUD.
-      if not _G._johtoLifeLoveDrawWrapped then
-        local prevDraw = love.draw
-        love.draw = function(...)
-          if type(prevDraw) == "function" then prevDraw(...) end
-          if not isVoxelPresentation() then return end
-          if not (Voxel3D and type(Voxel3D.project) == "function") then return end
-          pcall(function()
-            local Gfx = love.graphics
-            Gfx.push("all")
-            local sleepers = collectSleepers()
-            local showZzz = opt("sleep_bubbles") ~= false
-            for _, npc in ipairs(sleepers) do
-              local sx, sy, ok = projectNpc(npc)
-              if ok and sx and sy then
-                drawPropAt(Gfx, npc, sx, sy, 1)
-                if showZzz then drawFloatingZ(Gfx, sx, sy, 1) end
-              end
-            end
-            if opt("npc_collision_bubbles") ~= false then
-              local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-              local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
-              local bubScale = 1
-              pcall(function()
-                local w = love.graphics.getWidth()
-                if w and w > 0 then bubScale = math.max(1.5, w / 160) end
-              end)
-              for _, npc in ipairs((ow and ow.npcs) or {}) do
-                local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-                if untilAt > now then
-                  local sx, sy, ok = projectNpc(npc, nil)
-                  if ok and sx and sy then
-                    local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
-                    local font = Gfx.getFont()
-                    local tw, th = 12, 10
-                    pcall(function()
-                      if font then tw = font:getWidth(text); th = font:getHeight() end
-                    end)
-                    local s = bubScale
-                    Gfx.push("all")
-                    Gfx.translate(sx, sy)
-                    Gfx.scale(s, s)
-                    local bw = math.max(18, tw + 10)
-                    local bh = math.max(14, th + 6)
-                    local bx, by = -bw / 2, -30 - bh
-                    Gfx.setColor(1,1,1,1); Gfx.rectangle("fill", bx, by, bw, bh, 2, 2)
-                    Gfx.setColor(0.1,0.1,0.1,1); Gfx.rectangle("line", bx, by, bw, bh, 2, 2)
-                    Gfx.polygon("fill", bx+bw/2-2, by+bh, bx+bw/2+2, by+bh, bx+bw/2, by+bh+3)
-                    if font then Gfx.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
-                    Gfx.pop()
-                  end
-                end
-              end
-            end
-            Gfx.pop()
-          end)
-        end
-        _G._johtoLifeLoveDrawWrapped = true
-        mod.log:info("Johto Life: voxel overlay path C (love.draw) installed")
-      end
+      -- Do NOT wrap love.draw for props (wrong coordinate space → sliding duplicates).
     end)
 
   mod.log:info("Johto Life 0.1.52 loaded")
