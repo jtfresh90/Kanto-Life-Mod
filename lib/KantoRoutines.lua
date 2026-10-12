@@ -198,17 +198,6 @@ return function(ctx)
   -- Gen 2: uses built-in npc:scriptTeleport("from").
   -- Gen 1/3: custom spin + rise (mirrors Player:pose logic).
   npcTeleportOut = function(npc)
-    -- Play sound
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
-    end)
-    -- Gen 2 built-in (verified: src/world/gen2/Npc.lua:391)
-    if type(npc.scriptTeleport) == "function" then
-      pcall(npc.scriptTeleport, npc, "from")
-      return true
-    end
-    -- Gen 1: spin + rise with a random Psychic-type species (full Gen1 list).
     local psychicTypes = {
       "ABRA", "KADABRA", "ALAKAZAM",
       "SLOWPOKE", "SLOWBRO",
@@ -221,66 +210,73 @@ return function(ctx)
     local psySpecies = psychicTypes[math.random(#psychicTypes)]
     npc.kantoLifeTeleport = {
       frame = 0,
-      total = 90,  -- 1.5s at 60fps (snappier than player's 135)
+      total = 90,
       mode = "out",
       origFacing = npc.facing or "down",
-      psySpecies = psySpecies,  -- Used by pose wrapper (never mutates npc.sprite)
+      psySpecies = psySpecies,
     }
     npc.frozen = true
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
+    end)
+    if type(npc.scriptTeleport) == "function" then
+      pcall(npc.scriptTeleport, npc, "from")
+    end
     return true
   end
 
   -- NPC Teleport IN animation (arrival).
   npcTeleportIn = function(npc)
+    local psychicTypesIn = {
+      "ABRA", "KADABRA", "ALAKAZAM", "SLOWPOKE", "SLOWBRO",
+      "DROWZEE", "HYPNO", "EXEGGCUTE", "EXEGGUTOR",
+      "STARYU", "STARMIE", "MR_MIME", "JYNX", "MEWTWO", "MEW",
+    }
+    npc.kantoLifeTeleport = {
+      frame = 0,
+      total = 90,
+      mode = "in",
+      origFacing = npc.facing or "down",
+      psySpecies = psychicTypesIn[math.random(#psychicTypesIn)],
+    }
+    npc.frozen = true
     pcall(function()
       local gd = _G._kantoLifeGameData
       if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
     end)
     if type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "to")
-      return true
     end
-    npc.kantoLifeTeleport = {
-      frame = 0,
-      total = 90,
-      mode = "in",
-      origFacing = npc.facing or "down",
-    }
-    npc.frozen = true
     return true
   end
 
   -- NPC Fly OUT animation.
   -- Hides NPC, shows random flying Pokémon sprite flying up and away.
   npcFlyOut = function(npc)
-    -- Prefer the engine's native trainer Fly script when the active generation
-    -- exposes it. Older Gen1Recomp NPCs do not, so retain the sprite-based
-    -- flying-Pokemon fallback below for those builds.
-    if type(npc.scriptFly) == "function" then
-      local ok, result = pcall(npc.scriptFly, npc, "from")
-      if ok and result ~= false then
-        npc.frozen = true
-        return true
-      end
-    end
     local species = randomFlyingSpecies()
-    if not species then return false end
-    -- Play sound
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Fly") end
-    end)
-    -- Store fly state; KantoMain draw hook will render the bird
+    if not species then
+      local fallback = { "PIDGEY", "PIDGEOTTO", "PIDGEOT", "SPEAROW", "FEAROW",
+        "ZUBAT", "GOLBAT", "FARFETCHD", "DODUO", "DODRIO", "AERODACTYL" }
+      species = fallback[math.random(#fallback)]
+    end
     npc.kantoLifeFly = {
       species = species,
       frame = 0,
-      total = 90,  -- 1.5s
+      total = 90,
       mode = "out",
       startPx = npc.px or (npc.cellX or 0) * 16,
       startPy = npc.py or (npc.cellY or 0) * 16,
     }
-    npc.kantoLifeFlyHidden = true  -- Draw hook skips NPC, draws bird instead
+    npc.kantoLifeFlyHidden = true
     npc.frozen = true
+    pcall(function()
+      local gd = _G._kantoLifeGameData
+      if gd then require("src.core.Sound").play(gd, "Fly") end
+    end)
+    if type(npc.scriptFly) == "function" then
+      pcall(npc.scriptFly, npc, "from")
+    end
     return true
   end
 

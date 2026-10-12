@@ -115,15 +115,61 @@ local function writeInstallFlag(mod)
   return true
 end
 
+-- Runtime globals / pipeline wraps left by a previous install of this mod.
+-- These are not in mod.save or mod.cache; without clearing them, a reinstall
+-- can keep stale worldPresent wraps, Voxel3D handles, and sleep bake caches.
+local RUNTIME_GLOBALS = {
+  "_johtoLifeVoxel3D",
+  "_johtoLifeVoxelLib",
+  "_johtoLifeBattleArtMod",
+  "_johtoLifeVoxelSleepWorldSpace",
+  "_johtoLifeLoveDrawWrapped",
+  "_johtoLifePropImages",
+  "_kantoLifeGameData",
+  "_kantoLifeBattleArtMod",
+  "_kantoLifeVoxel3D",
+}
+
+local function clearRuntimeState()
+  -- ONLY clear soft lookup caches. Do NOT unwrap Pipelines.worldPresent:
+  -- JohtoMain/KantoMain install those wraps at mod entry; hygiene also runs on
+  -- save.loaded AFTER that install. Unwrapping there deleted the Gen2 voxel
+  -- sleep-prop and speech-bubble overlay for the whole session.
+  if type(_G) ~= "table" then return end
+  for _, key in ipairs(RUNTIME_GLOBALS) do
+    pcall(function() _G[key] = nil end)
+  end
+  -- Voxel3D / Battle Art handles are re-resolved lazily on the next project()
+  -- call; clearing them is safe. Pipeline wraps are NOT.
+end
+
 local function wipeData(mod)
   for _, key in ipairs(SAVE_KEYS) do
     saveSet(mod, key, nil)
   end
-  if mod and mod.cache and type(mod.cache.delete) == "function" then
-    for _, rel in ipairs(CACHE_FILES) do
-      pcall(mod.cache.delete, mod.cache, rel)
+  -- Wipe every file under mod.cache when the API supports listing.
+  if mod and mod.cache then
+    if type(mod.cache.delete) == "function" then
+      for _, rel in ipairs(CACHE_FILES) do
+        pcall(mod.cache.delete, mod.cache, rel)
+      end
+    end
+    if type(mod.cache.list) == "function" then
+      local ok, list = pcall(mod.cache.list, mod.cache)
+      if ok and type(list) == "table" then
+        for _, rel in ipairs(list) do
+          pcall(mod.cache.delete, mod.cache, rel)
+        end
+      end
+    end
+    -- Nuclear option: clear whole cache root if the engine exposes it
+    if type(mod.cache.clear) == "function" then
+      pcall(mod.cache.clear, mod.cache)
+    elseif type(mod.cache.wipe) == "function" then
+      pcall(mod.cache.wipe, mod.cache)
     end
   end
+  clearRuntimeState()
 end
 
 return function(mod)
@@ -162,8 +208,9 @@ return function(mod)
     return true, reason
   end
 
-  -- Normal boot: make sure the install flag is present for future
-  -- reinstall detection.
+  -- Normal boot / save.loaded with same version: do NOT clear runtime state.
+  -- JohtoMain already installed worldPresent wraps; clearing them here is what
+  -- made Gen2 voxel sleep accessories and speech bubbles vanish after load.
   writeInstallFlag(mod)
   return false, "current"
 end

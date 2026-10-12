@@ -3410,21 +3410,34 @@ function isVoxelPresentation()
       end
       return cx, cy, scale
     end
+    -- Shared camera/world transform for every sleep layer so base, body, and
+    -- overlay all pivot on the exact same point (px+8, py+8).
+    local function pushSleepTransform(self, ox, oy, scale)
+      love.graphics.push("all")
+      love.graphics.setColor(1, 1, 1, 1)
+      if scale ~= nil then
+        love.graphics.translate(ox or 0, oy or 0)
+        if scale ~= 1 then love.graphics.scale(scale, scale) end
+      else
+        -- Cam form: screen = world - cam
+        love.graphics.translate(-(ox or 0), -(oy or 0))
+      end
+    end
+    local function sleepTileCenter(self)
+      local px = (type(self.px) == "number" and self.px) or ((self.cellX or 0) * 16)
+      local py = (type(self.py) == "number" and self.py) or ((self.cellY or 0) * 16)
+      return px + 8, py + 8
+    end
     local function drawSleepAccessoryBase(self, ox, oy, scale)
       if not self.nightlifeSleeping then return end
       local style = resolveSleepStyle(self)
       if style == 0 or style == 1 then return end
       local img = sleepPropBaseImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local angle = self.johtoLifeSleepAngle or (math.pi/2)
-      local ax, ay, s = propScreenXY(self, ox, oy, scale)
-      love.graphics.push("all")
-      love.graphics.setColor(1, 1, 1, 1)
-      if scale ~= nil then
-        love.graphics.translate(ox or 0, oy or 0)
-        if s and s ~= 1 then love.graphics.scale(s, s) end
-      end
-      love.graphics.draw(img, ax, ay, angle, 1, 1, iw / 2, ih / 2)
+      local angle = self.johtoLifeSleepAngle or (math.pi / 2)
+      local cx, cy = sleepTileCenter(self)
+      pushSleepTransform(self, ox, oy, scale)
+      love.graphics.draw(img, cx, cy, angle, 1, 1, iw / 2, ih / 2)
       love.graphics.pop()
     end
     local function drawSleepAccessory(self, ox, oy, scale)
@@ -3433,18 +3446,34 @@ function isVoxelPresentation()
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
-      local angle = self.johtoLifeSleepAngle or (math.pi/2)
-      local ax, ay, s = propScreenXY(self, ox, oy, scale)
-      love.graphics.push("all")
-      love.graphics.setColor(1, 1, 1, 1)
-      if scale ~= nil then
-        love.graphics.translate(ox or 0, oy or 0)
-        if s and s ~= 1 then love.graphics.scale(s, s) end
-      end
-      -- Single draw with origin at image center == tile center (ax, ay).
-      -- Tent stays upright; bed/bag share the sleeper's yaw.
+      local angle = self.johtoLifeSleepAngle or (math.pi / 2)
+      local cx, cy = sleepTileCenter(self)
+      pushSleepTransform(self, ox, oy, scale)
       local rot = (style == 2 or style == 3) and angle or 0
-      love.graphics.draw(img, ax, ay, rot, 1, 1, iw / 2, ih / 2)
+      love.graphics.draw(img, cx, cy, rot, 1, 1, iw / 2, ih / 2)
+      love.graphics.pop()
+    end
+    -- Draw the baked sleeper at the SAME center as the props (not via baseDraw
+    -- which can use a different origin). Keeps the 3-layer stack locked.
+    local function drawSleepBodyCentered(self, ox, oy, scale)
+      local spr = self.sprite
+      if not spr then return end
+      local img = spr.image
+      if type(spr.resolveImage) == "function" then
+        local ok, r = pcall(spr.resolveImage, spr)
+        if ok and r then img = r end
+      end
+      if not img then return end
+      local fw = tonumber(spr.frameWidth) or 16
+      local fh = tonumber(spr.frameHeight) or 16
+      local quad = spr.frames and (spr.frames[0] or spr.frames[1])
+      local cx, cy = sleepTileCenter(self)
+      pushSleepTransform(self, ox, oy, scale)
+      if quad then
+        love.graphics.draw(img, quad, cx, cy, 0, 1, 1, fw / 2, fh / 2)
+      else
+        love.graphics.draw(img, cx, cy, 0, 1, 1, fw / 2, fh / 2)
+      end
       love.graphics.pop()
     end
 local function drawSleepTentOverlay(self, ox, oy, scale) return end
@@ -3563,12 +3592,21 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local sleeping = self and self.nightlifeSleeping
           if sleeping then
             local style = resolveSleepStyle(self)
-            if style ~= 1 and style ~= 0 then
-              pcall(drawSleepAccessoryBase, self, ox, oy, nil)
-            end
-            if style ~= 1 then r = baseDraw(self, ox, oy) end
-            pcall(drawSleepAccessory, self, ox, oy, nil)
-            if not isVoxelPresentation() then
+            if isVoxelPresentation() then
+              if style ~= 1 then r = baseDraw(self, ox, oy) end
+            else
+              if style ~= 1 and style ~= 0 then
+                pcall(drawSleepAccessoryBase, self, ox, oy, nil)
+              end
+              if style ~= 1 then
+                if self.sprite and self.sprite._johtoSleepBaked then
+                  pcall(drawSleepBodyCentered, self, ox, oy, nil)
+                  r = true
+                else
+                  r = baseDraw(self, ox, oy)
+                end
+              end
+              pcall(drawSleepAccessory, self, ox, oy, nil)
               drawZzzForNpc(self, ox, oy, nil)
             end
           else
@@ -3593,43 +3631,53 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
         -- Baked lying sprite: normal draw path (same idea as SPRITE_GAMBLER_ASLEEP)
         if sleeping and baked then
-          -- Tent (style 1) replaces NPC: don't draw the NPC sprite
           local style = resolveSleepStyle(self)
+          -- In voxel, NPC:draw is not the presentation path — pose + worldPresent
+          -- own the body and props. Drawing 2D props here paints on the wrong
+          -- canvas and produces the offset floating tents.
+          if voxel then
+            if style == 1 then return nil end  -- tent: hide body; overlay draws tent
+            return baseDraw(self, ox, oy, scale)
+          end
           local r = nil
-          -- 3-layer: draw base (opaque) UNDER the NPC for bed/sleeping bag
+          -- 2D: all three layers share sleepTileCenter (px+8, py+8).
           if style ~= 1 and style ~= 0 then
             pcall(drawSleepAccessoryBase, self, ox, oy, scale)
           end
           if style ~= 1 then
-            r = baseDraw(self, ox, oy, scale)
+            pcall(drawSleepBodyCentered, self, ox, oy, scale)
+            r = true
           end
           pcall(drawSleepAccessory, self, ox, oy, scale)
-          if not voxel then
-            drawZzzForNpc(self, ox, oy, scale)
-          end
+          drawZzzForNpc(self, ox, oy, scale)
           return r
         end
 
         -- Voxel (or missing sprite): must use baseDraw so figures still appear
         if sleeping and (not voxel) and self.sprite and type(self.sprite.draw) == "function" then
-          local G = love.graphics
-          local yOff = (self.spriteYOffset or 0) + 4
-          local px, py = self.px or 0, self.py or 0
-          local okRot = pcall(function()
-            G.push()
-            G.translate(ox or 0, oy or 0)
-            if scale and scale ~= 1 then G.scale(scale, scale) end
-            local cx, cy = px + 8, py + yOff + 4
-            G.translate(cx, cy)
-            G.rotate(angle)
-            G.translate(-cx, -cy)
-            G.setColor(0.55, 0.55, 0.60, 1)  -- Gray for sleeping
-            self.sprite:draw(px, py + yOff - 4, 0, 0, "down", 0, false, false, false, nil)
-            G.setColor(1, 1, 1, 1)  -- Reset
-            G.pop()
-          end)
-          if not okRot then
-            baseDraw(self, ox, oy, scale)
+          local style = resolveSleepStyle(self)
+          if style ~= 1 then
+            local px, py = self.px or 0, self.py or 0
+            local okRot = pcall(function()
+              local G = love.graphics
+              G.push()
+              G.translate(ox or 0, oy or 0)
+              if scale and scale ~= 1 then G.scale(scale, scale) end
+              local cx, cy = px + 8, py + 8
+              G.translate(cx, cy)
+              G.rotate(angle)
+              G.translate(-cx, -cy)
+              G.setColor(0.55, 0.55, 0.60, 1)
+              self.sprite:draw(px, py, 0, 0, "down", 0, false, false, false, nil)
+              G.setColor(1, 1, 1, 1)
+              G.pop()
+            end)
+            if not okRot then
+              baseDraw(self, ox, oy, scale)
+            end
+          end
+          if style ~= 1 and style ~= 0 then
+            pcall(drawSleepAccessoryBase, self, ox, oy, scale)
           end
           pcall(drawSleepAccessory, self, ox, oy, scale)
         else
@@ -3839,9 +3887,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
         local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
         local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
-        local ok, sx, sy = pcall(V3.project, px + 8, gh, py + 16)
+        local ok, sx, sy = pcall(V3.project, px + 8, gh + 8, py + 8)
         if not (ok and type(sx) == "number" and type(sy) == "number") and gh ~= 0 then
-          ok, sx, sy = pcall(V3.project, px + 8, 0, py + 16)
+          ok, sx, sy = pcall(V3.project, px + 8, 8, py + 8)
         end
         if not (ok and type(sx) == "number" and type(sy) == "number") then
           return nil, nil, false
@@ -3874,9 +3922,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         Gfx.pop()
       end
 
-      -- Draw 3-layer prop composite centered on projected tile center.
-      -- Underlay → (engine already drew NPC in the scene) → overlay.
-      -- For true 3-layer we also redraw the baked sleeper between layers.
+      -- Props only at the projected body center. Engine draws the sleeper via
+      -- pose — redrawing it here caused a second, offset body in voxel.
       local function drawPropAt(Gfx, npc, sx, sy, scale)
         local style = 0
         pcall(function() style = resolveSleepStyle(npc) end)
@@ -3885,7 +3932,6 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prop = sleepPropImage(style)
         local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
         if not prop and not propBase then return end
-        -- Props are 20×24; match ~16px NPC footprint on the canvas.
         local pscale = math.max(0.7, (tonumber(scale) or 1) * (16 / 20))
         local pang = (style == 1) and 0 or (npc.johtoLifeSleepAngle or (math.pi / 2))
         Gfx.push("all")
@@ -3894,32 +3940,6 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local bw, bh = propBase:getDimensions()
           Gfx.draw(propBase, sx, sy, pang, pscale, pscale, bw / 2, bh / 2)
         end
-        -- Redraw sleeper between underlay and overlay (3-layer).
-        pcall(function()
-          if style == 1 then return end -- tent replaces the body
-          local spr = npc.sprite
-          if not spr then return end
-          local img = spr.image
-          local quad = spr.quad or (spr.frames and (spr.frames[0] or spr.frames[1]))
-          if type(spr.resolveImage) == "function" then
-            local ok, r = pcall(spr.resolveImage, spr)
-            if ok and r then img = r end
-          end
-          if not img then return end
-          local iw, ih = 16, 16
-          pcall(function()
-            if quad and quad.getViewport then
-              local _, _, qw, qh = quad:getViewport()
-              iw, ih = qw or 16, qh or 16
-            end
-          end)
-          local nscale = (tonumber(scale) or 1)
-          if quad then
-            Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
-          else
-            Gfx.draw(img, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
-          end
-        end)
         if prop then
           local pw, ph = prop:getDimensions()
           Gfx.draw(prop, sx, sy, pang, pscale, pscale, pw / 2, ph / 2)
