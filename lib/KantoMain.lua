@@ -463,15 +463,21 @@ return function(mod)
     if pokeSpriteCache[species] then return pokeSpriteCache[species] end
     local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
     if type(pdef) == "table" then
-      local image = pdef.front or pdef.icon or pdef.image
-      if type(image) == "string" and sprites and sprites[image] then
-        image = sprites[image].image or image
+      local img = pdef.front or pdef.frontSprite or pdef.icon or pdef.menuIcon or pdef.image
+      if type(img) == "string" and sprites and sprites[img] then
+        img = sprites[img].image or img
       end
-      if image then
+      if img then
         local obj = tryDef({
           id = "SPRITE_KANTO_TRAVEL_" .. species,
-          image = image, frames = 1, walker = false,
-          spriteType = "POKEMON_SPRITE", species = species,
+          image = img,
+          frames = 1,
+          walker = false,
+          trueColor = true,
+          frameWidth = tonumber(pdef.frameWidth) or 16,
+          frameHeight = tonumber(pdef.frameHeight) or 16,
+          spriteType = "POKEMON_SPRITE",
+          species = species,
         })
         if obj then return obj end
       end
@@ -765,23 +771,33 @@ return function(mod)
   end
 
   local function nearWarp(map, x, y)
-    -- 5-cell exclusion zone around doors (user: don't block doors).
-    -- In small interiors (<30x30), only check the exact cell:
-    -- a 5-cell radius would cover the entire house, blocking all sleep.
-    if not map then return false end
-    local w = map.widthCells or map.width or 0
-    local h = map.heightCells or map.height or 0
-    local isSmallInterior = w > 0 and h > 0 and w < 30 and h < 30
-    if isSmallInterior then
-      local ok, isWarp = pcall(function() return map:warpAtCell(x, y) end)
-      return ok and isWarp or false
+    if not map or x == nil or y == nil then return false end
+    local function isWarpAt(cx, cy)
+      if type(map.warpAtCell) == "function" then
+        local ok, v = pcall(map.warpAtCell, map, cx, cy)
+        if ok and v then return true end
+      end
+      if type(map.warpAt) == "function" then
+        local ok, v = pcall(map.warpAt, map, cx, cy)
+        if ok and v then return true end
+      end
+      local warps = (map.def and map.def.warps) or map.warps
+      if type(warps) == "table" then
+        for _, w in pairs(warps) do
+          if type(w) == "table" then
+            local wx = w.x or w.cellX or w.tx
+            local wy = w.y or w.cellY or w.ty
+            if wx == cx and wy == cy then return true end
+          end
+        end
+      end
+      return false
     end
+    -- 5-cell exclusion on every map (no small-interior exception).
+    x, y = math.floor(x), math.floor(y)
     for dx = -5, 5 do
       for dy = -5, 5 do
-        local ok, isWarp = pcall(function() return map:warpAtCell(x + dx, y + dy) end)
-        if ok and isWarp then
-          return true
-        end
+        if isWarpAt(x + dx, y + dy) then return true end
       end
     end
     return false
@@ -3220,6 +3236,13 @@ function putToSleep(npc)
     if (npc.wild or npc.isWild or npc.wildPokemon) and not isPokeAmbient(npc) then return end
     if isSpecialCharacter(npc) then return end
     if npc.nightlifeSleeping then return end
+    do
+      local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+      local map = ow and ow.map
+      if map and type(npc.cellX) == "number" and type(npc.cellY) == "number" then
+        if nearWarp(map, npc.cellX, npc.cellY) then return end
+      end
+    end
     if type(npc.def) ~= "table" then npc.def = {} end
     npc.nightlifeSleeping = true
     if npc.facing ~= nil then npc.kantoLifeSleepFacing = npc.facing end
@@ -6210,16 +6233,26 @@ local function nightlifeTick(world, dt)
     local function installPublicVoxelBubbleRenderer()
       if NPCMod and NPCMod._kantoLifePublicBubbleRenderer then return end
       pcall(function() fileLog("BUBBLE: attempting registration") end)
-      local okFind, battle = pcall(function()
-        return mod.find("BATTLE_ART_VOXEL_FORK")
-      end)
-      if not okFind or not battle then
-        okFind, battle = pcall(function()
-          return mod.find("BATTLE_ART_VOXEL")
-        end)
+      local battle = nil
+      if type(mod.find) == "function" then
+        for _, id in ipairs({
+          "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
+          "battle_art_voxel", "BattleArtVoxel", "DRAMATIC_SHAPE",
+          "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
+        }) do
+          local ok, m = pcall(mod.find, id)
+          if ok and m and m.exports and m.exports.characterRenderers
+             and type(m.exports.characterRenderers.register) == "function" then
+            battle = m
+            break
+          end
+          if ok and m and m.exports and m.exports.lib then
+            battle = m
+            break
+          end
+        end
       end
-      local api = okFind and battle and battle.exports
-        and battle.exports.characterRenderers or nil
+      local api = battle and battle.exports and battle.exports.characterRenderers or nil
       if not api or type(api.register) ~= "function" then
         pcall(function() fileLog("BUBBLE: registration failed - no characterRenderers API") end)
         return
@@ -6266,8 +6299,9 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
-        -- Center anchor (entry.h / 2) like Zzz and accessories — fixes off-center placement
-        local mesh = SpriteBillboards.mesh(def, 0, entry.h / 2)
+        -- Center both axes so translate(px+8, …) centers the bubble on the NPC.
+        -- anchorX=0 put the left edge at the NPC center (off to the right / off-screen).
+        local mesh = SpriteBillboards.mesh(def, entry.w / 2, entry.h / 2)
         if not mesh then return false end
 
         local px = tonumber(ctx.px) or tonumber(npc.px)
@@ -6276,7 +6310,6 @@ local function nightlifeTick(world, dt)
           or tonumber((npc.cellY or 0) * 16) or 0
         local gh = tonumber(ctx.groundHeight) or 0
 
-        -- Billboard yaw: face the camera (same approach as the Zzz).
         local zyaw = 0
         local host = ctx.host or {}
         local fp = host.FirstPerson
@@ -6285,15 +6318,10 @@ local function nightlifeTick(world, dt)
           if okYaw and tonumber(v) then zyaw = v end
         end
 
-        -- Above the head. Zzz sits at gh+17; bubbles go higher to avoid
-        -- overlap (gh+26). World-space position: no projection needed.
-        -- NOTE: No scale in model — mesh is pre-sized by SpriteBillboards.mesh
-        -- (same as Zzz). This was a key difference from the failed approach.
-        -- Scale 1.5x (bubbles were too small at 1:1). Scale in object space,
-        -- then rotate, then translate.
-        local bubbleScale = 1.15  -- ~emote size; 2.0 was too large
+        -- Head height; mesh origin is now the visual center of the bubble.
+        local bubbleScale = 1.0
         local model = Mat4.mul(
-          Mat4.translate(px + 8, gh + 22, py + 8),
+          Mat4.translate(px + 8, gh + 20, py + 8),
           Mat4.mul(
             Mat4.rotateY(zyaw),
             Mat4.scale(bubbleScale, bubbleScale, 1)
