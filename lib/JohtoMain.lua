@@ -3970,7 +3970,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prop = sleepPropImage(style)
         local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
         if not prop and not propBase then return end
-        local pscale = math.max(0.7, (tonumber(scale) or 1) * (16 / 20))
+        -- Props are 20×24; draw a bit larger than the 16px NPC footprint so
+        -- bed/bag/tent read clearly in voxel (screenshots: 0.8× was too small).
+        local pscale = math.max(1.0, (tonumber(scale) or 1) * 1.30)
         local pang = (style == 1) and 0 or (npc.johtoLifeSleepAngle or (math.pi / 2))
         Gfx.push("all")
         Gfx.setColor(1, 1, 1, 1)
@@ -3992,7 +3994,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             local iw = tonumber(spr.frameWidth) or 16
             local ih = tonumber(spr.frameHeight) or 16
             local quad = spr.frames and (spr.frames[0] or spr.frames[1])
-            local nscale = tonumber(scale) or 1
+            -- Keep body ~NPC size; props are larger so the frame frames the sleeper.
+            local nscale = math.max(0.9, (tonumber(scale) or 1) * 1.05)
             if quad then
               Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
             else
