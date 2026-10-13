@@ -344,15 +344,36 @@ return function(mod)
     local out, seen = {}, {}
     local function add(sp)
       if type(sp) ~= "string" or sp == "" then return end
-      sp = sp:upper()
+      sp = sp:upper():gsub(" ", "_"):gsub("'", "")
       if seen[sp] then return end
+      -- Skip non-species bookkeeping keys
+      if sp:find("^SPRITE") or sp:find("^PAL_") or sp == "NONE" then return end
       seen[sp] = true
       out[#out + 1] = sp
     end
     local data = game and game.data and game.data.pokemon
     if type(data) == "table" then
-      for id, _ in pairs(data) do
+      for id, def in pairs(data) do
         if type(id) == "string" then add(id) end
+        if type(def) == "table" then
+          if type(def.id) == "string" then add(def.id) end
+          if type(def.name) == "string" then add(def.name) end
+          if type(def.species) == "string" then add(def.species) end
+        end
+      end
+    end
+    -- Also every overworld sprite that looks like a mon
+    local sprites = game and game.data and game.data.sprites
+    if type(sprites) == "table" then
+      for id, _ in pairs(sprites) do
+        local s = tostring(id):upper()
+        if s:find("SPRITE_POKEMON_", 1, true) then
+          add(s:gsub("^SPRITE_POKEMON_", ""))
+        elseif s:find("^SPRITE_") and not s:find("PLAYER") and not s:find("TRAINER")
+           and not s:find("NPC") and not s:find("ITEM") then
+          local body = s:gsub("^SPRITE_", "")
+          if #body >= 3 and #body <= 12 then add(body) end
+        end
       end
     end
     if #out == 0 then
@@ -1245,10 +1266,42 @@ return function(mod)
     local wantP = pokeTargetCount(mapId, map)
     local function buildReady(list)
       local out, seen = {}, {}
+      local data = game and game.data
+      local sprites = data and data.sprites
       for _, sp in ipairs(list or {}) do
         if type(sp) == "string" and not seen[sp] then
+          sp = sp:upper():gsub(" ", "_")
           seen[sp] = true
           local spr = resolvePokeSprite(sp)
+          if not spr and sprites and data and data.pokemon then
+            -- Full-dex variety: synthesize an overworld sprite from battle art
+            -- so every Pokédex species can appear as an ambient NPC.
+            local pdef = data.pokemon[sp]
+            if type(pdef) == "table" then
+              local img = pdef.front or pdef.frontSprite or pdef.icon
+                or pdef.menuIcon or pdef.image
+              if type(img) == "string" and sprites[img] then
+                img = sprites[img].image or img
+              end
+              if img then
+                local id = "SPRITE_KANTO_POKE_NPC_" .. sp
+                if not sprites[id] then
+                  sprites[id] = {
+                    id = id,
+                    image = img,
+                    frames = 1,
+                    walker = false,
+                    trueColor = true,
+                    frameWidth = tonumber(pdef.frameWidth) or 16,
+                    frameHeight = tonumber(pdef.frameHeight) or 16,
+                    spriteType = "POKEMON_SPRITE",
+                    species = sp,
+                  }
+                end
+                spr = id
+              end
+            end
+          end
           if spr then out[#out + 1] = { species = sp, sprite = spr } end
         end
       end
@@ -3937,13 +3990,15 @@ function putToSleep(npc)
     end
 
     local function voxel3D()
-      if voxelTried then return voxel3d end
-      voxelTried = true
+      -- Retry every call until found: Battle Art may load AFTER Kanto Life.
+      -- The old voxelTried latch permanently disabled canvas bubbles.
+      if voxel3d then return voxel3d end
       if type(mod.find) ~= "function" then return nil end
       local ids = {
         voxelOwner(),
-        "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "DRAMATIC_SHAPE",
-        "POTATO_VOXEL", "PotatoVoxel", "potato_voxel", "battle_art_voxel",
+        "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
+        "DRAMATIC_SHAPE", "POTATO_VOXEL", "PotatoVoxel", "potato_voxel",
+        "battle_art_voxel", "BattleArtVoxel",
       }
       for _, id in ipairs(ids) do
         if id then
@@ -4032,9 +4087,9 @@ function putToSleep(npc)
           if not py then py = (tonumber(npc.cellY) or 0) * 16 end
           local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
           -- Ground/feet point — engine emote + NPC Bubbles
-          local okP, sx, sy = pcall(v.project, px + 8, gh, py + 16)
+          local okP, sx, sy = pcall(v.project, px + 8, gh + 16, py + 8)
           if not (okP and type(sx) == "number") and gh ~= 0 then
-            okP, sx, sy = pcall(v.project, px + 8, 0, py + 16)
+            okP, sx, sy = pcall(v.project, px + 8, 16, py + 8)
           end
           if okP and type(sx) == "number" and type(sy) == "number" then
             sx, sy = sx / projDiv, sy / projDiv
@@ -4097,24 +4152,23 @@ function putToSleep(npc)
       if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: bubble pipeline registered") end
     end)
 
-    -- Last-resort only if content API is missing: wrap worldPresent once.
-    -- Prefer registered pipeline; wrapping is known to misplace on some arenas.
-    if not registered then
-      pcall(function()
-        local Pipelines = safeRequire("src.render.Pipelines")
-        if not (Pipelines and type(Pipelines.worldPresent) == "function") then return end
-        if Pipelines._kantoLifeCollisionBubbleWrapped then return end
-        local base = Pipelines.worldPresent
-        Pipelines.worldPresent = function(canvas, ctx)
-          local out = base(canvas, ctx)
-          if out and ctx then
-            pcall(drawBubblesOnCanvas, out, ctx)
-          end
-          return out
-        end
-        Pipelines._kantoLifeCollisionBubbleWrapped = true
-      end)
-    end
+    -- Always install a worldPresent overlay as well (idempotent). CharacterRenderers
+    -- + content pipeline can miss on some Battle Art forks; this matches the Gen2
+    -- path that successfully paints overlays every frame.
+    pcall(function()
+      local Pipelines = safeRequire("src.render.Pipelines")
+      if not (Pipelines and type(Pipelines.worldPresent) == "function") then return end
+      if Pipelines._kantoLifeCollisionBubbleWrapped then return end
+      local base = Pipelines.worldPresent
+      Pipelines._kantoLifeCollisionBubbleBase = base
+      Pipelines.worldPresent = function(canvas, ctx)
+        local out = base(canvas, ctx)
+        pcall(drawBubblesOnCanvas, out or canvas, ctx)
+        return out
+      end
+      Pipelines._kantoLifeCollisionBubbleWrapped = true
+      if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: Gen1 bubble worldPresent wrap installed") end
+    end)
   end
 
   
@@ -6290,6 +6344,7 @@ local function nightlifeTick(world, dt)
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
         local entry = getBubbleImage(text)
         if not entry or not entry.image then return false end
+        ensureAssetHook()
         local def = {
           id = "KANTO_LIFE_BUBBLE",
           image = entry.path,
@@ -6299,9 +6354,12 @@ local function nightlifeTick(world, dt)
           trueColor = true,
           walker = false,
         }
-        -- Center both axes so translate(px+8, …) centers the bubble on the NPC.
-        -- anchorX=0 put the left edge at the NPC center (off to the right / off-screen).
         local mesh = SpriteBillboards.mesh(def, entry.w / 2, entry.h / 2)
+        if not mesh and entry.image then
+          -- Some SpriteBillboards builds want the Image object, not a path key.
+          def.image = entry.image
+          mesh = SpriteBillboards.mesh(def, entry.w / 2, entry.h / 2)
+        end
         if not mesh then return false end
 
         local px = tonumber(ctx.px) or tonumber(npc.px)

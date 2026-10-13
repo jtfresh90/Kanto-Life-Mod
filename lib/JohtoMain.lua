@@ -1436,6 +1436,12 @@ return function(mod)
         end
       end
       refreshCurrentMap()
+      -- Immediately re-apply sleep when rate / toggle / day-sleepers / style change
+      if p.key == "sleep_pct" or p.key == "sleeping_npcs" or p.key == "day_sleepers"
+         or p.key == "sleep_style" or p.key == "sleep_bubbles" then
+        local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+        if ow then pcall(johtoSleepTick, ow) end
+      end
     end)
   end
 
@@ -1446,22 +1452,34 @@ return function(mod)
       if not map or not npc then return false end
       local x, y = npc.cellX, npc.cellY
       if x == nil or y == nil then return false end
+      -- Only block the door tile itself and immediate neighbors (1 cell).
       for _, w in ipairs(map.warps or (map.def and map.def.warps) or {}) do
-        local wx, wy = tonumber(w.x), tonumber(w.y)
-        if wx and wy and math.abs(wx-x) <= 1 and math.abs(wy-y) <= 1 then return false end
+        local wx = tonumber(w.x or w.cellX or w.tx)
+        local wy = tonumber(w.y or w.cellY or w.ty)
+        if wx and wy and math.abs(wx - x) <= 1 and math.abs(wy - y) <= 1 then
+          return false
+        end
+      end
+      if type(map.warpAtCell) == "function" then
+        for dx = -1, 1 do
+          for dy = -1, 1 do
+            local ok, isW = pcall(map.warpAtCell, map, x + dx, y + dy)
+            if ok and isW then return false end
+          end
+        end
       end
       if type(map.isDoorTileCell) == "function" then
         local ok, door = pcall(map.isDoorTileCell, map, x, y)
         if ok and door then return false end
       end
-      if type(map.isWalkableCell) == "function" then
-        local ok, walk = pcall(map.isWalkableCell, map, x, y)
-        if not ok or not walk then return false end
-      end
+      -- Do NOT require isWalkableCell — NPCs already stand on valid tiles;
+      -- that check was eliminating most candidates on some maps.
       return true
     end
     local function putAsleep(npc)
       if npc.nightlifeSleeping then return end
+      -- Door exclusion is handled by safe() (1-cell). A 5-cell radius was
+      -- rejecting almost every NPC in towns and all indoor sleepers.
       npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0
       npc.spriteYOffset = 0; npc.frozen = true; npc.nightlifeSleeping = true
       npc.sleepPose = true
@@ -1503,17 +1521,24 @@ return function(mod)
     -- Humans: sleep_pct of ALL ambient humans (not a pre-filtered 30% day subset).
     -- Day requires day_sleepers ON; night always eligible.
     local humanCandidates = {}
+    local player = world.player
     for _, npc in ipairs(world.npcs or {}) do
-      local d = npc.def or {}
-      local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
-      local isPoke = d.johtoLifePokemon or npc.johtoLifePokemon
-      if isAmb and not isPoke and safe(npc) then
-        local spr = tostring(d.sprite or ""):upper()
-        local nm = tostring(d.name or ""):upper()
+      if npc and npc ~= player then
+        local d = npc.def or {}
+        local isPoke = d.johtoLifePokemon or npc.johtoLifePokemon
+          or d.species or npc.species or d.pokemon
+        local spr = tostring(d.sprite or npc.sprite or ""):upper()
+        local nm = tostring(d.name or npc.name or ""):upper()
         local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
           or spr:find("CLERK", 1, true) or spr:find("SAILOR", 1, true)
-        if not isExcluded then
-          local id = tostring(npc.id or d.name or "")
+          or spr:find("PLAYER", 1, true) or nm:find("PLAYER", 1, true)
+          or d.isPlayer or npc.isPlayer
+        -- Prefer ambients; also allow other human map NPCs so sleep % works
+        -- even when extra-NPC count is 0.
+        local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+        local isHumanish = not isPoke and not isExcluded
+        if isHumanish and safe(npc) and (isAmb or not d.trainerClass) then
+          local id = tostring(npc.id or d.name or nm or "")
           local h = 0; for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
           humanCandidates[#humanCandidates + 1] = { npc = npc, hash = h }
         end
@@ -2585,7 +2610,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
 
     -- Gen2 sleep visuals: baseDraw always (voxel-safe); Zzz after; 2D side-lie when possible
     
-function isVoxelPresentation()
+local function isVoxelPresentation()
       -- Any Battle Art / Dramatic Shape voxel level other than OFF
       local names = {
         "DRAMATIC_SHAPE", "DRAMALESS_SHAPE", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_FORK",
@@ -3022,6 +3047,17 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             pcall(bakeRotatedSleepSprite, self)
           end
           local sprite, px, py, facing, phase, flip, extra = basePose(self, ...)
+          -- Voxel owns layering for tent/bed/bag via worldPresent drawPropAt.
+          -- Hide the engine billboard so it does not sit under the underlay
+          -- (or show beside a tent). drawPropAt paints underlay → body → overlay.
+          if self and self.nightlifeSleeping and isVoxelPresentation() then
+            local style = 0
+            pcall(function() style = resolveSleepStyle(self) end)
+            style = math.floor(tonumber(style) or 0)
+            if style >= 1 then
+              return nil, px, py, facing, phase, flip, extra
+            end
+          end
           local travel = self and self._johtoLifeTravelAnim
           if not travel then return sprite, px, py, facing, phase, flip, extra end
           local frame = tonumber(travel.frame) or 0
@@ -3164,8 +3200,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         Gfx.pop()
       end
 
-      -- Props only at the projected body center. Engine draws the sleeper via
-      -- pose — redrawing it here caused a second, offset body in voxel.
+      -- Voxel 3-layer at projected body center:
+      --   tent (1): tent only (engine body hidden in pose)
+      --   bag/bed (2/3): underlay → baked body → overlay (engine body hidden)
+      -- Hiding the engine billboard prevents the "sprite under the bed" look.
       local function drawPropAt(Gfx, npc, sx, sy, scale)
         local style = 0
         pcall(function() style = resolveSleepStyle(npc) end)
@@ -3181,6 +3219,28 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         if propBase then
           local bw, bh = propBase:getDimensions()
           Gfx.draw(propBase, sx, sy, pang, pscale, pscale, bw / 2, bh / 2)
+        end
+        -- Body between underlay and overlay for bed/bag only.
+        if style == 2 or style == 3 then
+          pcall(function()
+            local spr = npc.sprite
+            if not spr then return end
+            local img = spr.image
+            if type(spr.resolveImage) == "function" then
+              local ok, r = pcall(spr.resolveImage, spr)
+              if ok and r then img = r end
+            end
+            if not img then return end
+            local iw = tonumber(spr.frameWidth) or 16
+            local ih = tonumber(spr.frameHeight) or 16
+            local quad = spr.frames and (spr.frames[0] or spr.frames[1])
+            local nscale = tonumber(scale) or 1
+            if quad then
+              Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+            else
+              Gfx.draw(img, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+            end
+          end)
         end
         if prop then
           local pw, ph = prop:getDimensions()
