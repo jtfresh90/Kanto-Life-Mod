@@ -520,6 +520,50 @@ return function(mod)
         end
       end
     end
+    -- HGSS_SPRITES: load pokemon-overworld sheet by national dex when registry has no art
+    pcall(function()
+      if pokeSpriteCache[species] then return end
+      local hgss = mod.find("HGSS_SPRITES")
+      if not (hgss and hgss.assets and type(hgss.assets.path) == "function") then return end
+      local DEX = {
+        PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,
+        DODUO=84,DODRIO=85,CHARIZARD=6,AERODACTYL=142,DRAGONITE=149,BUTTERFREE=12,
+        ZUBAT=41,GOLBAT=42,VENOMOTH=49,SCYTHER=123,GYARADOS=130,
+        ARTICUNO=144,ZAPDOS=145,MOLTRES=146,ABRA=63,KADABRA=64,ALAKAZAM=65,
+        SLOWPOKE=79,SLOWBRO=80,DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,
+        STARMIE=121,MR_MIME=122,JYNX=124,MEWTWO=150,MEW=151,
+      }
+      local num = DEX[species]
+      local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
+      if type(pdef) == "table" then
+        num = num or tonumber(pdef.number or pdef.dex or pdef.nationalDex)
+      end
+      if not num then return end
+      local path = hgss.assets:path(string.format("assets/gen2/pokemon-overworld/%03d-normal.png", num))
+        or hgss.assets:path(string.format("assets/gen1/pokemon-overworld/%03d-normal.png", num))
+      if not path then return end
+      local okI, img = pcall(love.graphics.newImage, path)
+      if not (okI and img) then return end
+      local iw, ih = img:getDimensions()
+      local fw, fh = math.min(32, iw), math.min(32, ih)
+      local c = love.graphics.newCanvas(16, 16)
+      local prev = love.graphics.getCanvas()
+      love.graphics.setCanvas(c)
+      love.graphics.clear(0, 0, 0, 0)
+      love.graphics.setColor(1, 1, 1, 1)
+      local q = love.graphics.newQuad(0, 0, fw, fh, iw, ih)
+      love.graphics.draw(img, q, 0, 0, 0, 16 / fw, 16 / fh)
+      love.graphics.setCanvas(prev)
+      tryDef({
+        id = "SPRITE_KANTO_TRAVEL_HGSS_" .. species,
+        image = c, frames = 1, walker = false, trueColor = true,
+        frameWidth = 16, frameHeight = 16, spriteType = "POKEMON_SPRITE", species = species,
+      })
+    end)
+    if pokeSpriteCache[species] and (not strict or pokeSpriteExact[species]) then
+      return pokeSpriteCache[species]
+    end
+
     -- Only reuse a live ambient whose SPECIES matches (never borrow Lapras/surf
     -- art for a psychic/flying travel swap — that was the surfing-sprite bug).
     if not strict then pcall(function()
@@ -546,14 +590,33 @@ return function(mod)
         img = sprites[img].image or img
       end
       if img then
+        -- Scale battle/menu art down to a 16x16 OW card so travel mons are not huge
+        local scaled = nil
+        pcall(function()
+          local src = img
+          if type(src) == "string" then
+            local okI, i = pcall(love.graphics.newImage, src)
+            if okI then src = i else return end
+          end
+          if type(src.getDimensions) ~= "function" then return end
+          local sw, sh = src:getDimensions()
+          local c = love.graphics.newCanvas(16, 16)
+          local prev = love.graphics.getCanvas()
+          love.graphics.setCanvas(c)
+          love.graphics.clear(0, 0, 0, 0)
+          love.graphics.setColor(1, 1, 1, 1)
+          love.graphics.draw(src, 0, 0, 0, 16 / math.max(1, sw), 16 / math.max(1, sh))
+          love.graphics.setCanvas(prev)
+          scaled = c
+        end)
         local obj = tryDef({
           id = "SPRITE_KANTO_TRAVEL_" .. species,
-          image = img,
+          image = scaled or img,
           frames = 1,
           walker = false,
           trueColor = true,
-          frameWidth = tonumber(pdef.frameWidth) or 16,
-          frameHeight = tonumber(pdef.frameHeight) or 16,
+          frameWidth = 16,
+          frameHeight = 16,
           spriteType = "POKEMON_SPRITE",
           species = species,
         })
@@ -4108,7 +4171,7 @@ function putToSleep(npc)
           local mon = nil
           pcall(function() mon = getPokeSpriteObject(tp.psySpecies) end)
           if not mon then
-            for _, fb in ipairs({"ABRA", "KADABRA", "ALAKAZAM", "MEW", "MEWTWO"}) do
+            for _, fb in ipairs({"ABRA","KADABRA","ALAKAZAM","DROWZEE","HYPNO","MR_MIME","JYNX","SLOWBRO","STARMIE","MEW","MEWTWO"}) do
               pcall(function() mon = getPokeSpriteObject(fb) end)
               if mon then break end
             end
@@ -6418,7 +6481,26 @@ local function nightlifeTick(world, dt)
         sleepImgCache[bodyPath] = body
         sleepImgCache[zPath] = z
         ensureAssetHook()
-        local bodyMesh = quadMesh(bodyPath, body, w, h, bodyPath)
+        -- Fit sleep body to a 16x16 card so HGSS 32px / Snorlax / HD sheets
+        -- never dominate the voxel view or overflow the bed footprint.
+        local fitW, fitH, fitBody = w, h, body
+        if (w and w > 16) or (h and h > 16) then
+          local okS, scaled = pcall(function()
+            local c = love.graphics.newCanvas(16, 16)
+            local prev = love.graphics.getCanvas()
+            love.graphics.setCanvas(c)
+            love.graphics.clear(0, 0, 0, 0)
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(body, 0, 0, 0, 16 / math.max(1, w), 16 / math.max(1, h))
+            love.graphics.setCanvas(prev)
+            return c
+          end)
+          if okS and scaled then
+            fitBody, fitW, fitH = scaled, 16, 16
+            sleepImgCache[bodyPath] = fitBody
+          end
+        end
+        local bodyMesh = quadMesh(bodyPath, fitBody, fitW, fitH, bodyPath)
         local zMesh = quadMesh(zPath, z, 5, 7, zPath)
         if not bodyMesh or not zMesh then return false end
 

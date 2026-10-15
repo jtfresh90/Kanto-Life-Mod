@@ -1558,6 +1558,11 @@ return function(mod)
       npc.spriteYOffset = 0; npc.frozen = true; npc.nightlifeSleeping = true
       npc.sleepPose = true
       if npc.def then npc.def.sleeping = true end
+      -- Keep the real overworld sprite (HGSS 32px etc.) for voxel body layer.
+      -- Pose later swaps in an invisible card so BA does not draw a standing body.
+      if npc.sprite and not npc.sprite._johtoInvisible then
+        npc._johtoOrigSleepSprite = npc.sprite
+      end
       if npc.facing ~= nil and npc.johtoLifeSleepFacing == nil then
         npc.johtoLifeSleepFacing = npc.facing
       end
@@ -1573,6 +1578,7 @@ return function(mod)
     local function wakeUp(npc)
       if not npc.nightlifeSleeping then return end
       npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
+      npc._johtoOrigSleepSprite = nil
       npc.sleepPose = nil
       if npc.def then npc.def.sleeping = nil end
       if npc._johtoLifeSavedVisible then
@@ -2703,9 +2709,96 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
 
 
     -- Gen2 sleep visuals: baseDraw always (voxel-safe); Zzz after; 2D side-lie when possible
-    
-local _johtoSleepInvisibleSprite
-local function isVoxelPresentation()
+
+    local _johtoSleepInvisibleSprite
+    local _johtoCompositeCache = {}
+
+    -- One card BA draws like any other NPC (same FP/TP sizing as default sleepers).
+    local function bakeVoxelSleepComposite(npc)
+      if not npc then return nil end
+      local style = 0
+      pcall(function() style = resolveSleepStyle(npc) end)
+      style = math.floor(tonumber(style) or 0)
+
+      local bodySrc = npc._johtoSleepBodyImage
+      local spr = npc._johtoOrigSleepSprite or npc.sprite
+      if not bodySrc and spr and not spr._johtoInvisible and not spr._johtoSleepComposite then
+        if spr._johtoSleepBaked and spr.image then
+          bodySrc = spr.image
+        elseif type(spr.resolveImage) == "function" then
+          local ok, r = pcall(spr.resolveImage, spr)
+          if ok then bodySrc = r end
+        else
+          bodySrc = spr.image
+        end
+      end
+
+      local prop = (style >= 1) and sleepPropImage(style) or nil
+      local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
+      if style == 1 and not prop then return nil end
+      if style == 0 and not bodySrc then return nil end
+      if (style == 2 or style == 3) and not (prop or propBase or bodySrc) then return nil end
+
+      local cacheKey = tostring(npc) .. "#" .. tostring(style) .. "#"
+        .. tostring(bodySrc) .. "#" .. tostring(prop) .. "#" .. tostring(propBase)
+      if _johtoCompositeCache[cacheKey] then return _johtoCompositeCache[cacheKey] end
+
+      local SIZE = 16
+      local okC, canvas = pcall(function()
+        local c = love.graphics.newCanvas(SIZE, SIZE)
+        local prev = love.graphics.getCanvas()
+        love.graphics.setCanvas(c)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setColor(1, 1, 1, 1)
+        local function blit(img, scale)
+          if not img or type(img.getDimensions) ~= "function" then return end
+          local iw, ih = img:getDimensions()
+          local s = scale or (SIZE / math.max(iw, ih, 1))
+          local dx = (SIZE - iw * s) / 2
+          local dy = (SIZE - ih * s) / 2
+          love.graphics.draw(img, dx, dy, 0, s, s)
+        end
+        if style == 1 then
+          blit(prop)
+        elseif style == 2 or style == 3 then
+          if propBase then blit(propBase) end
+          if bodySrc then blit(bodySrc, 0.85) end
+          if prop then blit(prop) end
+        else
+          if bodySrc then blit(bodySrc) end
+        end
+        love.graphics.setCanvas(prev)
+        pcall(c.setFilter, c, "nearest", "nearest")
+        return c
+      end)
+      if not (okC and canvas) then return nil end
+
+      local qok, q = pcall(love.graphics.newQuad, 0, 0, SIZE, SIZE, SIZE, SIZE)
+      local comp = {
+        image = canvas,
+        frames = qok and { [0] = q } or nil,
+        frameWidth = SIZE,
+        frameHeight = SIZE,
+        frameCount = 1,
+        def = {
+          id = "JOHTO_LIFE_SLEEP_COMPOSITE",
+          image = canvas,
+          frames = 1,
+          frameWidth = SIZE,
+          frameHeight = SIZE,
+          trueColor = true,
+          walker = false,
+        },
+        _johtoSleepComposite = true,
+        _johtoSleepBaked = true,
+        resolveImage = function(self) return self.image end,
+      }
+      _johtoCompositeCache[cacheKey] = comp
+      npc._johtoVoxelSleepComposite = comp
+      return comp
+    end
+
+    local function isVoxelPresentation()
       -- Any Battle Art / Dramatic Shape voxel level other than OFF
       local names = {
         "DRAMATIC_SHAPE", "DRAMALESS_SHAPE", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_FORK",
@@ -3067,7 +3160,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local travelSpriteCache = {}
         local function travelPokemonSprite(species)
           if type(species) ~= "string" or species == "" then return nil end
-          species = tostring(species):upper():gsub(" ", "_")
+          species = tostring(species):upper():gsub(" ", "_"):gsub("'", "")
           if travelSpriteCache[species] then return travelSpriteCache[species] end
           local okRenderer, Renderer = pcall(require, "src.render.SpriteRenderer")
           if not (okRenderer and Renderer and type(Renderer.new) == "function") then return nil end
@@ -3075,73 +3168,229 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local data = g and g.data
           local sprites = data and data.sprites
 
-          -- 1) Same path ambient poke NPCs use: SPRITE_<SPECIES> overworld art
-          --    (full color). Menu icons (gen2Icons) are often grayscale.
+          local function accept(spr)
+            if spr then travelSpriteCache[species] = spr; return spr end
+            return nil
+          end
+
+          -- 1) Registry overworld sprites
           local candidates = {
-            "SPRITE_" .. species,
-            species,
-            "SPRITE_POKEMON_" .. species,
+            "SPRITE_" .. species, species, "SPRITE_POKEMON_" .. species,
+            "SPRITE_POKE_" .. species,
           }
           if sprites then
             for _, id in ipairs(candidates) do
               local def = sprites[id]
               if type(def) == "table" then
                 local okS, spr = pcall(Renderer.new, def)
-                if okS and spr then
-                  travelSpriteCache[species] = spr
-                  return spr
-                end
+                if okS and accept(spr) then return spr end
               end
             end
-            -- Any sprite id containing the species name
             for id, def in pairs(sprites) do
               local up = tostring(id):upper()
               if up:find(species, 1, true) and not up:find("BACK", 1, true)
+                 and not up:find("TRAINER", 1, true)
                  and type(def) == "table" then
                 local okS, spr = pcall(Renderer.new, def)
-                if okS and spr then
-                  travelSpriteCache[species] = spr
-                  return spr
-                end
+                if okS and accept(spr) then return spr end
               end
             end
           end
 
-          -- 2) Clone a live ambient poke NPC of the same species (guaranteed color)
+          -- 2) Prefer registry defs already patched by HGSS_SPRITES
+          if sprites then
+            local best
+            for id, def in pairs(sprites) do
+              local up = tostring(id):upper()
+              if type(def) == "table" and up:find(species, 1, true)
+                 and not up:find("BACK", 1, true)
+                 and not up:find("TRAINER", 1, true) then
+                if def.hgssNativeImage or def.hgssVoxelWidth or def.hgssFrameWidth then
+                  local okS, spr = pcall(Renderer.new, def)
+                  if okS and accept(spr) then return spr end
+                end
+                if not best then best = def end
+              end
+            end
+          end
+
+          -- 3) Load HGSS pokemon-overworld sheet by national dex number
+          pcall(function()
+            local hgss = mod.find("HGSS_SPRITES")
+            if not hgss then
+              for _, id in ipairs({"HGSS_SPRITES", "hgss_sprites", "HGSS Visual Overhaul"}) do
+                local ok, m = pcall(function() return mod.find(id) end)
+                if ok and m then hgss = m; break end
+              end
+            end
+            if not (hgss and hgss.assets and type(hgss.assets.path) == "function") then return end
+
+            local DEX = {
+              PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,FARFETCH_D=83,
+              DODUO=84,DODRIO=85,CHARIZARD=6,AERODACTYL=142,DRAGONITE=149,BUTTERFREE=12,
+              ZUBAT=41,GOLBAT=42,CROBAT=169,VENOMOTH=49,SCYTHER=123,GYARADOS=130,
+              ARTICUNO=144,ZAPDOS=145,MOLTRES=146,HOOTHOOT=163,NOCTOWL=164,NATU=177,XATU=178,
+              SKARMORY=227,MURKROW=198,GLIGAR=207,MANTINE=226,TOGETIC=176,LUGIA=249,HO_OH=250,
+              ABRA=63,KADABRA=64,ALAKAZAM=65,SLOWPOKE=79,SLOWBRO=80,SLOWKING=199,
+              DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,STARYU=120,STARMIE=121,
+              MR_MIME=122,JYNX=124,SMOOCHUM=238,ESPEON=196,UNOWN=201,WOBBUFFET=202,
+              GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,MEWtwo=150,
+            }
+            local num = DEX[species]
+            local pdef = data and data.pokemon and data.pokemon[species]
+            if type(pdef) == "table" then
+              num = num or tonumber(pdef.number or pdef.dex or pdef.nationalDex or pdef.natDex or pdef.id)
+            end
+            if not num and type(data) == "table" and data.pokemon then
+              for k, v in pairs(data.pokemon) do
+                if type(k) == "string" and k:upper():gsub(" ", "_") == species and type(v) == "table" then
+                  num = tonumber(v.number or v.dex or v.nationalDex)
+                  break
+                end
+              end
+            end
+            if not num then return end
+            local rel = string.format("assets/gen2/pokemon-overworld/%03d-normal.png", num)
+            local path = hgss.assets:path(rel)
+            if not path then
+              rel = string.format("assets/gen2/pokemon-overworld/%d-normal.png", num)
+              path = hgss.assets:path(rel)
+            end
+            if not path then return end
+            local okI, img = pcall(love.graphics.newImage, path)
+            if not (okI and img) then return end
+            pcall(img.setFilter, img, "nearest", "nearest")
+            local iw, ih = img:getDimensions()
+            local fw, fh = math.min(32, iw), math.min(32, ih)
+            local okC, canvas = pcall(function()
+              local c = love.graphics.newCanvas(16, 16)
+              local prev = love.graphics.getCanvas()
+              love.graphics.setCanvas(c)
+              love.graphics.clear(0, 0, 0, 0)
+              love.graphics.setColor(1, 1, 1, 1)
+              local q = love.graphics.newQuad(0, 0, fw, fh, iw, ih)
+              love.graphics.draw(img, q, 0, 0, 0, 16 / fw, 16 / fh)
+              love.graphics.setCanvas(prev)
+              return c
+            end)
+            if not (okC and canvas) then return end
+            -- Register canvas so SpriteRenderer/Assets can resolve it
+            local imgKey = "johto_life_travel_hgss_" .. species
+            pcall(function()
+              local okA, Assets = pcall(require, "src.render.Assets")
+              if okA and Assets then
+                if not Assets._johtoTravelHooked and type(Assets.image) == "function" then
+                  local baseImg = Assets.image
+                  local bag = {}
+                  Assets.image = function(p, ...)
+                    if bag[p] then return bag[p] end
+                    if type(p) == "string" and p:find("johto_life_travel_hgss_", 1, true) then
+                      return canvas
+                    end
+                    return baseImg(p, ...)
+                  end
+                  Assets._johtoTravelHooked = true
+                  Assets._johtoTravelBag = bag
+                end
+                if Assets._johtoTravelBag then Assets._johtoTravelBag[imgKey] = canvas end
+              end
+            end)
+            local def = {
+              id = "SPRITE_JOHTO_TRAVEL_HGSS_" .. species,
+              image = imgKey,
+              frames = 1, walker = false, trueColor = true,
+              frameWidth = 16, frameHeight = 16,
+              spriteType = "POKEMON_SPRITE", species = species,
+            }
+            local okS, spr = pcall(Renderer.new, def)
+            if not (okS and spr) then
+              def.image = canvas
+              okS, spr = pcall(Renderer.new, def)
+            end
+            if okS and accept(spr) then return end
+          end)
+          if travelSpriteCache[species] then return travelSpriteCache[species] end
+
+          -- 3) Live ambient of same species
           pcall(function()
             local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
             for _, n in ipairs((ow and ow.npcs) or {}) do
-              local mon = (n.def and n.def.johtoLifeMon) or n.johtoLifeMon
-              if mon and tostring(mon):upper() == species and n.sprite then
-                travelSpriteCache[species] = n.sprite
+              local mon = (n.def and (n.def.species or n.def.johtoLifeSpecies or n.def.kantoLifeSpecies))
+                or n.species or n.johtoLifeSpecies
+              if mon and tostring(mon):upper():gsub(" ", "_"):gsub("'", "") == species and n.sprite then
+                accept(n.sprite)
+                return
               end
             end
           end)
           if travelSpriteCache[species] then return travelSpriteCache[species] end
 
-          -- 3) Last resort: gen2 menu icon (may be limited palette)
+          -- 4) Battle front / icon synthesised to 16x16
+          local pdef = data and data.pokemon and data.pokemon[species]
+          if type(pdef) == "table" then
+            local img = pdef.front or pdef.frontSprite or pdef.icon or pdef.menuIcon or pdef.image
+            if type(img) == "string" and sprites and sprites[img] then
+              img = sprites[img].image or img
+            end
+            if img then
+              local okC, canvas = pcall(function()
+                local src = img
+                if type(src) == "string" then
+                  local okI, i = pcall(love.graphics.newImage, src)
+                  if okI then src = i else return nil end
+                end
+                if type(src.getDimensions) ~= "function" then return nil end
+                local sw, sh = src:getDimensions()
+                local c = love.graphics.newCanvas(16, 16)
+                local prev = love.graphics.getCanvas()
+                love.graphics.setCanvas(c)
+                love.graphics.clear(0, 0, 0, 0)
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.draw(src, 0, 0, 0, 16 / math.max(1, sw), 16 / math.max(1, sh))
+                love.graphics.setCanvas(prev)
+                return c
+              end)
+              if okC and canvas then
+                local def = {
+                  id = "SPRITE_JOHTO_TRAVEL_SYN_" .. species,
+                  image = canvas, frames = 1, walker = false,
+                  trueColor = true, frameWidth = 16, frameHeight = 16,
+                  spriteType = "POKEMON_SPRITE", species = species,
+                }
+                local okS, spr = pcall(Renderer.new, def)
+                if okS and accept(spr) then return spr end
+              end
+            end
+          end
+
+          -- 5) gen2 menu icon last resort
           local icons = data and data.gen2Icons
           local iconId = icons and icons.species and icons.species[species]
           local entry = iconId and icons.icons and icons.icons[iconId]
           if entry and entry.image then
             local def = {
               id = "SPRITE_JOHTO_TRAVEL_MON_" .. species,
-              image = entry.image,
-              frames = entry.frames or 2,
-              walker = false,
+              image = entry.image, frames = entry.frames or 2, walker = false,
               spriteType = "POKEMON_SPRITE",
               palette = entry.palette or "PAL_OW_RED",
-              paletteId = entry.paletteId or 0,
-              species = species,
+              paletteId = entry.paletteId or 0, species = species,
             }
             local okS, spr = pcall(Renderer.new, def)
-            if okS and spr then travelSpriteCache[species] = spr; return spr end
+            if okS and accept(spr) then return spr end
           end
           return nil
         end
+
+
         NPC.pose = function(self, ...)
-          if self and self.nightlifeSleeping and self.sprite and not self.sprite._johtoSleepBaked then
-            pcall(bakeRotatedSleepSprite, self)
+          if self and self.nightlifeSleeping and self.sprite and not self.sprite._johtoInvisible then
+            if not self.sprite._johtoSleepBaked then
+              pcall(bakeRotatedSleepSprite, self)
+            end
+            if self.sprite and self.sprite._johtoSleepBaked and self.sprite.image then
+              self._johtoSleepBodyImage = self.sprite.image
+              self._johtoOrigSleepSprite = self._johtoOrigSleepSprite or self.sprite
+            end
           end
           local sprite, px, py, facing, phase, flip, extra = basePose(self, ...)
           -- Voxel owns layering for tent/bed/bag via worldPresent drawPropAt.
@@ -3151,30 +3400,21 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             local style = 0
             pcall(function() style = resolveSleepStyle(self) end)
             style = math.floor(tonumber(style) or 0)
-            if style >= 1 then
-              self._johtoLifeVoxelSleepHidden = true
-              self.visible = false
-              self.hidden = true
-              self._johtoLifeSavedVisible = true
-              -- Fully transparent sprite so BA has nothing to extrude into a blob
-              if not _johtoSleepInvisibleSprite then
-                pcall(function()
-                  local img = love.graphics.newCanvas(2, 2)
-                  love.graphics.setCanvas(img)
-                  love.graphics.clear(0, 0, 0, 0)
-                  love.graphics.setCanvas()
-                  img:setFilter("nearest", "nearest")
-                  _johtoSleepInvisibleSprite = {
-                    image = img,
-                    frames = { [0] = love.graphics.newQuad(0,0,2,2,2,2) },
-                    frameWidth = 2, frameHeight = 2, frameCount = 1,
-                    def = { trueColor = true, frames = 1, walker = false, image = img },
-                    _johtoInvisible = true,
-                    _johtoSleepBaked = true, -- stop bakeRotated from restoring body art
-                  }
-                end)
+            -- Voxel: return a single composite card (prop + body) so Battle Art
+            -- draws it through the SAME drawEntity/billboard path as default
+            -- sleepers — no custom matrices, no FP/TP shrink.
+            if style >= 0 then
+              if self.sprite and not self.sprite._johtoSleepComposite and not self.sprite._johtoInvisible then
+                self._johtoOrigSleepSprite = self._johtoOrigSleepSprite or self.sprite
               end
-              return _johtoSleepInvisibleSprite or nil, px, py, facing, 0, false, extra
+              local comp = nil
+              pcall(function() comp = bakeVoxelSleepComposite(self) end)
+              if comp then
+                if _G._johtoLifeTagSleeperSprite then
+                  pcall(_G._johtoLifeTagSleeperSprite, comp, self)
+                end
+                return comp, px, py, facing, 0, false, extra
+              end
             end
           elseif self and self._johtoLifeSavedVisible then
             self.visible = true
@@ -3551,41 +3791,46 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
   -- Ports Gen1's floor-geometry claim so beds/bags lie flat, tents stay
   -- upright, BA does not draw a standing/duplicate body, and Zzz is large.
   ----------------------------------------------------------------
+  ----------------------------------------------------------------
+  -- Gen2 Battle Art 2.1.x has NO CharacterRenderers export.
+  -- Sleep props must ride the SAME world-space path as default NPCs:
+  -- wrap VoxelScene.drawEntity and draw with Voxel3D + Mat4 so beds/tents
+  -- never shrink or stick to the camera in FP/TP.
+  ----------------------------------------------------------------
   local function installJohtoVoxelSleepCR()
     if _G._johtoLifeVoxelSleepCRInstalled then return true end
-    local battle = nil
-    local names = {
-      "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
-      "battle_art_voxel", "BattleArtVoxel", "POTATO_VOXEL", "PotatoVoxel",
-      "DRAMATIC_SHAPE", "DRAMALESS_SHAPE",
-    }
-    for _, id in ipairs(names) do
+
+    local battle, battleId = nil, nil
+    for _, id in ipairs({
+      "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL",
+      "battle_art_voxel", "POTATO_VOXEL", "PotatoVoxel",
+    }) do
       local ok, m = pcall(function() return mod.find(id) end)
-      if ok and m and m.exports then
-        local cr = m.exports.characterRenderers or m.exports.CharacterRenderers
-        if cr and type(cr.register) == "function" then
-          battle = m; break
-        end
+      if ok and m and m.exports and m.exports.lib and type(m.exports.lib.require) == "function" then
+        battle, battleId = m, id
+        break
       end
     end
     if not battle then return false end
-    local api = battle.exports.characterRenderers or battle.exports.CharacterRenderers
+
     local lib = battle.exports.lib
-    if not (lib and type(lib.require) == "function") then return false end
     local okV, Voxel3D = pcall(lib.require, "Voxel3D")
     local okM, Mat4 = pcall(lib.require, "Mat4")
     local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
-    if not (okV and okM and okB and Voxel3D and Mat4 and SpriteBillboards
+    local okS, VoxelScene = pcall(lib.require, "VoxelScene")
+    local okF, FirstPerson = pcall(lib.require, "FirstPerson")
+    if not (okV and okM and okB and okS and Voxel3D and Mat4 and SpriteBillboards
+            and VoxelScene and type(VoxelScene.drawEntity) == "function"
             and type(Voxel3D.draw) == "function"
             and type(Mat4.mul) == "function"
-            and type(Mat4.translate) == "function"
-            and type(Mat4.rotateX) == "function"
-            and type(Mat4.rotateY) == "function"
             and type(SpriteBillboards.mesh) == "function") then
       return false
     end
 
+    -- Gen2 BA: SpriteBillboards.mesh(def, frameNumber) — NOT (def, ax, ay)
     local sleepImgCache = {}
+    local meshCache = {}
+
     local function ensureAssetHook()
       pcall(function()
         local okA, Assets = pcall(require, "src.render.Assets")
@@ -3596,11 +3841,18 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           if path and sleepImgCache[path] then return sleepImgCache[path] end
           return base(path, ...)
         end
+        -- BA prefers Assets.image
+        if type(Assets.image) == "function" and not Assets._johtoLifeSleepImageHooked then
+          local baseImg = Assets.image
+          Assets.image = function(path, ...)
+            if path and sleepImgCache[path] then return sleepImgCache[path] end
+            return baseImg(path, ...)
+          end
+          Assets._johtoLifeSleepImageHooked = true
+        end
         Assets._johtoLifeSleepCRHooked = true
       end)
     end
-
-    local propMeshCache, propBaseMeshCache, bodyMeshCache = {}, {}, {}
 
     local function loadPropImg(rel)
       if not rel then return nil end
@@ -3610,7 +3862,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         path = mod.assets:path("assets/" .. rel) or path
       end
       local ok, img = pcall(love.graphics.newImage, path)
-      if not ok or not img then
+      if not (ok and img) then
         ok, img = pcall(love.graphics.newImage, "assets/" .. rel)
       end
       if ok and img then
@@ -3622,23 +3874,36 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       return nil
     end
 
-    -- Match Gen1 mesh convention: anchorX=0, pivot with Mat4.translate(-8,0,0)
-    local function makeMesh(cacheKey, img, anchorY)
+    local function makeMesh(cacheKey, img)
       if not img then return nil end
+      if meshCache[cacheKey] then return meshCache[cacheKey] end
       local w, h = img:getDimensions()
-      local path = "johto_life_sleep_cr/" .. tostring(cacheKey) .. ".png"
+      local path = "johto_life_sleep_ba/" .. tostring(cacheKey) .. ".png"
       sleepImgCache[path] = img
       ensureAssetHook()
       local def = {
-        id = "JOHTO_LIFE_SLEEP_CR_" .. tostring(cacheKey),
-        image = path, frames = 1,
-        frameWidth = w, frameHeight = h,
-        trueColor = true, walker = false,
+        id = "JOHTO_LIFE_SLEEP_BA_" .. tostring(cacheKey),
+        image = path,
+        frames = 1,
+        frameWidth = w,
+        frameHeight = h,
+        trueColor = true,
+        walker = false,
       }
-      local mesh = SpriteBillboards.mesh(def, 0, anchorY)
-      if mesh then return { mesh = mesh, image = img, w = w, h = h } end
-      return nil
+      -- Gen2 BA signature: mesh(def, frameIndex)
+      local mesh = SpriteBillboards.mesh(def, 0)
+      if not mesh then
+        -- Fallback if BA build still accepts anchor form
+        local ok2, m2 = pcall(SpriteBillboards.mesh, def, 0, h / 2)
+        if ok2 then mesh = m2 end
+      end
+      if not mesh then return nil end
+      meshCache[cacheKey] = { mesh = mesh, image = img, w = w, h = h }
+      return meshCache[cacheKey]
     end
+
+    local propMeshCache, propBaseMeshCache, bodyMeshCache = {}, {}, {}
+    local zBillboard = nil
 
     local function propMesh(style)
       style = math.floor(tonumber(style) or 0)
@@ -3646,10 +3911,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if propMeshCache[style] then return propMeshCache[style] end
       local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
       local img = loadPropImg(names[style]); if not img then return nil end
-      local _, ph = img:getDimensions()
-      -- Tent: bottom-anchored upright. Bed/bag: center for flat floor card.
-      local anchorY = (style == 1) and ph or (ph / 2)
-      propMeshCache[style] = makeMesh("prop_" .. style, img, anchorY)
+      propMeshCache[style] = makeMesh("prop_" .. style, img)
       return propMeshCache[style]
     end
 
@@ -3659,50 +3921,113 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if propBaseMeshCache[style] then return propBaseMeshCache[style] end
       local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
       local img = loadPropImg(names[style]); if not img then return nil end
-      local _, ph = img:getDimensions()
-      propBaseMeshCache[style] = makeMesh("propbase_" .. style, img, ph / 2)
+      propBaseMeshCache[style] = makeMesh("propbase_" .. style, img)
       return propBaseMeshCache[style]
     end
 
     local function bodyMeshFor(npc)
-      local spr = npc and npc.sprite
-      if not spr or spr._johtoInvisible then
-        -- Prefer original pre-hide image if we saved one
-        spr = npc and npc._johtoOrigSleepSprite or spr
+      -- Prefer the baked lying-down canvas (already ~16px, gray, correct frame).
+      local bakedImg = npc and npc._johtoSleepBodyImage
+      local spr = npc and (npc._johtoOrigSleepSprite or npc.sprite)
+      if not bakedImg and (not spr or spr._johtoInvisible) then return nil end
+
+      local key
+      local drawImg
+      if bakedImg and type(bakedImg.getDimensions) == "function" then
+        key = "baked#" .. tostring(npc) .. "#" .. tostring(bakedImg)
+        if bodyMeshCache[key] then return bodyMeshCache[key] end
+        local bw, bh = bakedImg:getDimensions()
+        if bw == 16 and bh == 16 then
+          drawImg = bakedImg
+        else
+          local okS, scaled = pcall(function()
+            local c = love.graphics.newCanvas(16, 16)
+            local prev = love.graphics.getCanvas()
+            love.graphics.setCanvas(c)
+            love.graphics.clear(0, 0, 0, 0)
+            love.graphics.setColor(1, 1, 1, 1)
+            love.graphics.draw(bakedImg, 0, 0, 0, 16 / math.max(1, bw), 16 / math.max(1, bh))
+            love.graphics.setCanvas(prev)
+            return c
+          end)
+          drawImg = (okS and scaled) or bakedImg
+        end
+        bodyMeshCache[key] = makeMesh("body_" .. key, drawImg)
+        return bodyMeshCache[key]
       end
-      if not spr then return nil end
+
+      if not spr or spr._johtoInvisible then return nil end
+      local def = spr.def or {}
       local img = spr.image
       if type(spr.resolveImage) == "function" then
         local ok, r = pcall(spr.resolveImage, spr)
         if ok and r then img = r end
       end
-      if not img then return nil end
-      local fw = tonumber(spr.frameWidth) or 16
-      local fh = tonumber(spr.frameHeight) or 16
-      local key = tostring(spr) .. "#" .. tostring(fw) .. "x" .. tostring(fh)
-        .. (spr._johtoSleepBaked and "#baked" or "#raw")
+      if (not img or type(img) == "string") and type(def.hgssNativeImage) == "string" then
+        pcall(function()
+          local okI, i = pcall(love.graphics.newImage, def.hgssNativeImage)
+          if okI and i then img = i end
+        end)
+      end
+      if type(img) == "string" then
+        pcall(function()
+          local okI, i = pcall(love.graphics.newImage, img)
+          if okI and i then img = i end
+        end)
+      end
+      if not img or type(img.getDimensions) ~= "function" then return nil end
+
+      local fw = tonumber(spr.frameWidth) or tonumber(def.frameWidth)
+        or tonumber(def.hgssFrameWidth) or tonumber(def.hgssVoxelWidth) or 16
+      local fh = tonumber(spr.frameHeight) or tonumber(def.frameHeight)
+        or tonumber(def.hgssFrameHeight) or tonumber(def.hgssVoxelHeight) or 16
+      fw = math.max(1, math.floor(fw))
+      fh = math.max(1, math.floor(fh))
+      local iw, ih = img:getDimensions()
+      if fw > iw then fw = iw end
+      if fh > ih then fh = ih end
+
+      key = tostring(spr) .. "#" .. fw .. "x" .. fh .. "#fit16"
       if bodyMeshCache[key] then return bodyMeshCache[key] end
-      local drawImg = img
-      local quad = spr.frames and (spr.frames[0] or spr.frames[1])
-      if quad then
-        local okC, canvas = pcall(function()
-          local c = love.graphics.newCanvas(fw, fh)
+
+      local okFrame, frameCanvas = pcall(function()
+        local c = love.graphics.newCanvas(fw, fh)
+        local prev = love.graphics.getCanvas()
+        love.graphics.setCanvas(c)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setColor(1, 1, 1, 1)
+        local quad = spr.frames and (spr.frames[0] or spr.frames[1])
+        if quad then
+          love.graphics.draw(img, quad, 0, 0)
+        else
+          local okQ, q = pcall(love.graphics.newQuad, 0, 0, fw, fh, iw, ih)
+          if okQ and q then love.graphics.draw(img, q, 0, 0)
+          else love.graphics.draw(img, 0, 0) end
+        end
+        love.graphics.setCanvas(prev)
+        return c
+      end)
+      if not (okFrame and frameCanvas) then return nil end
+
+      drawImg = frameCanvas
+      if fw ~= 16 or fh ~= 16 then
+        local okS, scaled = pcall(function()
+          local c = love.graphics.newCanvas(16, 16)
           local prev = love.graphics.getCanvas()
           love.graphics.setCanvas(c)
           love.graphics.clear(0, 0, 0, 0)
           love.graphics.setColor(1, 1, 1, 1)
-          love.graphics.draw(img, quad, 0, 0)
+          love.graphics.draw(frameCanvas, 0, 0, 0, 16 / fw, 16 / fh)
           love.graphics.setCanvas(prev)
           return c
         end)
-        if okC and canvas then drawImg = canvas end
+        if okS and scaled then drawImg = scaled end
       end
-      bodyMeshCache[key] = makeMesh("body_" .. key, drawImg, fh / 2)
+      bodyMeshCache[key] = makeMesh("body_" .. key, drawImg)
       return bodyMeshCache[key]
     end
 
-    -- World-space animated Z (not a screen sticker — no shrink / camera stick)
-    local zBillboard = nil
+
     local function zMesh()
       if zBillboard then return zBillboard end
       local okC, canvas = pcall(function()
@@ -3719,7 +4044,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         return c
       end)
       if not (okC and canvas) then return nil end
-      zBillboard = makeMesh("zzz_anim", canvas, 7)
+      zBillboard = makeMesh("zzz_anim", canvas)
       return zBillboard
     end
 
@@ -3730,10 +4055,38 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       return 0
     end
 
-    local function drawSleep3D(ctx)
-      local npc = ctx and ctx.actor
-      if not npc or not npc.nightlifeSleeping then return false end
+    -- Match BA's character card matrix so tent size tracks default NPCs in FP/TP
+    local function uprightCardMatrix(px, py, y, half)
+      half = half or 8
+      local m = Mat4.translate(px + half, y, py + half)
+      if okF and FirstPerson and type(FirstPerson.cardBlend) == "function" then
+        local okB, b = pcall(FirstPerson.cardBlend)
+        b = (okB and tonumber(b)) or 0
+        if b > 0 and type(FirstPerson.cardYaw) == "function" then
+          local okY, yaw = pcall(FirstPerson.cardYaw, px + half, py + half)
+          if okY and tonumber(yaw) then
+            m = Mat4.mul(m, Mat4.rotateY(yaw * b))
+          end
+        end
+        -- In orbit mode BA leans the card by camera pitch; approximate upright
+        -- in FP (blend high) and slight lean in orbit (blend low).
+        if b < 0.5 then
+          m = Mat4.mul(m, Mat4.rotateX(-math.pi / 2 * (1 - b) * 0.15))
+        end
+      end
+      return Mat4.mul(m, Mat4.translate(-half, 0, 0))
+    end
 
+    -- Flat on the ground (bed/bag) — fixed world orientation, not camera-sized
+    local function flatMatrix(px, py, y, yaw)
+      return Mat4.mul(
+        Mat4.translate(px + 8, y, py + 8),
+        Mat4.mul(Mat4.rotateY(yaw or 0), Mat4.rotateX(-math.pi / 2)),
+        Mat4.translate(-8, 0, 0)
+      )
+    end
+
+    local function resolveStyle(npc)
       local style = 0
       if npc.kantoLifeNaturalSleepStyle ~= nil then
         style = npc.kantoLifeNaturalSleepStyle
@@ -3747,109 +4100,156 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           if okO then style = v end
         end
       end
-      style = math.floor(tonumber(style) or 0)
+      return math.floor(tonumber(style) or 0)
+    end
 
-      local px = tonumber(ctx.px) or tonumber(npc.px) or ((npc.cellX or 0) * 16)
-      local py = tonumber(ctx.py) or tonumber(npc.py) or ((npc.cellY or 0) * 16)
-      local gh = tonumber(ctx.groundHeight) or tonumber(npc.groundHeight) or 0
+    local function drawSleeperWorld(npc, px, py, gh)
+      local style = resolveStyle(npc)
       local yaw = facingYaw(npc.facing or npc.kantoLifeSleepFacing)
-      -- Flat on the floor (Gen1): rotateX(-PI/2)
-      local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+      gh = tonumber(gh) or 0
+      px = tonumber(px) or 0
+      py = tonumber(py) or 0
 
-      -- Underlay (bed/bag)
       if style == 2 or style == 3 then
         local pbm = propBaseMesh(style)
         if pbm and pbm.mesh then
-          local baseModel = Mat4.mul(
-            Mat4.translate(px + 8, gh + 0.03, py + 8),
-            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
-          )
-          pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
+          pcall(Voxel3D.draw, pbm.mesh, pbm.image,
+                flatMatrix(px, py, gh + 0.03, yaw), 0, flatMatrix(px, py, gh + 0.03, yaw))
         end
-      end
-
-      -- Body between layers (not under tent)
-      if style ~= 1 then
         local bm = bodyMeshFor(npc)
         if bm and bm.mesh then
-          local bodyModel = Mat4.mul(
-            Mat4.translate(px + 8, gh + 0.25, py + 8),
-            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
-          )
-          pcall(Voxel3D.draw, bm.mesh, bm.image, bodyModel, 0.1, bodyModel)
+          pcall(Voxel3D.draw, bm.mesh, bm.image,
+                flatMatrix(px, py, gh + 0.25, yaw), 0.1, flatMatrix(px, py, gh + 0.25, yaw))
+        end
+        local pm = propMesh(style)
+        if pm and pm.mesh then
+          pcall(Voxel3D.draw, pm.mesh, pm.image,
+                flatMatrix(px, py, gh + 0.45, yaw), 0.2, flatMatrix(px, py, gh + 0.45, yaw))
+        end
+      elseif style == 1 then
+        local pm = propMesh(1)
+        if pm and pm.mesh then
+          -- Upright tent, same world-space card path as default NPCs
+          local half = (pm.w or 16) / 2
+          local model = uprightCardMatrix(px, py, gh + 0.05, half)
+          pcall(Voxel3D.draw, pm.mesh, pm.image, model, 0.2, model)
+        end
+      else
+        -- style 0: default sleep — still draw body flat + Zzz (no prop)
+        local bm = bodyMeshFor(npc)
+        if bm and bm.mesh then
+          pcall(Voxel3D.draw, bm.mesh, bm.image,
+                flatMatrix(px, py, gh + 0.15, yaw), 0.1, flatMatrix(px, py, gh + 0.15, yaw))
         end
       end
 
-      -- Overlay / upright tent
-      local pm = propMesh(style)
-      if pm and pm.mesh then
-        if style == 1 then
-          -- Upright tent, bottom on ground, fixed yaw (not camera-billboard)
-          local tentModel = Mat4.mul(
-            Mat4.translate(px + 8, gh + 0.05, py + 8),
-            Mat4.rotateY(0)
-          )
-          pcall(Voxel3D.draw, pm.mesh, pm.image, tentModel, 0.2, tentModel)
-        elseif style == 2 or style == 3 then
-          local propModel = Mat4.mul(
-            Mat4.translate(px + 8, gh + 0.45, py + 8),
-            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
-          )
-          pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
-        end
-      end
-
-      -- Animated world-space Zzz (rise over time, camera-facing only for legibility)
+      -- World-space animated Zzz (classic rise, fixed world size)
       local zm = zMesh()
       if zm and zm.mesh then
-        local host = ctx.host or {}
-        local fp = host.FirstPerson
-        local pitch = -math.pi / 2
-        local zyaw = 0
-        if fp and type(fp.cardBlend) == "function" then
-          local okBlend, blend = pcall(fp.cardBlend)
-          if okBlend and tonumber(blend) and blend > 0.5 and type(fp.cardYaw) == "function" then
-            local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
-            if okYaw and tonumber(v) then zyaw = v end
-            pitch = 0
-          end
-        end
         local zt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-        -- Three rising Zs like the classic 2D animation, in WORLD space
         for i = 0, 2 do
           local phase = zt * 1.5 + i * 0.75
           local cycle = phase % 2.5
           local rise = cycle * 4
           local alpha = 1 - cycle / 2.5
           if alpha > 0.25 then
-            local zModel = Mat4.mul(
-              Mat4.translate(px + 8 + (i - 1) * 3, gh + 16 + rise + i * 2, py + 8),
-              Mat4.rotateY(zyaw)
-            )
-            if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
-            pcall(Voxel3D.draw, zm.mesh, zm.image, zModel, 0.5, zModel)
+            local model = uprightCardMatrix(px + (i - 1) * 3, py, gh + 14 + rise + i * 2, 6)
+            pcall(Voxel3D.draw, zm.mesh, zm.image, model, 0.5, model)
           end
         end
       end
-
-      npc._johtoLifeCRSleepClaimed = true
-      -- CLAIM: BA must not draw the standing / gray body
-      return true
     end
 
-    local handle = api.register({
-      apiVersion = 1,
-      id = "JOHTO_LIFE_SLEEP_3D",
-      name = "Johto Life Sleeping NPCs",
-      priority = 10000,
-      drawEntity = drawSleep3D,
-    })
-    if handle then
-      _G._johtoLifeVoxelSleepCRInstalled = true
-      pcall(function() mod.log:info("Johto Life: Gen2 CharacterRenderers sleep installed") end)
-      return true
+    -- Map invisible pose sprite → owning NPC so drawEntity can find them
+    if not _G._johtoLifeSleeperBySprite then
+      _G._johtoLifeSleeperBySprite = setmetatable({}, { __mode = "k" })
     end
-    return false
+    local sleeperBySprite = _G._johtoLifeSleeperBySprite
+
+    -- Also: scan world npcs each draw by px/py match as backup
+    local function findSleeperAt(px, py)
+      local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
+      local list = (ow and ow.npcs) or {}
+      for _, n in ipairs(list) do
+        if n and n.nightlifeSleeping then
+          local nx = tonumber(n.px) or ((n.cellX or 0) * 16)
+          local ny = tonumber(n.py) or ((n.cellY or 0) * 16)
+          if math.abs(nx - px) < 1 and math.abs(ny - py) < 1 then
+            return n
+          end
+        end
+      end
+      return nil
+    end
+
+    if not VoxelScene._johtoLifeDrawEntityWrapped then
+      local baseDrawEntity = VoxelScene.drawEntity
+      VoxelScene.drawEntity = function(sprite, px, py, facing, phase, flip, gh, colors, lift)
+        local npc = nil
+        if sprite then
+          npc = sleeperBySprite[sprite] or sprite._johtoLifeSleeperNpc
+        end
+        if not npc then
+          npc = findSleeperAt(px, py)
+        end
+        if npc and npc.nightlifeSleeping then
+          -- Composite sprite is already what pose() returned; let BA draw it
+          -- with the normal billboard path (same FP/TP sizing as default sleepers).
+          local result = baseDrawEntity(sprite, px, py, facing, phase, flip, gh, colors, lift)
+          -- World-space Zzz only (small, same upright card matrix as NPCs)
+          pcall(function()
+            local zm = zMesh and zMesh() or nil
+            if not (zm and zm.mesh) then return end
+            local zt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+            for i = 0, 2 do
+              local phaseZ = zt * 1.5 + i * 0.75
+              local cycle = phaseZ % 2.5
+              local rise = cycle * 4
+              local alpha = 1 - cycle / 2.5
+              if alpha > 0.25 then
+                local model = uprightCardMatrix(px + (i - 1) * 3, py, (gh or 0) + 14 + rise + i * 2, 6)
+                pcall(Voxel3D.draw, zm.mesh, zm.image, model, 0.5, model)
+              end
+            end
+          end)
+          npc._johtoLifeCRSleepClaimed = true
+          return result ~= nil and result or true
+        end
+        return baseDrawEntity(sprite, px, py, facing, phase, flip, gh, colors, lift)
+      end
+      VoxelScene._johtoLifeDrawEntityWrapped = true
+      VoxelScene._johtoLifeDrawEntityBase = baseDrawEntity
+    end
+
+    -- Tag invisible sleep sprites so drawEntity can resolve the NPC
+    -- (pose already hides the engine billboard in voxel)
+    pcall(function()
+      if _johtoSleepInvisibleSprite then
+        -- keep table identity stable
+      end
+    end)
+
+    _G._johtoLifeVoxelSleepCRInstalled = true
+    pcall(function()
+      mod.log:info("Johto Life: Gen2 VoxelScene.drawEntity sleep wrap installed ("
+        .. tostring(battleId) .. ")")
+    end)
+    return true
+  end
+
+  -- Tag invisible sprite with NPC during pose (so drawEntity can find it)
+  do
+    local prevPoseHook = NPC and NPC.pose
+    -- Already wrapped above; extend by patching the invisible sprite assignment
+    -- via a small after-install helper used from the existing pose wrap.
+    _G._johtoLifeTagSleeperSprite = function(sprite, npc)
+      if not sprite or not npc then return end
+      sprite._johtoLifeSleeperNpc = npc
+      if not _G._johtoLifeSleeperBySprite then
+        _G._johtoLifeSleeperBySprite = setmetatable({}, { __mode = "k" })
+      end
+      _G._johtoLifeSleeperBySprite[sprite] = npc
+    end
   end
 
   pcall(installJohtoVoxelSleepCR)
