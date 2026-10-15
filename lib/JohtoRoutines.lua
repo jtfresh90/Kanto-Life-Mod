@@ -111,7 +111,12 @@ return function(ctx)
     if method == "fly" or method == "teleport" then
       local species
       if method == "fly" then
-        local flyers = {"PIDGEY","SPEAROW","FARFETCHD","DODUO","CHARIZARD","AERODACTYL","DRAGONITE","ARTICUNO","ZAPDOS","MOLTRES","LUGIA","HO_OH"}
+        local flyers = {
+          "PIDGEY","PIDGEOTTO","PIDGEOT","SPEAROW","FEAROW","FARFETCHD","DODUO","DODRIO",
+          "CHARIZARD","AERODACTYL","DRAGONITE","BUTTERFREE","ZUBAT","GOLBAT","CROBAT",
+          "VENOMOTH","SCYTHER","GYARADOS","HOOTHOOT","NOCTOWL","NATU","XATU","SKARMORY",
+          "MURKROW","GLIGAR","MANTINE","TOGETIC","ARTICUNO","ZAPDOS","MOLTRES","LUGIA","HO_OH",
+        }
         species = flyers[math.random(#flyers)]
       else
         -- Full Gen1+Gen2 Psychic-type pool for teleport.

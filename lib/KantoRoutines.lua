@@ -260,17 +260,17 @@ return function(ctx)
   local FLY_FALLBACK = {
     "PIDGEY", "PIDGEOTTO", "PIDGEOT", "SPEAROW", "FEAROW", "FARFETCHD", "FARFETCH_D",
     "DODUO", "DODRIO", "CHARIZARD", "DRAGONITE", "AERODACTYL",
+    "BUTTERFREE", "ZUBAT", "GOLBAT", "VENOMOTH", "SCYTHER", "GYARADOS",
     "ARTICUNO", "ZAPDOS", "MOLTRES", "MEW",
-    -- Gen 2 additions (only used if present in the loaded data)
     "HOOTHOOT", "NOCTOWL", "NATU", "XATU", "SKARMORY", "LUGIA", "HO_OH",
+    "TOGEPI", "TOGETIC", "MURKROW", "GLIGAR", "MANTINE", "CROBAT",
   }
   local PSY_FALLBACK = {
     "ABRA", "KADABRA", "ALAKAZAM", "SLOWPOKE", "SLOWBRO",
-    "DROWZEE", "HYPNO", "EXEGGCUTE", "EXEGGUTOR", "STARMIE",
-    "MR_MIME", "JYNX", "MEWTWO", "MEW",
-    -- Gen 2 additions (only used if present in the loaded data)
+    "DROWZEE", "HYPNO", "EXEGGCUTE", "EXEGGUTOR", "STARMIE", "STARYU",
+    "MR_MIME", "JYNX", "MEWTWO", "MEW", "CLEFABLE", "JIGGLYPUFF", "WIGGLYTUFF",
     "NATU", "XATU", "ESPEON", "UNOWN", "WOBBUFFET", "GIRAFARIG",
-    "SMOOCHUM", "LUGIA", "CELEBI",
+    "SMOOCHUM", "LUGIA", "CELEBI", "SLOWKING", "GALLADE",
   }
 
   local travelPools = {}
@@ -328,14 +328,10 @@ return function(ctx)
       travelPools[kind] = pool
     end
     if #pool == 0 then return nil end
-    -- Prefer species with dedicated art, but NEVER drop to a different type
-    -- pool. Battle-front fallback in getPokeSpriteObject covers the rest.
-    local usable = {}
-    for _, sp in ipairs(pool) do
-      if hasTravelArt(sp) then usable[#usable + 1] = sp end
-    end
-    local list = (#usable > 0) and usable or pool
-    return list[math.random(#list)]
+    -- Always pick from the FULL type pool so fly/teleport are not stuck on
+    -- the few species that already have overworld art (Articuno / Mewtwo).
+    -- getPokeSpriteObject synthesizes battle-front / HGSS / party art.
+    return pool[math.random(#pool)]
   end
 
   -- Layered sprite swap used when the engine's NATIVE fly/teleport script drives
