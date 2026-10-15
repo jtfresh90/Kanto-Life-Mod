@@ -152,6 +152,14 @@ return function(mod)
     local angle = npc.johtoLifeSleepAngle or (math.pi / 2)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
+    -- Normalize to 16x16 so HGSS 32px (and other oversized) sprites do not
+    -- become massive in voxel / 2D after the ±90° bake.
+    local useFw, useFh = 16, 16
+    local srcFw, srcFh = fw, fh
+    if sprite.def and (sprite.def.hgssNativeImage or sprite.def.hgssFrameWidth or sprite.def.hgssVoxelWidth) then
+      srcFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.hgssVoxelWidth or sprite.def.frameWidth) or 32
+      srcFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.hgssVoxelHeight or sprite.def.frameHeight) or srcFw
+    end
 
     local ok, canvas = pcall(function()
       local img = nil
@@ -162,7 +170,7 @@ return function(mod)
       if not img then img = sprite.image end
       if not img then return nil end
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
-      local c = love.graphics.newCanvas(fw, fh)
+      local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
@@ -171,13 +179,15 @@ return function(mod)
       local gray = getSleepGrayShader()
       if gray then love.graphics.setShader(gray) end
       love.graphics.push()
-      love.graphics.translate(fw / 2, fh / 2)
+      love.graphics.translate(useFw / 2, useFh / 2)
       love.graphics.rotate(angle)
-      love.graphics.translate(-fw / 2, -fh / 2)
+      love.graphics.translate(-useFw / 2, -useFh / 2)
+      local scaleX = useFw / srcFw
+      local scaleY = useFh / srcFh
       if quad then
-        love.graphics.draw(img, quad, 0, 0)
+        love.graphics.draw(img, quad, 0, 0, 0, scaleX, scaleY)
       else
-        love.graphics.draw(img, 0, 0)
+        love.graphics.draw(img, 0, 0, 0, scaleX, scaleY)
       end
       love.graphics.pop()
       love.graphics.setShader()
@@ -192,8 +202,12 @@ return function(mod)
     sprite._johtoOrigFrames = sprite.frames
     sprite._johtoOrigFrameCount = sprite.frameCount
     sprite._johtoOrigDef = sprite.def
+    sprite._johtoOrigFrameWidth = sprite.frameWidth
+    sprite._johtoOrigFrameHeight = sprite.frameHeight
     sprite.image = canvas
-    local qok, q = pcall(love.graphics.newQuad, 0, 0, fw, fh, fw, fh)
+    sprite.frameWidth = useFw
+    sprite.frameHeight = useFh
+    local qok, q = pcall(love.graphics.newQuad, 0, 0, useFw, useFh, useFw, useFh)
     if qok then
       sprite.frames = { [0] = q }
       sprite.frameCount = 1
@@ -206,6 +220,8 @@ return function(mod)
     newDef.image = sleepKey
     newDef.frames = 1
     newDef.walker = false
+    newDef.frameWidth = useFw
+    newDef.frameHeight = useFh
     sprite.def = newDef
     sprite._johtoSleepBaked = true
     sprite._johtoSleepCacheVersion = 2
@@ -646,10 +662,11 @@ return function(mod)
       return math.max(0, math.floor(tonumber(opt("indoor_npc_count")) or 3))
     end
     if not (isTown(mapId) or isRoute(mapId)) then return 0 end
-    if outdoorTouched then return math.max(0, math.floor(tonumber(opt("extra_npc_count")) or 0)) end
-    local n = math.floor(tonumber(opt("extra_npc_count")) or 0)
-    if n > 0 then return n end
-    return defaultCount(mapId)
+    -- Absolute count only. Never auto-apply townDefaults (50–150) on first
+    -- load — that froze low-end devices and could leave the overworld with
+    -- no visible NPCs when spawn partially failed under other mods
+    -- (Dramatic Shape / Kanto in Motion / Nuzlocke).
+    return math.max(0, math.min(150, math.floor(tonumber(opt("extra_npc_count")) or 0)))
   end
   local function pokeTarget(mapId, map)
     if not opt("pokemon_npcs") then return 0 end
@@ -1570,6 +1587,12 @@ return function(mod)
       npc.johtoLifeSleepAngle = sign * (math.pi / 2)
       npc.johtoLifeSleepSide = sign
       pcall(bakeRotatedSleepSprite, npc)
+      -- Always capture the baked lying image for the 3-layer voxel body path.
+      -- Without this, bodyMeshFor can return nil and the sleeper disappears,
+      -- leaving only a tiny prop (the reported "body gone" bug).
+      if npc.sprite and npc.sprite._johtoSleepBaked and npc.sprite.image then
+        npc._johtoSleepBodyImage = npc.sprite.image
+      end
       local faceDir = (sign > 0) and "LEFT" or "RIGHT"
       pcall(function()
         if type(npc.face) == "function" then npc:face(faceDir) else npc.facing = faceDir end
@@ -3239,10 +3262,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               ZUBAT=41,GOLBAT=42,CROBAT=169,VENOMOTH=49,SCYTHER=123,GYARADOS=130,
               ARTICUNO=144,ZAPDOS=145,MOLTRES=146,HOOTHOOT=163,NOCTOWL=164,NATU=177,XATU=178,
               SKARMORY=227,MURKROW=198,GLIGAR=207,MANTINE=226,TOGETIC=176,LUGIA=249,HO_OH=250,
+              TOGEPI=175,
               ABRA=63,KADABRA=64,ALAKAZAM=65,SLOWPOKE=79,SLOWBRO=80,SLOWKING=199,
               DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,STARYU=120,STARMIE=121,
               MR_MIME=122,JYNX=124,SMOOCHUM=238,ESPEON=196,UNOWN=201,WOBBUFFET=202,
-              GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,
+              GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,CLEFAIRY=35,CLEFABLE=36,
+              JIGGLYPUFF=39,WIGGLYTUFF=40,SNORLAX=143,
             }
             local num = DEX[species]
             local pdef = data and data.pokemon and data.pokemon[species]
@@ -3913,12 +3938,37 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     local propMeshCache, propBaseMeshCache, bodyMeshCache = {}, {}, {}
     local zBillboard = nil
 
+    -- Scale prop images up so beds/bags match human tile size in voxel (~24 world units).
+    -- Raw asset PNGs are small; without this the prop is a tiny sticker on the floor.
+    local function scalePropToTile(img, target)
+      if not img or type(img.getDimensions) ~= "function" then return img end
+      target = target or 24
+      local iw, ih = img:getDimensions()
+      if iw >= target and ih >= target then return img end
+      local ok, c = pcall(function()
+        local canvas = love.graphics.newCanvas(target, target)
+        local prev = love.graphics.getCanvas()
+        love.graphics.setCanvas(canvas)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setColor(1, 1, 1, 1)
+        local s = target / math.max(iw, ih, 1)
+        local dx = (target - iw * s) / 2
+        local dy = (target - ih * s) / 2
+        love.graphics.draw(img, dx, dy, 0, s, s)
+        love.graphics.setCanvas(prev)
+        pcall(canvas.setFilter, canvas, "nearest", "nearest")
+        return canvas
+      end)
+      return (ok and c) or img
+    end
+
     local function propMesh(style)
       style = math.floor(tonumber(style) or 0)
       if style <= 0 then return nil end
       if propMeshCache[style] then return propMeshCache[style] end
       local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
       local img = loadPropImg(names[style]); if not img then return nil end
+      img = scalePropToTile(img, style == 1 and 20 or 24)
       propMeshCache[style] = makeMesh("prop_" .. style, img)
       return propMeshCache[style]
     end
@@ -3929,6 +3979,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if propBaseMeshCache[style] then return propBaseMeshCache[style] end
       local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
       local img = loadPropImg(names[style]); if not img then return nil end
+      img = scalePropToTile(img, 24)
       propBaseMeshCache[style] = makeMesh("propbase_" .. style, img)
       return propBaseMeshCache[style]
     end
@@ -3937,7 +3988,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       -- Prefer the baked lying-down canvas (already ~16px, gray, correct frame).
       local bakedImg = npc and npc._johtoSleepBodyImage
       local spr = npc and (npc._johtoOrigSleepSprite or npc.sprite)
-      if not bakedImg and (not spr or spr._johtoInvisible) then return nil end
+      -- Fall back to the live sprite image even if it was marked invisible for
+      -- the engine billboard — the voxel 3-layer path still needs the body.
+      if not bakedImg and spr and spr._johtoSleepBaked and spr.image then
+        bakedImg = spr.image
+        npc._johtoSleepBodyImage = bakedImg
+      end
+      if not bakedImg and (not spr or (spr._johtoInvisible and not spr.image)) then return nil end
 
       local key
       local drawImg
@@ -3964,7 +4021,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         return bodyMeshCache[key]
       end
 
-      if not spr or spr._johtoInvisible then return nil end
+      if not spr then return nil end
       local def = spr.def or {}
       local img = spr.image
       if type(spr.resolveImage) == "function" then

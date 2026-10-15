@@ -526,12 +526,19 @@ return function(mod)
       local hgss = mod.find("HGSS_SPRITES")
       if not (hgss and hgss.assets and type(hgss.assets.path) == "function") then return end
       local DEX = {
-        PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,
+        -- Flying / Fly users
+        PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,FARFETCH_D=83,
         DODUO=84,DODRIO=85,CHARIZARD=6,AERODACTYL=142,DRAGONITE=149,BUTTERFREE=12,
         ZUBAT=41,GOLBAT=42,VENOMOTH=49,SCYTHER=123,GYARADOS=130,
-        ARTICUNO=144,ZAPDOS=145,MOLTRES=146,ABRA=63,KADABRA=64,ALAKAZAM=65,
-        SLOWPOKE=79,SLOWBRO=80,DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,
-        STARMIE=121,MR_MIME=122,JYNX=124,MEWTWO=150,MEW=151,
+        ARTICUNO=144,ZAPDOS=145,MOLTRES=146,HOOTHOOT=163,NOCTOWL=164,NATU=177,XATU=178,
+        SKARMORY=227,MURKROW=198,GLIGAR=207,MANTINE=226,TOGETIC=176,LUGIA=249,HO_OH=250,
+        CROBAT=169,TOGEPI=175,
+        -- Psychic
+        ABRA=63,KADABRA=64,ALAKAZAM=65,SLOWPOKE=79,SLOWBRO=80,SLOWKING=199,
+        DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,STARYU=120,STARMIE=121,
+        MR_MIME=122,JYNX=124,SMOOCHUM=238,ESPEON=196,UNOWN=201,WOBBUFFET=202,
+        GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,CLEFAIRY=35,CLEFABLE=36,
+        JIGGLYPUFF=39,WIGGLYTUFF=40,SNORLAX=143,
       }
       local num = DEX[species]
       local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
@@ -1129,14 +1136,34 @@ return function(mod)
       end
       ::continue::
     end
-    -- Whitelist: any entry present in the live registry (image may be a path
-    -- string the engine loads later — do not require userdata here).
+    -- Whitelist: always include every known civilian / special human sprite
+    -- that exists in the live registry so the extra-NPC pool has full variety
+    -- (gym leaders, E4, rivals, story NPCs, trainers, etc.), not only sprites
+    -- already present on the current map.
     do
       local reg = game and game.data and game.data.sprites
       if type(reg) == "table" then
         for _, s in ipairs(KNOWN_GEN1_CIVILIAN_SPRITES) do
           if not seen[s] and type(reg[s]) == "table" then
             seen[s] = true; sprites[#sprites + 1] = s
+          end
+        end
+        -- Also pick up any extra SPRITE_* human entries the registry has that
+        -- were not in the static list (mods / HGSS / alternate IDs).
+        for id, def in pairs(reg) do
+          if type(id) == "string" and type(def) == "table" and not seen[id] then
+            local u = id:upper()
+            if u:find("^SPRITE_") and not u:find("POKE", 1, true)
+               and not u:find("BALL", 1, true) and not u:find("ITEM", 1, true)
+               and not u:find("SNORLAX", 1, true) and not u:find("LAPRAS", 1, true)
+               and (u:find("TRAINER") or u:find("LEADER") or u:find("RIVAL")
+                    or u:find("BROCK") or u:find("MISTY") or u:find("OAK")
+                    or u:find("ROCKET") or u:find("NURSE") or u:find("GUARD")
+                    or u:find("CLERK") or u:find("OFFICER") or u:find("MOM")
+                    or u:find("DAISY") or u:find("BILL") or u:find("FUJI")
+                    or isHumanCivilianSprite(id)) then
+              seen[id] = true; sprites[#sprites + 1] = id
+            end
           end
         end
       end
@@ -1882,7 +1909,9 @@ return function(mod)
       local cur = math.floor(tonumber(opt("indoor_npc_count")) or 0)
       if cur <= 0 then setOpt("indoor_npc_count", 2) end
     end
-    syncAmbientToTarget(mapId, enteredMap)
+    -- Fail-open: a spawn/sync error must never freeze the overworld or wipe
+    -- vanilla NPCs (reported with Dramatic Shape + Kanto in Motion + Nuzlocke).
+    pcall(function() syncAmbientToTarget(mapId, enteredMap) end)
   end)
 
   mod.events:on("mod.options_changed", function(payload)
@@ -3565,10 +3594,13 @@ local nm = storyDisplayName(talker)
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
       local fw = tonumber(sprite.frameWidth) or 16
       local fh = tonumber(sprite.frameHeight) or 16
-      local useFw, useFh = fw, fh
+      -- Always bake to a consistent 16x16 canvas so HGSS 32px (and other oversized)
+      -- sprites do not become massive in voxel / 2D after rotation.
+      local useFw, useFh = 16, 16
+      local srcFw, srcFh = fw, fh
       if isHgss then
-        useFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
-        useFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or useFw
+        srcFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
+        srcFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or srcFw
         quad = nil
       end
       local c = love.graphics.newCanvas(useFw, useFh)
@@ -3582,8 +3614,13 @@ local nm = storyDisplayName(talker)
       love.graphics.translate(useFw / 2, useFh / 2)
       love.graphics.rotate(angle)
       love.graphics.translate(-useFw / 2, -useFh / 2)
-      if quad then love.graphics.draw(img, quad, 0, 0)
-      else love.graphics.draw(img, 0, 0) end
+      local scaleX = useFw / srcFw
+      local scaleY = useFh / srcFh
+      if quad then
+        love.graphics.draw(img, quad, 0, 0, 0, scaleX, scaleY)
+      else
+        love.graphics.draw(img, 0, 0, 0, scaleX, scaleY)
+      end
       love.graphics.pop()
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.setCanvas(prev)
