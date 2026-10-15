@@ -3176,8 +3176,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             return nil
           end
 
-          -- 1) Registry overworld sprites
+          -- 1) Registry overworld sprites.
+          -- HGSS_SPRITES registers Gen 2 Pokemon under SPRITE_HGSS_GEN2_<SPECIES>
+          -- (35 canonical species keep SPRITE_<SPECIES>). Try the HGSS id FIRST
+          -- so HGSS art wins over any default-art def when the mod is on; the
+          -- order-arbitrary fuzzy scan below must never shadow it.
           local candidates = {
+            "SPRITE_HGSS_GEN2_" .. species,
             "SPRITE_" .. species, species, "SPRITE_POKEMON_" .. species,
             "SPRITE_POKE_" .. species,
           }
@@ -3237,7 +3242,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               ABRA=63,KADABRA=64,ALAKAZAM=65,SLOWPOKE=79,SLOWBRO=80,SLOWKING=199,
               DROWZEE=96,HYPNO=97,EXEGGCUTE=102,EXEGGUTOR=103,STARYU=120,STARMIE=121,
               MR_MIME=122,JYNX=124,SMOOCHUM=238,ESPEON=196,UNOWN=201,WOBBUFFET=202,
-              GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,MEWtwo=150,
+              GIRAFARIG=203,MEWTWO=150,MEW=151,CELEBI=251,
             }
             local num = DEX[species]
             local pdef = data and data.pokemon and data.pokemon[species]
