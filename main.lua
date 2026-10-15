@@ -13,21 +13,39 @@ return function(mod)
     -- 2) Prevent sleep accessory props from being scaled by fractional
     --    BattleArt/voxel camera scales. Match JohtoMain's world-space behavior.
     if rel == "lib/KantoRoutines.lua" then
-      -- Replace the simple fallback selection with a prefer-art attempt.
+      -- Replace the simple fallback selection with an Any-Species option (A):
+      -- Pick from the full pokemon table when available, preferring species with
+      -- travel art. Fall back to the kind-specific pool if game data is absent.
       source = source:gsub(
         "return pool%[math.random%(%#pool%)%]",
         [[
-        -- Prefer species that have travel/overworld art when available to
-        -- avoid tiny repeated pools. Try a few times then fall back.
+        -- Option A: prefer any species from game data when available
         (function()
+          local full = {}
+          local ok_data, data = pcall(pokemonTable)
+          if ok_data and type(data) == "table" then
+            for k in pairs(data) do full[#full+1] = k end
+          end
+          if #full == 0 then
+            -- No game-table available: pick from the kind pool, preferring art
+            if type(hasTravelArt) == "function" then
+              for i = 1, 6 do
+                local sp = pool[math.random(#pool)]
+                local ok, got = pcall(hasTravelArt, sp)
+                if ok and got then return sp end
+              end
+            end
+            return pool[math.random(#pool)]
+          end
+          -- Prefer species with travel art from the full list
           if type(hasTravelArt) == "function" then
-            for _ = 1, 6 do
-              local sp = pool[math.random(#pool)]
+            for i = 1, 8 do
+              local sp = full[math.random(#full)]
               local ok, got = pcall(hasTravelArt, sp)
               if ok and got then return sp end
             end
           end
-          return pool[math.random(#pool)]
+          return full[math.random(#full)]
         end)()
         ]]
       )
