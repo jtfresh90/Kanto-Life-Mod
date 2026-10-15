@@ -520,10 +520,19 @@ return function(mod)
         end
       end
     end
-    -- HGSS_SPRITES: load pokemon-overworld sheet by national dex when registry has no art
+    -- HGSS_SPRITES: load pokemon-overworld sheet by national dex when registry has no art.
+    -- Try the known mod ids (same fallback list as Gen 2): the id is not
+    -- guaranteed to be exactly "HGSS_SPRITES".
     pcall(function()
       if pokeSpriteCache[species] then return end
-      local hgss = mod.find("HGSS_SPRITES")
+      local hgss = nil
+      pcall(function() hgss = mod.find("HGSS_SPRITES") end)
+      if not hgss then
+        for _, id in ipairs({"hgss_sprites", "HGSS Visual Overhaul"}) do
+          local ok, m = pcall(function() return mod.find(id) end)
+          if ok and m then hgss = m; break end
+        end
+      end
       if not (hgss and hgss.assets and type(hgss.assets.path) == "function") then return end
       local DEX = {
         PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,
@@ -4171,10 +4180,15 @@ function putToSleep(npc)
           local mon = nil
           pcall(function() mon = getPokeSpriteObject(tp.psySpecies) end)
           if not mon then
+            -- Random among the fallbacks that actually resolve (not
+            -- first-success): a systematic resolution failure must not
+            -- collapse every teleport onto a single species.
+            local fbOk = {}
             for _, fb in ipairs({"ABRA","KADABRA","ALAKAZAM","DROWZEE","HYPNO","MR_MIME","JYNX","SLOWBRO","STARMIE","MEW","MEWTWO"}) do
-              pcall(function() mon = getPokeSpriteObject(fb) end)
-              if mon then break end
+              local okF, m = pcall(getPokeSpriteObject, fb)
+              if okF and m then fbOk[#fbOk + 1] = m end
             end
+            if #fbOk > 0 then mon = fbOk[math.random(#fbOk)] end
           end
           local eff = travelEffFrame(tp)
           local rise = 0
@@ -6921,10 +6935,14 @@ local function nightlifeTick(world, dt)
             local monSprite = nil
             pcall(function() monSprite = getPokeSpriteObject(tp.psySpecies) end)
             if not monSprite then
+              -- Random among resolving fallbacks (see 2D path): never collapse
+              -- onto one species when art is missing.
+              local fbOk = {}
               for _, fb in ipairs({"ABRA", "KADABRA", "ALAKAZAM", "MEW", "MEWTWO", "HYPNO"}) do
-                pcall(function() monSprite = getPokeSpriteObject(fb) end)
-                if monSprite then break end
+                local okF, m = pcall(getPokeSpriteObject, fb)
+                if okF and m then fbOk[#fbOk + 1] = m end
               end
+              if #fbOk > 0 then monSprite = fbOk[math.random(#fbOk)] end
             end
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor((tonumber(tp.frame) or 0) / 2) % 4) + 1]
@@ -6943,10 +6961,14 @@ local function nightlifeTick(world, dt)
             local bird = nil
             pcall(function() bird = getPokeSpriteObject(fl.species) end)
             if not bird then
+              -- Random among resolving fallbacks (see teleport): never collapse
+              -- onto one species when art is missing.
+              local fbOk = {}
               for _, fb in ipairs({"PIDGEOT", "FEAROW", "DODRIO", "AERODACTYL", "CHARIZARD"}) do
-                pcall(function() bird = getPokeSpriteObject(fb) end)
-                if bird then break end
+                local okF, b = pcall(getPokeSpriteObject, fb)
+                if okF and b then fbOk[#fbOk + 1] = b end
               end
+              if #fbOk > 0 then bird = fbOk[math.random(#fbOk)] end
             end
             local total = fl.total or 90
             local progress = fl.frame / total

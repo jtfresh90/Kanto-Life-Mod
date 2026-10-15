@@ -2750,10 +2750,13 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
         love.graphics.setCanvas(c)
         love.graphics.clear(0, 0, 0, 0)
         love.graphics.setColor(1, 1, 1, 1)
-        local function blit(img, scale)
+        local function blit(img, scaleMul)
           if not img or type(img.getDimensions) ~= "function" then return end
           local iw, ih = img:getDimensions()
-          local s = scale or (SIZE / math.max(iw, ih, 1))
+          -- scaleMul is a multiplier on the fit-to-SIZE scale (not an absolute
+          -- scale): blit(bodySrc, 0.85) draws the body at 85% of its fitted
+          -- size instead of overflowing the 16x16 canvas.
+          local s = (SIZE / math.max(iw, ih, 1)) * (scaleMul or 1)
           local dx = (SIZE - iw * s) / 2
           local dy = (SIZE - ih * s) / 2
           love.graphics.draw(img, dx, dy, 0, s, s)
