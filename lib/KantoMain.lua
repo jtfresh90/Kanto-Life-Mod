@@ -341,6 +341,7 @@ return function(mod)
     { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
       default = 30, min = 0, max = 100, step = 10 },
     { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
+    { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     -- EXPERIMENTAL: Lifelike feature toggles
@@ -530,37 +531,85 @@ return function(mod)
       if type(sp) ~= "string" or sp == "" then return end
       sp = sp:upper():gsub(" ", "_"):gsub("'", "")
       if seen[sp] then return end
-      -- Skip non-species bookkeeping keys
       if sp:find("^SPRITE") or sp:find("^PAL_") or sp == "NONE" then return end
+      -- Never treat human/trainer class names as Pokémon species.
+      local HUMANISH = {
+        YOUNGSTER=1, LASS=1, BUG_CATCHER=1, SUPER_NERD=1, HIKER=1, BIKER=1,
+        CUE_BALL=1, GAMBLER=1, BEAUTY=1, JR_TRAINER_M=1, JR_TRAINER_F=1,
+        COOLTRAINER_M=1, COOLTRAINER_F=1, ROCKET=1, CHANNELER=1, SCIENTIST=1,
+        ENGINEER=1, JUGGLER=1, TAMER=1, BIRD_KEEPER=1, BLACKBELT=1, FISHER=1,
+        SWIMMER=1, PSYCHIC=1, ROCKER=1, SAILOR=1, GENTLEMAN=1, SISTER=1,
+        NURSE=1, CLERK=1, GUARD=1, GYM_GUIDE=1, OFFICER=1, BRUNO=1, AGATHA=1,
+        LORELEI=1, LANCE=1, RIVAL=1, BROCK=1, MISTY=1, SURGE=1, ERIKA=1,
+        KOGA=1, SABRINA=1, BLAINE=1, GIOVANNI=1, PLAYER=1, RED=1, BLUE=1,
+      }
+      if HUMANISH[sp] or sp:find("TRAINER", 1, true) or sp:find("LEADER", 1, true) then
+        return
+      end
       seen[sp] = true
       out[#out + 1] = sp
     end
+    -- Authoritative source: the game Pokédex table only.
     local data = game and game.data and game.data.pokemon
     if type(data) == "table" then
       for id, def in pairs(data) do
-        if type(id) == "string" then add(id) end
-        if type(def) == "table" then
+        if type(id) == "string" then add(id)
+        elseif type(id) == "number" and type(def) == "table" then
+          -- National-dex numeric keys (mods / expanded dex)
           if type(def.id) == "string" then add(def.id) end
           if type(def.name) == "string" then add(def.name) end
           if type(def.species) == "string" then add(def.species) end
         end
-      end
-    end
-    -- Also every overworld sprite that looks like a mon
-    local sprites = game and game.data and game.data.sprites
-    if type(sprites) == "table" then
-      for id, _ in pairs(sprites) do
-        local s = tostring(id):upper()
-        if s:find("SPRITE_POKEMON_", 1, true) then
-          add(s:gsub("^SPRITE_POKEMON_", ""))
-        elseif s:find("^SPRITE_") and not s:find("PLAYER") and not s:find("TRAINER")
-           and not s:find("NPC") and not s:find("ITEM") then
-          local body = s:gsub("^SPRITE_", "")
-          if #body >= 3 and #body <= 12 then add(body) end
+        if type(def) == "table" then
+          if type(def.id) == "string" then add(def.id) end
+          if type(def.species) == "string" then add(def.species) end
+          if type(def.name) == "string" and not tostring(def.name):find(" ") then
+            add(def.name)
+          end
         end
       end
     end
-    if #out == 0 then
+    -- OW / Wilds keys: SPRITE_POKEMON_*, and POKEDEX-style ids
+    local sprites = game and game.data and game.data.sprites
+    if type(sprites) == "table" then
+      for id, sd in pairs(sprites) do
+        local s = tostring(id):upper()
+        if s:find("SPRITE_POKEMON_", 1, true) then
+          add(s:gsub("^SPRITE_POKEMON_", ""))
+        elseif s:find("^POKEMON_", 1, true) then
+          add(s:gsub("^POKEMON_", ""))
+        elseif type(sd) == "table" and (sd.species or sd.pokemonSpecies) then
+          add(tostring(sd.species or sd.pokemonSpecies))
+        end
+      end
+    end
+    if #out < 50 then
+      -- Guarantee the classic 151 even if game.data.pokemon is sparse
+      local GEN1_151 = {
+        "BULBASAUR","IVYSAUR","VENUSAUR","CHARMANDER","CHARMELEON","CHARIZARD",
+        "SQUIRTLE","WARTORTLE","BLASTOISE","CATERPIE","METAPOD","BUTTERFREE",
+        "WEEDLE","KAKUNA","BEEDRILL","PIDGEY","PIDGEOTTO","PIDGEOT",
+        "RATTATA","RATICATE","SPEAROW","FEAROW","EKANS","ARBOK","PIKACHU","RAICHU",
+        "SANDSHREW","SANDSLASH","NIDORAN_F","NIDORINA","NIDOQUEEN",
+        "NIDORAN_M","NIDORINO","NIDOKING","CLEFAIRY","CLEFABLE","VULPIX","NINETALES",
+        "JIGGLYPUFF","WIGGLYTUFF","ZUBAT","GOLBAT","ODDISH","GLOOM","VILEPLUME",
+        "PARAS","PARASECT","VENONAT","VENOMOTH","DIGLETT","DUGTRIO","MEOWTH","PERSIAN",
+        "PSYDUCK","GOLDUCK","MANKEY","PRIMEAPE","GROWLITHE","ARCANINE",
+        "POLIWAG","POLIWHIRL","POLIWRATH","ABRA","KADABRA","ALAKAZAM",
+        "MACHOP","MACHOKE","MACHAMP","BELLSPROUT","WEEPINBELL","VICTREEBEL",
+        "TENTACOOL","TENTACRUEL","GEODUDE","GRAVELER","GOLEM","PONYTA","RAPIDASH",
+        "SLOWPOKE","SLOWBRO","MAGNEMITE","MAGNETON","FARFETCHD","DODUO","DODRIO",
+        "SEEL","DEWGONG","GRIMER","MUK","SHELLDER","CLOYSTER","GASTLY","HAUNTER","GENGAR",
+        "ONIX","DROWZEE","HYPNO","KRABBY","KINGLER","VOLTORB","ELECTRODE",
+        "EXEGGCUTE","EXEGGUTOR","CUBONE","MAROWAK","HITMONLEE","HITMONCHAN",
+        "LICKITUNG","KOFFING","WEEZING","RHYHORN","RHYDON","CHANSEY","TANGELA",
+        "KANGASKHAN","HORSEA","SEADRA","GOLDEEN","SEAKING","STARYU","STARMIE",
+        "MR_MIME","SCYTHER","JYNX","ELECTABUZZ","MAGMAR","PINSIR","TAUROS",
+        "MAGIKARP","GYARADOS","LAPRAS","DITTO","EEVEE","VAPOREON","JOLTEON","FLAREON",
+        "PORYGON","OMANYTE","OMASTAR","KABUTO","KABUTOPS","AERODACTYL","SNORLAX",
+        "ARTICUNO","ZAPDOS","MOLTRES","DRATINI","DRAGONAIR","DRAGONITE","MEWTWO","MEW",
+      }
+      for _, s in ipairs(GEN1_151) do add(s) end
       for _, s in ipairs(POKE_SPECIES) do add(s) end
     end
     return out
@@ -608,17 +657,26 @@ return function(mod)
   -- Prefer ambient-poke overworld art; fall back to any live poke ambient so
   -- fly/teleport never keeps the human trainer sprite.
   local pokeSpriteCache = {}
-  local function getPokeSpriteObject(species)
+  -- Species whose cached sprite is that species' OWN art (not a borrowed
+  -- ambient-Pokemon sprite). Lets callers ask for an exact match (strict).
+  local pokeSpriteExact = {}
+  local function getPokeSpriteObject(species, strict)
     if not species then return nil end
     species = tostring(species):upper():gsub(" ", "_"):gsub("'", "")
-    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    if pokeSpriteCache[species] and (not strict or pokeSpriteExact[species]) then
+      return pokeSpriteCache[species]
+    end
     local ok, SR = pcall(require, "src.render.SpriteRenderer")
     if not (ok and SR and SR.new) then return nil end
     local sprites = game and game.data and game.data.sprites
     local function tryDef(def)
       if not def then return nil end
       local ok2, obj = pcall(SR.new, def)
-      if ok2 and obj then pokeSpriteCache[species] = obj; return obj end
+      if ok2 and obj then
+        pokeSpriteCache[species] = obj
+        pokeSpriteExact[species] = true
+        return obj
+      end
       return nil
     end
     local spriteId = resolvePokeSprite(species)
@@ -646,26 +704,25 @@ return function(mod)
         end
       end
     end
-    -- Reuse a live ambient poke's sprite (same art pipeline as spawned mon NPCs).
-    pcall(function()
+    -- Only reuse a live ambient whose SPECIES matches (never borrow Lapras/surf
+    -- art for a psychic/flying travel swap — that was the surfing-sprite bug).
+    if not strict then pcall(function()
       local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
       for _, n in ipairs((ow and ow.npcs) or {}) do
         if n and (n.kantoLifePokeAmbient or (n.def and n.def.kantoLifePokeAmbient))
            and n.sprite and type(n.sprite.draw) == "function" then
           local sp = (n.def and n.def.kantoLifeSpecies) or n.kantoLifeSpecies
           if sp and tostring(sp):upper():gsub(" ", "_"):gsub("'", "") == species then
-            pokeSpriteCache[species] = n.sprite; return
+            pokeSpriteCache[species] = n.sprite
+            pokeSpriteExact[species] = true
+            return
           end
         end
       end
-      for _, n in ipairs((ow and ow.npcs) or {}) do
-        if n and (n.kantoLifePokeAmbient or (n.def and n.def.kantoLifePokeAmbient))
-           and n.sprite and type(n.sprite.draw) == "function" then
-          pokeSpriteCache[species] = n.sprite; return
-        end
-      end
-    end)
-    if pokeSpriteCache[species] then return pokeSpriteCache[species] end
+    end) end
+    if not strict and pokeSpriteCache[species] and pokeSpriteExact[species] then
+      return pokeSpriteCache[species]
+    end
     local pdef = game and game.data and game.data.pokemon and game.data.pokemon[species]
     if type(pdef) == "table" then
       local img = pdef.front or pdef.frontSprite or pdef.icon or pdef.menuIcon or pdef.image
@@ -804,39 +861,65 @@ return function(mod)
   -- it as an overworld sprite.  Never pass an unregistered sprite through to
   -- world:spawnNpc().
   local KNOWN_GEN1_CIVILIAN_SPRITES = {
+    -- Town / story civilians
     "SPRITE_YOUNGSTER", "SPRITE_COOLTRAINER_F", "SPRITE_COOLTRAINER_M",
     "SPRITE_LITTLE_GIRL", "SPRITE_MIDDLE_AGED_MAN", "SPRITE_GAMBLER",
     "SPRITE_SUPER_NERD", "SPRITE_GIRL", "SPRITE_HIKER", "SPRITE_BEAUTY",
     "SPRITE_GENTLEMAN", "SPRITE_BIKER", "SPRITE_SAILOR", "SPRITE_COOK",
     "SPRITE_ROCKET", "SPRITE_CHANNELER", "SPRITE_WAITER",
-    "SPRITE_SILPH_WORKER_F", "SPRITE_MIDDLE_AGED_WOMAN",
-    "SPRITE_BRUNETTE_GIRL", "SPRITE_SCIENTIST", "SPRITE_ROCKER",
-    "SPRITE_SWIMMER", "SPRITE_SAFARI_ZONE_WORKER", "SPRITE_GYM_GUIDE",
-    "SPRITE_GRAMPS", "SPRITE_CLERK", "SPRITE_FISHING_GURU", "SPRITE_GRANNY",
+    "SPRITE_SILPH_WORKER_F", "SPRITE_SILPH_WORKER_M", "SPRITE_SILPH_PRESIDENT",
+    "SPRITE_MIDDLE_AGED_WOMAN", "SPRITE_BRUNETTE_GIRL", "SPRITE_SCIENTIST",
+    "SPRITE_ROCKER", "SPRITE_SWIMMER", "SPRITE_SWIMMER_F", "SPRITE_SWIMMER_M",
+    "SPRITE_SAFARI_ZONE_WORKER", "SPRITE_GYM_GUIDE", "SPRITE_GRAMPS",
+    "SPRITE_CLERK", "SPRITE_FISHING_GURU", "SPRITE_GRANNY",
+    "SPRITE_BLACK_BELT", "SPRITE_BLACKBELT", "SPRITE_LASS",
+    "SPRITE_JR_TRAINER_M", "SPRITE_JR_TRAINER_F", "SPRITE_CUE_BALL",
+    "SPRITE_ENGINEER", "SPRITE_JUGGLER", "SPRITE_TAMER", "SPRITE_BIRD_KEEPER",
+    "SPRITE_FISHER", "SPRITE_FISHERMAN", "SPRITE_PSYCHIC", "SPRITE_SISTER",
+    "SPRITE_NURSE", "SPRITE_GUARD", "SPRITE_MART_GUY", "SPRITE_OLD_MAN",
+    "SPRITE_OLD_MAN_1", "SPRITE_OLD_MAN_2", "SPRITE_FAT_MAN",
+    "SPRITE_BUG_CATCHER",
+    -- Gym leaders + Elite Four + rivals / story
+    "SPRITE_BROCK", "SPRITE_MISTY", "SPRITE_LT_SURGE", "SPRITE_SURGE",
+    "SPRITE_ERIKA", "SPRITE_KOGA", "SPRITE_SABRINA", "SPRITE_BLAINE",
+    "SPRITE_GIOVANNI", "SPRITE_LORELEI", "SPRITE_BRUNO", "SPRITE_AGATHA",
+    "SPRITE_LANCE", "SPRITE_RIVAL", "SPRITE_RIVAL1", "SPRITE_RIVAL2",
+    "SPRITE_RIVAL3", "SPRITE_BLUE", "SPRITE_PROF_OAK", "SPRITE_OAK",
+    "SPRITE_MOM", "SPRITE_DAISY", "SPRITE_BILL", "SPRITE_MR_FUJI",
+    "SPRITE_COPYCAT", "SPRITE_SS_CAPTAIN", "SPRITE_CAPTAIN",
+    "SPRITE_ROCKET_GIRL", "SPRITE_ROCKET_F", "SPRITE_JANINE",
+    "SPRITE_WARDEN", "SPRITE_SAFARI_WARDEN", "SPRITE_RECEPTIONIST",
+    "SPRITE_CABLE_CLUB_WOMAN", "SPRITE_GAMEBOY_KID", "SPRITE_LAPRAS_GIVER",
+    "SPRITE_BALDING_GUY", "SPRITE_YOUNG_BOY", "SPRITE_MAN", "SPRITE_WOMAN",
+    "SPRITE_BOY", "SPRITE_LITTLE_BOY", "SPRITE_OFFICER", "SPRITE_POLICE",
+    "SPRITE_AGATHA_GHOST", "SPRITE_UNUSED_GUY",
+    -- Yellow extras / alternate IDs
   }
   local KNOWN_GEN1_CIVILIAN_SET = {}
   for _, id in ipairs(KNOWN_GEN1_CIVILIAN_SPRITES) do KNOWN_GEN1_CIVILIAN_SET[id] = true end
 
   local function isRegisteredOverworldSprite(sprite)
     if type(sprite) ~= "string" or sprite == "" then return false end
+    if KNOWN_GEN1_CIVILIAN_SET[sprite] then return true end
     local data = game and game.data
     local registry = data and data.sprites
     if type(registry) == "table" and registry[sprite] ~= nil then return true end
-    -- The whitelist is deliberately conservative when data.sprites is not
-    -- available during an early spawn pass.  It contains only actual Yellow
-    -- overworld sprite IDs from the imported ROM manifest.
-    return KNOWN_GEN1_CIVILIAN_SET[sprite] == true
+    return false
   end
 
   local function isHumanCivilianSprite(sprite)
     if not sprite then return false end
     local raw = tostring(sprite)
     local s = raw:upper()
-    if not isRegisteredOverworldSprite(raw) then return false end
     if s:find("PIKACHU", 1, true) or s:find("POKEMON", 1, true) then return false end
-    if s:find("POKE", 1, true) or s:find("BALL", 1, true) or s:find("FOSSIL", 1, true) then return false end
-    if s:find("MON_", 1, true) or s:find("_MON", 1, true) then return false end
-    return true
+    if s:find("SPRITE_POKEMON", 1, true) or s:find("SPRITE_POKE_", 1, true) then return false end
+    if s:find("BALL", 1, true) or s:find("FOSSIL", 1, true) then return false end
+    if s:find("ITEM", 1, true) or s:find("STILL", 1, true) then return false end
+    -- Accept whitelist and any SPRITE_* that is not an explicit mon/item
+    if KNOWN_GEN1_CIVILIAN_SET[raw] then return true end
+    if s:find("^SPRITE_") and isRegisteredOverworldSprite(raw) then return true end
+    if isRegisteredOverworldSprite(raw) then return true end
+    return false
   end
   local function defaultCount(mapId)
     if townDefaults[mapId] then return townDefaults[mapId] end
@@ -1008,6 +1091,39 @@ return function(mod)
     return false
   end
 
+  -- Sleep-only door exclusion: NPCs must never fall asleep within 5 cells of a
+  -- doorway/warp/door tile. Unlike nearWarp (which is also used for spawning and
+  -- only checks the exact cell in small interiors), this applies to EVERY map
+  -- size, and the per-frame NPC:update sleep path uses it too (it previously had
+  -- no door check at all). Result is cached per NPC cell so the 11x11 scan does
+  -- not run every frame.
+  local SLEEP_DOOR_RADIUS = 5
+  local function sleepBlockedByDoor(npc, map)
+    if not npc or not map then return false end
+    local cx, cy = npc.cellX, npc.cellY
+    if type(cx) ~= "number" or type(cy) ~= "number" then return false end
+    cx, cy = math.floor(cx), math.floor(cy)
+    local mapId = map.id
+    local c = npc._kantoSleepDoorCache
+    if c and c.map == mapId and c.x == cx and c.y == cy then return c.v end
+    local hasDoorTile = type(map.isDoorTileCell) == "function"
+    local found = false
+    for dx = -SLEEP_DOOR_RADIUS, SLEEP_DOOR_RADIUS do
+      for dy = -SLEEP_DOOR_RADIUS, SLEEP_DOOR_RADIUS do
+        local x, y = cx + dx, cy + dy
+        local okW, isWarp = pcall(function() return map:warpAtCell(x, y) end)
+        if okW and isWarp then found = true; break end
+        if hasDoorTile then
+          local okD, isDoor = pcall(map.isDoorTileCell, map, x, y)
+          if okD and isDoor then found = true; break end
+        end
+      end
+      if found then break end
+    end
+    npc._kantoSleepDoorCache = { map = mapId, x = cx, y = cy, v = found }
+    return found
+  end
+
   local function isWaterCell(map, x, y)
     if not map or x == nil or y == nil then return false end
     if type(map.isWaterCell) == "function" then
@@ -1124,21 +1240,78 @@ return function(mod)
       local lyingViridianOldMan = mapId == "VIRIDIAN_CITY"
         and (tostring(d.sprite):find("OLD_MAN", 1, true)
           or tostring(d.name):find("OLD_MAN", 1, true))
+      -- Include civilians AND trainer-looking humans in the extra-NPC pool.
+      -- (Pokemon ambients stay on the poke path — never use these sprites there.)
       if d.sprite and not lyingViridianOldMan
          and isHumanCivilianSprite(d.sprite)
-         and not d.trainerClass and not d.item and not d.pokemon
+         and not d.item and not d.pokemon
          and not seen[d.sprite] then
         seen[d.sprite] = true; sprites[#sprites + 1] = d.sprite
       end
       ::continue::
     end
-    -- Fallback human town sprites if the map has none to sample.
-    if #sprites == 0 then
-      -- Do not use trainer-only constants here.  In particular,
-      -- SPRITE_BUG_CATCHER is not a Yellow overworld sprite.
+    -- Whitelist: any entry present in the live registry (image may be a path
+    -- string the engine loads later — do not require userdata here).
+    do
+      local reg = game and game.data and game.data.sprites
+      if type(reg) == "table" then
+        for _, s in ipairs(KNOWN_GEN1_CIVILIAN_SPRITES) do
+          if not seen[s] and type(reg[s]) == "table" then
+            seen[s] = true; sprites[#sprites + 1] = s
+          end
+        end
+      end
+    end
+    local registry = game and game.data and game.data.sprites
+    if type(registry) == "table" then
+      for id, def in pairs(registry) do
+        if type(id) == "string" and not seen[id] then
+          local u = id:upper()
+          local skip = u:find("POKEMON", 1, true) or u:find("SPRITE_POKE_", 1, true)
+            or u:find("BALL", 1, true) or u:find("ITEM", 1, true)
+            or u:find("FOSSIL", 1, true) or u:find("STILL", 1, true)
+            or u:find("MISC", 1, true) or u:find("BOOK", 1, true)
+            or u:find("SIGN", 1, true) or u:find("TREE", 1, true)
+            or u:find("DOOR", 1, true) or u:find("BOULDER", 1, true)
+            or u:find("ROCK", 1, true) or u:find("CUT_", 1, true)
+            or u:find("SNORLAX", 1, true) or u:find("LAPRAS", 1, true)
+            or u:find("MISSINGNO", 1, true) or u:find("KANTO_POKE", 1, true)
+          if not skip and u:find("^SPRITE_") and not u:find("MON$", 1, true) then
+            local humanish = KNOWN_GEN1_CIVILIAN_SET[id]
+              or u:find("TRAINER") or u:find("LEADER") or u:find("RIVAL")
+              or u:find("BROCK") or u:find("MISTY") or u:find("SURGE")
+              or u:find("ERIKA") or u:find("KOGA") or u:find("SABRINA")
+              or u:find("BLAINE") or u:find("GIOVANNI") or u:find("OAK")
+              or u:find("LANCE") or u:find("BRUNO") or u:find("AGATHA")
+              or u:find("LORELEI") or u:find("ROCKET") or u:find("YOUNGSTER")
+              or u:find("LASS") or u:find("HIKER") or u:find("BEAUTY")
+              or u:find("SAILOR") or u:find("BIKER") or u:find("FISHER")
+              or u:find("SWIMMER") or u:find("SCIENTIST") or u:find("ENGINEER")
+              or u:find("NURSE") or u:find("CLERK") or u:find("GUARD")
+              or u:find("CHANNELER") or u:find("JUGGLER") or u:find("TAMER")
+              or u:find("PSYCHIC") or u:find("BLACK") or u:find("CUE")
+              or u:find("GAMBLER") or u:find("ROCKER") or u:find("WAITER")
+              or u:find("COOK") or u:find("GIRL") or u:find("BOY")
+              or u:find("MAN") or u:find("WOMAN") or u:find("GRANNY")
+              or u:find("GRAMPS") or u:find("MOM") or u:find("DAISY")
+              or u:find("BILL") or u:find("FUJI") or u:find("COPYCAT")
+              or u:find("CAPTAIN") or u:find("WARDEN") or u:find("OFFICER")
+              or u:find("BUG_CATCHER") or u:find("BIRD_KEEPER")
+              or u:find("COOLTRAINER") or u:find("JR_TRAINER")
+              or u:find("SILPH") or u:find("SAFARI") or u:find("MART")
+              or isHumanCivilianSprite(id)
+            if humanish then
+              seen[id] = true; sprites[#sprites + 1] = id
+            end
+          end
+        end
+      end
+    end
+    -- Registry presence is enough; engine resolves image by sprite id.
+    if type(registry) == "table" then
       for _, s in ipairs(KNOWN_GEN1_CIVILIAN_SPRITES) do
-        if isRegisteredOverworldSprite(s) then
-          sprites[#sprites + 1] = s
+        if not seen[s] and type(registry[s]) == "table" then
+          seen[s] = true; sprites[#sprites + 1] = s
         end
       end
     end
@@ -1452,41 +1625,152 @@ return function(mod)
       local out, seen = {}, {}
       local data = game and game.data
       local sprites = data and data.sprites
+      local function validImage(img)
+        if img == nil then return false end
+        local ty = type(img)
+        if ty == "userdata" then return true end
+        if ty == "string" and img ~= "" then return true end
+        -- Some ports store { image = ... } nested
+        if ty == "table" then
+          return validImage(img.image or img.front or img.data or img[1])
+        end
+        return false
+      end
+      local function unwrapImage(img)
+        if img == nil then return nil end
+        if type(img) == "userdata" then return img end
+        if type(img) == "string" and img ~= "" then return img end
+        if type(img) == "table" then
+          return unwrapImage(img.image or img.front or img.data or img[1])
+        end
+        return nil
+      end
+      local function imageFromSpriteDef(sd)
+        if type(sd) ~= "table" then return unwrapImage(sd) end
+        return unwrapImage(sd.image or sd.front or sd.icon or sd.menuIcon)
+      end
       for _, sp in ipairs(list or {}) do
         if type(sp) == "string" and not seen[sp] then
-          sp = sp:upper():gsub(" ", "_")
+          sp = sp:upper():gsub(" ", "_"):gsub("'", "")
           seen[sp] = true
           local spr = resolvePokeSprite(sp)
-          if not spr and sprites and data and data.pokemon then
-            -- Full-dex variety: synthesize an overworld sprite from battle art
-            -- so every Pokédex species can appear as an ambient NPC.
-            local pdef = data.pokemon[sp]
-            if type(pdef) == "table" then
-              local img = pdef.front or pdef.frontSprite or pdef.icon
-                or pdef.menuIcon or pdef.image
-              if type(img) == "string" and sprites[img] then
-                img = sprites[img].image or img
-              end
-              if img then
-                local id = "SPRITE_KANTO_POKE_NPC_" .. sp
-                if not sprites[id] then
-                  sprites[id] = {
-                    id = id,
-                    image = img,
-                    frames = 1,
-                    walker = false,
-                    trueColor = true,
-                    frameWidth = tonumber(pdef.frameWidth) or 16,
-                    frameHeight = tonumber(pdef.frameHeight) or 16,
-                    spriteType = "POKEMON_SPRITE",
-                    species = sp,
-                  }
+          -- Reject trainer/human overworld art even if name matched.
+          if spr then
+            local su = tostring(spr):upper()
+            if su:find("YOUNGSTER") or su:find("LASS") or su:find("TRAINER")
+               or su:find("ROCKET") or su:find("HIKER") or su:find("BIKER")
+               or su:find("BEAUTY") or su:find("SAILOR") or su:find("NURSE")
+               or su:find("CLERK") or su:find("BUG_CATCHER") or su:find("FISHER")
+               or su:find("SWIMMER") or su:find("BLACKBELT") or su:find("PSYCHIC")
+               or su:find("CHANNELER") or su:find("SCIENTIST") or su:find("ENGINEER")
+               or su:find("GENTLEMAN") or su:find("COOLTRAINER") or su:find("PLAYER")
+               or su:find("BROCK") or su:find("MISTY") or su:find("OAK") then
+              spr = nil
+            end
+          end
+          -- Only accept existing registry sprites that already have a real image.
+          if spr and sprites and type(sprites[spr]) == "table" then
+            if not imageFromSpriteDef(sprites[spr]) then spr = nil end
+          end
+          -- Synth from party/battle front ONLY when image is a real path/userdata.
+          -- Never register a sprite def with nil image (Assets.newImage crashes).
+          if not spr and sprites and data and type(data.pokemon) == "table" then
+            local pdef = data.pokemon[sp] or data.pokemon[sp:lower()]
+            if not pdef then
+              for pid, pd in pairs(data.pokemon) do
+                if type(pd) == "table" then
+                  local nm = tostring(pd.id or pd.species or pd.name or ""):upper():gsub(" ", "_")
+                  if nm == sp or tostring(pid):upper() == sp then pdef = pd; break end
                 end
-                spr = id
+              end
+            end
+            if type(pdef) == "table" then
+              local img = unwrapImage(pdef.front or pdef.frontSprite or pdef.icon
+                or pdef.menuIcon or pdef.partyIcon or pdef.small
+                or pdef.image or pdef.sprite)
+              if type(pdef.sprites) == "table" then
+                img = img or unwrapImage(pdef.sprites.front or pdef.sprites.icon
+                  or pdef.sprites.menu or pdef.sprites.party)
+              end
+              if type(img) == "string" and sprites[img] then
+                img = imageFromSpriteDef(sprites[img]) or img
+              end
+              if not validImage(img) then
+                for _, key in ipairs({
+                  "ICON_" .. sp, "MENU_" .. sp, "PARTY_" .. sp,
+                  "POKEMON_" .. sp, "SPRITE_POKEMON_" .. sp, "FRONT_" .. sp,
+                  "SPRITE_" .. sp, sp,
+                }) do
+                  local got = imageFromSpriteDef(sprites[key])
+                  if got then img = got; break end
+                end
+              end
+              -- Last resort: any registry sprite id containing the species name
+              -- that already has a real image (still no nil registrations).
+              if not validImage(img) and sprites then
+                local up = sp
+                for id, sd in pairs(sprites) do
+                  local uid = tostring(id):upper()
+                  if uid:find(up, 1, true) and not uid:find("BACK", 1, true)
+                     and not uid:find("TRAINER", 1, true) then
+                    local got = imageFromSpriteDef(sd)
+                    if got then img = got; break end
+                  end
+                end
+              end
+              if validImage(img) then
+                local id = "SPRITE_KANTO_POKE_NPC_" .. sp
+                local existing = sprites[id]
+                if not (type(existing) == "table" and imageFromSpriteDef(existing)) then
+                  -- Scale battle/party art down to ~16x16 OW size so variety
+                  -- works without native overworld frames.
+                  local owImg = unwrapImage(img)
+                  local fw, fh = 16, 16
+                  pcall(function()
+                    local src = owImg
+                    if type(src) == "string" then
+                      local okI, loaded = pcall(love.graphics.newImage, src)
+                      if okI and loaded then src = loaded end
+                    end
+                    if type(src) == "userdata" and src.getWidth then
+                      local sw, sh = src:getWidth(), src:getHeight()
+                      if sw > 20 or sh > 20 then
+                        local c = love.graphics.newCanvas(16, 16)
+                        local prev = love.graphics.getCanvas()
+                        love.graphics.setCanvas(c)
+                        love.graphics.clear(0, 0, 0, 0)
+                        love.graphics.setColor(1, 1, 1, 1)
+                        love.graphics.draw(src, 0, 0, 0, 16 / sw, 16 / sh)
+                        love.graphics.setCanvas(prev)
+                        c:setFilter("nearest", "nearest")
+                        owImg = c
+                        fw, fh = 16, 16
+                      end
+                    end
+                  end)
+                  if validImage(owImg) then
+                    sprites[id] = {
+                      id = id,
+                      image = owImg,
+                      frames = 1,
+                      walker = false,
+                      trueColor = true,
+                      frameWidth = fw,
+                      frameHeight = fh,
+                      spriteType = "POKEMON_SPRITE",
+                      species = sp,
+                    }
+                    spr = id
+                  end
+                else
+                  spr = id
+                end
               end
             end
           end
-          if spr then out[#out + 1] = { species = sp, sprite = spr } end
+          if spr then
+            out[#out + 1] = { species = sp, sprite = spr }
+          end
         end
       end
       return out
@@ -1855,12 +2139,9 @@ return function(mod)
         -- true wilds only
       elseif shouldSleepNow(npc, isNight) then
         -- Don't fall asleep in doorways/warps (blocks player)
-        local cx, cy = npc.cellX, npc.cellY
         local blocking = false
-        if type(cx) == "number" and type(cy) == "number" and ow and ow.map then
-          pcall(function()
-            blocking = nearWarp(ow.map, math.floor(cx), math.floor(cy))
-          end)
+        if ow and ow.map then
+          pcall(function() blocking = sleepBlockedByDoor(npc, ow.map) end)
         end
         if not blocking then
           pcall(function()
@@ -2200,6 +2481,13 @@ return function(mod)
               kantoRoutines.setTravelPercent(n)
             end
           end,
+        },
+        {
+          label = "FLY / TELEPORT",
+          stepper = true, kind = "toggle",
+          current = opt("npc_fly_teleport") ~= false,
+          right = opt("npc_fly_teleport") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("npc_fly_teleport", v and true or false) end,
         },
         {
           label = "NPC AGENDA",
@@ -2713,6 +3001,13 @@ local nm = storyDisplayName(talker)
         resolveDestMap = resolveDestMap,
         onRoutineExit = onRoutineExit,
         getOption = function(k) return opt(k) end,
+        -- True when this exact species has its own overworld/front art, so the
+        -- fly/teleport picker never selects a species that would silently fall
+        -- back to the NPC's trainer sprite.
+        travelSpriteAvailable = function(species)
+          local okS, obj = pcall(getPokeSpriteObject, species, true)
+          return okS and obj ~= nil
+        end,
       })
       if okInit and instance then
         kantoRoutines = instance
@@ -4584,6 +4879,27 @@ function putToSleep(npc)
     G.pop()
   end
 
+  -- Fly/teleport travel helpers shared by the 2D draw and voxel pose wrappers.
+  -- Active layered swap (native engine script drives motion; we only swap the
+  -- sprite). Wall-clock expiry guarantees a swap can never stick to an NPC.
+  local function activeTravelSwap(npc)
+    local sw = npc and npc.kantoLifeTravelSwap
+    if type(sw) ~= "table" or not sw.species then return nil end
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    if sw.born == nil then sw.born = now end
+    if now - sw.born > 2.4 then npc.kantoLifeTravelSwap = nil; return nil end
+    return sw
+  end
+  -- Effective frame for a custom travel animation. "in" plays in reverse so an
+  -- arriving NPC descends/lands instead of rising away a second time.
+  local function travelEffFrame(state)
+    local f = tonumber(state.frame) or 0
+    if state.mode == "in" then
+      return math.max(0, (tonumber(state.total) or 90) - f)
+    end
+    return f
+  end
+
   -- Draw: engine handles the (baked) lying sprite like SPRITE_GAMBLER_ASLEEP;
   local function isVoxelPresentation() local names={"DRAMATIC_SHAPE","DRAMALESS_SHAPE","BATTLE_ART_VOXEL","BATTLE_ART_VOXEL_FORK","battle_art_voxel","BattleArtVoxel","POTATO_VOXEL","PotatoVoxel"} if type(mod.find)=="function" then for _,id in ipairs(names) do local ok,m=pcall(mod.find,id) if ok and m and m.options and type(m.options.get)=="function" then for _,key in ipairs({"voxel","VOXEL","voxels","mode"}) do local v=m.options:get(key) if v~=nil and v~=false and v~="OFF" and v~="off" and v~=0 then return true end end end end end return false end -- we only add Zzz above the head in screen space.
   do
@@ -4603,9 +4919,16 @@ function putToSleep(npc)
         if tp and tp.frame ~= nil then
           local mon = nil
           pcall(function() mon = getPokeSpriteObject(tp.psySpecies) end)
+          if not mon then
+            for _, fb in ipairs({"ABRA", "KADABRA", "ALAKAZAM", "MEW", "MEWTWO"}) do
+              pcall(function() mon = getPokeSpriteObject(fb) end)
+              if mon then break end
+            end
+          end
+          local eff = travelEffFrame(tp)
           local rise = 0
-          if (tp.frame or 0) > 16 then rise = math.min(120, ((tp.frame or 0) - 16) * 4) end
-          local spin = ({"down","left","up","right"})[(math.floor((tp.frame or 0) / 2) % 4) + 1]
+          if eff > 16 then rise = math.min(120, (eff - 16) * 4) end
+          local spin = ({"down","left","up","right"})[(math.floor((tonumber(tp.frame) or 0) / 2) % 4) + 1]
           local px = tonumber(self.px) or ((tonumber(self.cellX) or 0) * 16)
           local py = (tonumber(self.py) or ((tonumber(self.cellY) or 0) * 16)) - rise
           if mon and type(mon.draw) == "function" then
@@ -4619,28 +4942,48 @@ function putToSleep(npc)
           end
           return
         end
-        -- Fly: replace the trainer with a flying Pokémon in 2D.
+        -- Fly: replace the trainer with a Fly-capable Pokémon in 2D.
         if self.kantoLifeFlyHidden and self.kantoLifeFly then
           local fl = self.kantoLifeFly
           local bird = nil
           pcall(function() bird = getPokeSpriteObject(fl.species) end)
-          local progress = math.max(0, math.min(1, (tonumber(fl.frame) or 0) / (tonumber(fl.total) or 90)))
+          local total = tonumber(fl.total) or 90
+          local progress = math.max(0, math.min(1, (tonumber(fl.frame) or 0) / total))
+          -- "in" plays the same arc in reverse: it descends and lands.
+          local arc = (fl.mode == "in") and (1 - progress) or progress
           local bx = tonumber(fl.startPx) or tonumber(self.px) or ((tonumber(self.cellX) or 0) * 16)
           local by = tonumber(fl.startPy) or tonumber(self.py) or ((tonumber(self.cellY) or 0) * 16)
-          local lift = progress * progress * 160
-          local drift = progress * 64
+          local lift = arc * arc * 160
+          local drift = arc * 64
           if bird and type(bird.draw) == "function" then
             pcall(function()
               bird:draw(bx + drift, by - lift, camX or 0, camY or 0, "down", math.floor((fl.frame or 0) / 3) % 2, false, nil, nil, nil)
             end)
           else
-            local origPy = self.py
+            local origPy, origPx = self.py, self.px
             if type(self.py) == "number" then self.py = by - lift end
             if type(self.px) == "number" then self.px = bx + drift end
             pcall(baseNpcDraw, self, camX, camY)
-            self.py = origPy
+            self.py, self.px = origPy, origPx
           end
           return
+        end
+        -- Native engine fly/teleport drives the motion: draw the NPC through
+        -- its own pipeline but with the Pokémon's sprite from the first frame.
+        do
+          local sw = activeTravelSwap(self)
+          if sw then
+            local mon = nil
+            pcall(function() mon = getPokeSpriteObject(sw.species) end)
+            if mon and type(mon.draw) == "function" then
+              local origSprite = self.sprite
+              self.sprite = mon
+              local okD, errD = pcall(baseNpcDraw, self, camX, camY)
+              self.sprite = origSprite
+              if not okD then error(errD) end
+              return
+            end
+          end
         end
         if self.nightlifeSleeping then
           fileLog("DRAW sleeping NPC, calling drawSleepAccessory")
@@ -4899,6 +5242,8 @@ function putToSleep(npc)
           if not py then py = (tonumber(npc.cellY) or 0) * 16 end
           local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
           -- Ground/feet point — engine emote + NPC Bubbles
+          -- Project the TILE CENTER (py + 8) at body height: the front edge
+          -- (py + 16) shifts sideways on screen under a rotated camera.
           local okP, sx, sy = pcall(v.project, px + 8, gh + 16, py + 8)
           if not (okP and type(sx) == "number") and gh ~= 0 then
             okP, sx, sy = pcall(v.project, px + 8, 16, py + 8)
@@ -4914,21 +5259,39 @@ function putToSleep(npc)
               pcall(function()
                 if font then tw = font:getWidth(text); th = font:getHeight() end
               end)
+              -- Reject letterbox / off-scene projections (common when the
+              -- canvas is the full window rather than the 3D view).
+              if cw > 0 and ch > 0 then
+                if sx < 4 or sy < 4 or sx > cw - 4 or sy > ch - 4 then
+                  goto continue_bubble
+                end
+                -- Also reject if sitting in the bottom UI strip of a tall canvas
+                if ch > cw * 1.4 and sy > ch * 0.72 then
+                  goto continue_bubble
+                end
+              end
+              -- Tell the 3D billboard path this NPC's bubble is already drawn
+              -- this frame so the two renderers never stack a duplicate.
+              npc._kantoLifeBubbleOverlayAt = now
               G.push("all")
               G.translate(sx, sy)
-              G.scale(s, s)
-              -- Emote top-left is (-4, -30) in world px at this scale
+              -- Voxel project Y can be inverted vs Love2D; flip so text is upright
+              -- and the stem points toward the NPC (bubble sits ABOVE the head).
+              G.scale(s, -s)
               local bw = math.max(16, tw + 8)
               local bh = math.max(12, th + 4)
-              local bx, by = -bw / 2, -30 - bh
+              -- With Y flipped, negative by draws toward the top of the screen.
+              local bx, by = -bw / 2, -42 - bh
               G.setColor(1, 1, 1, 1)
               G.rectangle("fill", bx, by, bw, bh, 2, 2)
               G.setColor(0.1, 0.1, 0.1, 1)
               G.rectangle("line", bx, by, bw, bh, 2, 2)
+              -- Stem toward NPC (positive Y in flipped space = toward feet/anchor)
               G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
               if font then G.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
               G.pop()
             end
+            ::continue_bubble::
           end
         end
       end
@@ -4964,9 +5327,10 @@ function putToSleep(npc)
       if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: bubble pipeline registered") end
     end)
 
-    -- Always install a worldPresent overlay as well (idempotent). CharacterRenderers
-    -- + content pipeline can miss on some Battle Art forks; this matches the Gen2
-    -- path that successfully paints overlays every frame.
+    -- worldPresent fallback (same seam Gen2 uses successfully). The content
+    -- pipeline alone can be silent on some Battle Art forks; wrapping here
+    -- restores bubbles when CR registration fails. Coordinates are clipped to
+    -- the canvas so letterbox placement is rejected.
     pcall(function()
       local Pipelines = safeRequire("src.render.Pipelines")
       if not (Pipelines and type(Pipelines.worldPresent) == "function") then return end
@@ -4975,11 +5339,25 @@ function putToSleep(npc)
       Pipelines._kantoLifeCollisionBubbleBase = base
       Pipelines.worldPresent = function(canvas, ctx)
         local out = base(canvas, ctx)
-        pcall(drawBubblesOnCanvas, out or canvas, ctx)
+        local target = out or canvas
+        -- Only paint when we have a real voxel projector and on-canvas coords.
+        pcall(function()
+          if not target or not ctx then return end
+          local v = voxel3D()
+          if not v then return end
+          local okW, cw = pcall(target.getWidth, target)
+          local okH, ch = pcall(target.getHeight, target)
+          cw = (okW and tonumber(cw)) or 0
+          ch = (okH and tonumber(ch)) or 0
+          if cw < 32 or ch < 32 then return end
+          drawBubblesOnCanvas(target, ctx)
+        end)
         return out
       end
       Pipelines._kantoLifeCollisionBubbleWrapped = true
-      if mod.log then pcall(mod.log.info, mod.log, "Kanto Life: Gen1 bubble worldPresent wrap installed") end
+      if mod.log then
+        pcall(mod.log.info, mod.log, "Kanto Life: Gen1 bubble worldPresent wrap installed (with clip)")
+      end
     end)
   end
 
@@ -6114,12 +6492,9 @@ local function nightlifeTick(world, dt)
           if npc.nightlifeSleeping then wakeNpc(npc) end
         elseif shouldSleepNow(npc, isNight) then
           -- Don't fall asleep in doorways/warps (blocks player)
-          local cx, cy = npc.cellX, npc.cellY
           local blocking = false
-          if type(cx) == "number" and type(cy) == "number" and world and world.map then
-            pcall(function()
-              blocking = nearWarp(world.map, math.floor(cx), math.floor(cy))
-            end)
+          if world and world.map then
+            pcall(function() blocking = sleepBlockedByDoor(npc, world.map) end)
           end
           if not blocking then
             -- Natural sleep style (5): compute at sleep time when world/map is available.
@@ -6144,6 +6519,8 @@ local function nightlifeTick(world, dt)
               end
             end)
             putToSleep(npc)
+          elseif npc.nightlifeSleeping then
+            wakeNpc(npc)  -- sleeping inside a doorway zone: wake and move on
           end
         elseif npc.nightlifeSleeping then
           wakeNpc(npc)
@@ -7201,6 +7578,10 @@ local function nightlifeTick(world, dt)
         local untilAt = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
         if untilAt <= now then return false end
         local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+        -- The screen-space overlay already drew this bubble: don't double up.
+        if now - (tonumber(npc._kantoLifeBubbleOverlayAt) or -1) < 0.25 then
+          return false
+        end
 
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
         local entry = getBubbleImage(text)
@@ -7237,13 +7618,35 @@ local function nightlifeTick(world, dt)
           if okYaw and tonumber(v) then zyaw = v end
         end
 
-        -- Head height; mesh origin is now the visual center of the bubble.
         local bubbleScale = 1.0
+        -- CENTERING: don't trust the mesh anchor semantics across builds.
+        -- Measure the mesh's real X extent once and shift by its midpoint so
+        -- the bubble centre sits on the NPC for any anchor behaviour.
+        local centerX = entry._meshCenterX
+        if centerX == nil then
+          centerX = 0
+          pcall(function()
+            local minX, maxX
+            local n = mesh.getVertexCount and mesh:getVertexCount() or 0
+            for i = 1, math.min(n, 64) do
+              local x = mesh:getVertex(i)
+              if type(x) == "number" then
+                if not minX or x < minX then minX = x end
+                if not maxX or x > maxX then maxX = x end
+              end
+            end
+            if minX and maxX then centerX = (minX + maxX) / 2 end
+          end)
+          entry._meshCenterX = centerX
+        end
         local model = Mat4.mul(
-          Mat4.translate(px + 8, gh + 20, py + 8),
+          Mat4.translate(px + 8, gh + 36, py + 8),
           Mat4.mul(
             Mat4.rotateY(zyaw),
-            Mat4.scale(bubbleScale, bubbleScale, 1)
+            Mat4.mul(
+              Mat4.scale(bubbleScale, bubbleScale, 1),
+              Mat4.translate(-centerX, 0, 0)
+            )
           )
         )
         -- pull=0.5: same camera-ward bias as the Zzz (avoids z-fighting).
@@ -7290,36 +7693,61 @@ local function nightlifeTick(world, dt)
         if self then
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
-            -- Teleport: spin + rise, showing a psychic Pokemon.
-            -- Use the selected psychic species rather than the generic
-            -- placeholder sprite. Sprite lookup is guarded so missing species
-            -- graphics safely fall back to the NPC's normal sprite.
+            -- Teleport: spin + rise (or descend, for arrivals), showing the
+            -- selected Psychic-type Pokemon. Falls back to the NPC's normal
+            -- sprite only if that species has no art.
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local monSprite = nil
             pcall(function() monSprite = getPokeSpriteObject(tp.psySpecies) end)
+            if not monSprite then
+              for _, fb in ipairs({"ABRA", "KADABRA", "ALAKAZAM", "MEW", "MEWTWO", "HYPNO"}) do
+                pcall(function() monSprite = getPokeSpriteObject(fb) end)
+                if monSprite then break end
+              end
+            end
             local spinOrder = {"down", "left", "up", "right"}
-            local spinFacing = spinOrder[(math.floor(tp.frame / 2) % 4) + 1]
+            local spinFacing = spinOrder[(math.floor((tonumber(tp.frame) or 0) / 2) % 4) + 1]
             -- GBC: spin in place first, then rise (mirror engine spinRise)
+            local eff = travelEffFrame(tp)
             local rise = 0
-            if tp.frame > 20 then rise = (tp.frame - 20) * 5 end
+            if eff > 20 then rise = (eff - 20) * 5 end
             if rise > 100 then rise = 100 end
             return monSprite or sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
             -- Use the selected Fly-capable Pokémon, not the engine's generic
-            -- bird icon. This keeps the visible animation species-specific.
+            -- bird icon. Arrivals play the arc in reverse (descend and land).
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
             local bird = nil
             pcall(function() bird = getPokeSpriteObject(fl.species) end)
+            if not bird then
+              for _, fb in ipairs({"PIDGEOT", "FEAROW", "DODRIO", "AERODACTYL", "CHARIZARD"}) do
+                pcall(function() bird = getPokeSpriteObject(fb) end)
+                if bird then break end
+              end
+            end
             local total = fl.total or 90
             local progress = fl.frame / total
             if progress > 1 then progress = 1 end
             if progress < 0 then progress = 0 end
-            local lift = progress * 120
-            local dx = progress * 80
+            local arc = (fl.mode == "in") and (1 - progress) or progress
+            local lift = arc * 120
+            local dx = arc * 80
             local flapPhase = math.floor(fl.frame / 3) % 2
             return bird or sprite, px + dx, py - lift, facing, flapPhase, false, false
+          end
+          -- Native engine fly/teleport drives the motion (basePose already
+          -- carries it); only substitute the Pokémon sprite, from frame 0.
+          local sw = activeTravelSwap(self)
+          if sw then
+            local mon = nil
+            pcall(function() mon = getPokeSpriteObject(sw.species) end)
+            if mon then
+              local r = { basePose(self, ...) }
+              r[1] = mon
+              return (table.unpack or unpack)(r, 1, math.max(#r, 7))
+            end
           end
         end
         if self and self.nightlifeSleeping then
@@ -7405,7 +7833,9 @@ local function nightlifeTick(world, dt)
             if self.nightlifeSleeping then pcall(wakeNpc, self) end
             return baseUpdate(self, map, entities)
           end
-          if shouldSleepNow(self, isNight) then
+          local doorBlocked = false
+          pcall(function() doorBlocked = sleepBlockedByDoor(self, map) end)
+          if shouldSleepNow(self, isNight) and not doorBlocked then
             if not self.nightlifeSleeping then
               pcall(function()
                 if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then

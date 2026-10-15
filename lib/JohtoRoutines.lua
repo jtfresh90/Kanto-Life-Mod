@@ -52,11 +52,28 @@ return function(ctx)
     return true
   end
 
+
+  -- FLY / TELEPORT toggle (pause menu > Options > Kanto Life). When OFF, NPCs
+  -- never use fly/teleport to depart or arrive; they use doors/routes instead.
+  local function flyTeleportEnabled()
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, "npc_fly_teleport")
+      if ok and v ~= nil then return v ~= false and v ~= 0 end
+    end
+    return true
+  end
+  local function noFlyTele(kind)
+    if (kind == "fly" or kind == "teleport") and not flyTeleportEnabled() then
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
   -- Forward declaration: hash is defined further below but used by
   -- pickTravelKind above its definition point.
   local hash
 
-  local function pickTravelKind(npc, world)
+  local function pickTravelKindRaw(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
     end
@@ -78,9 +95,14 @@ return function(ctx)
     else return "route" end
   end
 
+  local function pickTravelKind(npc, world)
+    return noFlyTele(pickTravelKindRaw(npc, world))
+  end
+
   -- Visual departure effect markers. Fail-open: if nothing reads them, the
   -- NPC still despawns.
   local function startDepartEffect(npc, method)
+    method = noFlyTele(method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._johtoLifeDepartMethod = method
     npc._johtoLifeDepartUntil = now + 1.2
@@ -172,10 +194,26 @@ return function(ctx)
   end
 
   local BUBBLE_TEXT = { ":)", ":D", ":-)", ";)", "^_^", "!!", "?", "...", "<3", ":P", "^^", "o_o" }
+  -- Talk-bubble text hold: once an NPC shows a bubble text it keeps that exact
+  -- text for at least BUBBLE_TEXT_HOLD seconds (no flickering between faces).
+  local BUBBLE_TEXT_HOLD = 10
+  local function stableBubbleText(a, b, now)
+    for _, n in ipairs({ a, b }) do
+      if n._kantoLifeBubbleHoldText and now - (tonumber(n._kantoLifeBubbleHoldAt) or -1e9) < BUBBLE_TEXT_HOLD then
+        return n._kantoLifeBubbleHoldText, tonumber(n._kantoLifeBubbleHoldAt)
+      end
+    end
+    return BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)], now
+  end
+  local function nowSec()
+    return (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+  end
   local function setCollisionBubble(a, b)
     if not a or not b then return end
-    local text = BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)]
-    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    local now = nowSec()
+    local text, stamp = stableBubbleText(a, b, now)
+    a._kantoLifeBubbleHoldText, a._kantoLifeBubbleHoldAt = text, stamp
+    b._kantoLifeBubbleHoldText, b._kantoLifeBubbleHoldAt = text, stamp
     a._kantoLifeCollisionBubbleText, a._kantoLifeCollisionBubbleUntil = text, now + 1.35
     b._kantoLifeCollisionBubbleText, b._kantoLifeCollisionBubbleUntil = text, now + 1.35
   end
@@ -1074,7 +1112,8 @@ return function(ctx)
         local wt = st.wanderTarget
         if wt and npc.cellX == wt[1] and npc.cellY == wt[2] then st.wanderTarget = nil end
         if st.wait <= 0 then
-          local kind = st.travelKind
+          local kind = noFlyTele(st.travelKind)
+          st.travelKind = kind
           if kind == "fly" or kind == "teleport" or kind == "surf" then
             st.phase = "special_depart"
             st.wait = 1.2
@@ -1095,7 +1134,8 @@ return function(ctx)
       if st.phase == "special_depart" then
         st.wait = (st.wait or 0) - (dt or 0)
         if st.wait <= 0 then
-          local kind = st.travelKind or "door"
+          local kind = noFlyTele(st.travelKind or "door")
+          st.travelKind = kind
           local dest
           if kind == "route" then
             dest = destinationFor(world, npc, nil, "route")

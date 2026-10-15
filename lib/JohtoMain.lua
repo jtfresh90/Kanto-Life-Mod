@@ -285,6 +285,7 @@ return function(mod)
         { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
       default = 30, min = 0, max = 100, step = 10 },
     { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
+    { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     -- EXPERIMENTAL: Lifelike feature toggles
@@ -388,6 +389,15 @@ return function(mod)
     { "SPRITE_BOARDER", "m" }, { "SPRITE_SKIER", "f" },
     { "SPRITE_BUENA", "f" }, { "SPRITE_SAILOR", "m" },
     { "SPRITE_SWIMMER_GUY", "m" }, { "SPRITE_SWIMMER_GIRL", "f" },
+    -- Extra trainers / important humans for ambient variety
+    { "SPRITE_BLACK_BELT", "m" }, { "SPRITE_HIKER", "m" },
+    { "SPRITE_PSYCHIC", "m" }, { "SPRITE_MEDIUM", "f" },
+    { "SPRITE_KIMONO_GIRL", "f" }, { "SPRITE_FIREBREATHER", "m" },
+    { "SPRITE_JUGGLER", "m" }, { "SPRITE_Biker", "m" },
+    { "SPRITE_BIKER", "m" }, { "SPRITE_CAMPER", "m" },
+    { "SPRITE_PICNICKER", "f" }, { "SPRITE_ROCKET", "m" },
+    { "SPRITE_ROCKET_GIRL", "f" }, { "SPRITE_GUITARIST", "m" },
+    { "SPRITE_GENTLEMAN", "m" }, { "SPRITE_OFFICER_M", "m" },
   }
   local MALE_NAMES = {
     "Aaron","Adam","Alex","Andrew","Ben","Blake","Brian","Caleb","Carlos","Chris",
@@ -464,16 +474,39 @@ return function(mod)
     local out, seen = {}, {}
     local function add(sp)
       if type(sp) ~= "string" or sp == "" then return end
-      sp = sp:upper()
+      sp = sp:upper():gsub(" ", "_"):gsub("'", "")
       if seen[sp] then return end
+      if sp:find("^SPRITE") or sp:find("^PAL_") or sp == "NONE" then return end
+      -- Never treat human class names as mons
+      if sp:find("TRAINER", 1, true) or sp:find("PLAYER", 1, true) then return end
       seen[sp] = true
       out[#out + 1] = sp
     end
     local g = G and G() or game
     local data = g and g.data and g.data.pokemon
     if type(data) == "table" then
-      for id, _ in pairs(data) do
-        if type(id) == "string" then add(id) end
+      for id, def in pairs(data) do
+        if type(id) == "string" then add(id)
+        elseif type(id) == "number" and type(def) == "table" then
+          if type(def.id) == "string" then add(def.id) end
+          if type(def.species) == "string" then add(def.species) end
+          if type(def.name) == "string" then add(def.name) end
+        end
+        if type(def) == "table" then
+          if type(def.id) == "string" then add(def.id) end
+          if type(def.species) == "string" then add(def.species) end
+        end
+      end
+    end
+    local sprites = g and g.data and g.data.sprites
+    if type(sprites) == "table" then
+      for id, sd in pairs(sprites) do
+        local s = tostring(id):upper()
+        if s:find("SPRITE_POKEMON_", 1, true) then
+          add(s:gsub("^SPRITE_POKEMON_", ""))
+        elseif type(sd) == "table" and sd.species then
+          add(tostring(sd.species))
+        end
       end
     end
     if #out == 0 then
@@ -752,6 +785,27 @@ return function(mod)
         end
         if #pool == 0 then pool = SPRITE_DEFS end
       end
+      -- Merge every human-looking sprite from the live registry (all trainers).
+      pcall(function()
+        local reg = game and game.data and game.data.sprites
+        if type(reg) ~= "table" then return end
+        local extra = {}
+        for id, _ in pairs(reg) do
+          local u = tostring(id):upper()
+          if u:find("^SPRITE_") and not u:find("POKEMON") and not u:find("POKE_")
+             and not u:find("PLAYER") and not u:find("ITEM") and not u:find("BALL")
+             and not u:find("STILL") and not u:find("MISC") then
+            extra[#extra+1] = { id, (u:find("_F") or u:find("LASS") or u:find("GIRL")
+              or u:find("BEAUTY") or u:find("WOMAN") or u:find("GRANNY")) and "f" or "m" }
+          end
+        end
+        if #extra > 0 then
+          local merged = {}
+          for _, c in ipairs(pool) do merged[#merged+1] = c end
+          for _, c in ipairs(extra) do merged[#merged+1] = c end
+          pool = merged
+        end
+      end)
       local def = pool[love.math.random(#pool)]
       sprite, gender = def[1], def[2]
       displayName = randomName(gender)
@@ -1183,6 +1237,8 @@ return function(mod)
             local n = math.floor(tonumber(opt("npc_travel_pct")) or 30)
             n = (n >= 100) and 0 or (n + 10); setOpt("npc_travel_pct", n); refreshCurrentMap()
           end },
+        { label = "FLY / TELEPORT", right = opt("npc_fly_teleport") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("npc_fly_teleport", not (opt("npc_fly_teleport") ~= false)) end },
         { label = "NPC AGENDA", right = ({[0] = "OFF", [1] = "DAY", [2] = "FULL"})[math.floor(tonumber(opt("npc_agenda")) or 0)] or "OFF", stepper = true,
           step = function(dir)
             local n = math.floor(tonumber(opt("npc_agenda")) or 0) + (dir or 1)
@@ -1656,7 +1712,25 @@ return function(mod)
       return true
     end
     local function putAsleep(npc)
-      if npc.nightlifeSleeping then return end
+      if not npc or npc.nightlifeSleeping then return end
+      -- Hard gate: never sleep mart/center map staff (non-ambient)
+      do
+        local d = npc.def or {}
+        local spr = tostring(d.sprite or npc.sprite or ""):upper()
+        local nm = tostring(d.name or npc.name or ""):upper()
+        if spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
+           or spr:find("CLERK", 1, true) or spr:find("MART", 1, true)
+           or spr:find("SHOP", 1, true) or spr:find("CASHIER", 1, true)
+           or spr:find("RECEPTION", 1, true) then
+          return
+        end
+        local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+        local mapId = tostring((world.map and world.map.id) or ""):upper()
+        if (mapId:find("MART", 1, true) or mapId:find("CENTER", 1, true)
+            or mapId:find("POKECENTER", 1, true)) and not isAmb then
+          return
+        end
+      end
       -- Door exclusion is handled by safe() (1-cell). A 5-cell radius was
       -- rejecting almost every NPC in towns and all indoor sleepers.
       npc.moving = false; npc.targetX = nil; npc.targetY = nil; npc.progress = 0
@@ -1680,6 +1754,15 @@ return function(mod)
       npc.frozen = false; npc.nightlifeSleeping = nil; npc.johtoLifeSleepAngle = nil
       npc.sleepPose = nil
       if npc.def then npc.def.sleeping = nil end
+      if npc._johtoLifeSavedVisible then
+        npc.visible = true
+        npc.hidden = false
+        npc._johtoLifeSavedVisible = nil
+      elseif npc.visible == false then
+        npc.visible = true
+        npc.hidden = false
+      end
+      npc._johtoLifeVoxelSleepHidden = nil
       pcall(restoreRotatedSleepSprite, npc)
       if npc.johtoLifeSleepFacing ~= nil then
         pcall(function()
@@ -1723,10 +1806,21 @@ return function(mod)
         local isExcluded = spr:find("NURSE", 1, true) or nm:find("JOY", 1, true)
           or spr:find("CLERK", 1, true) or spr:find("SAILOR", 1, true)
           or spr:find("PLAYER", 1, true) or nm:find("PLAYER", 1, true)
-          or d.isPlayer or npc.isPlayer
-        -- Prefer ambients; also allow other human map NPCs so sleep % works
-        -- even when extra-NPC count is 0.
+          or spr:find("MART", 1, true) or nm:find("MART", 1, true)
+          or spr:find("SHOP", 1, true) or nm:find("SHOP", 1, true)
+          or spr:find("CASHIER", 1, true) or spr:find("RECEPTION", 1, true)
+          or nm:find("RECEPTION", 1, true) or spr:find("ATTENDANT", 1, true)
+          or spr:find("GYM_GUIDE", 1, true) or d.isPlayer or npc.isPlayer
         local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+        -- Map staff in marts / centers must never sleep (only ambient visitors may).
+        local mapId = tostring((world.map and world.map.id) or ""):upper()
+        local isServiceMap = mapId:find("MART", 1, true)
+          or mapId:find("CENTER", 1, true)
+          or mapId:find("POKECENTER", 1, true)
+          or mapId:find("POKE_CENTER", 1, true)
+        if isServiceMap and not isAmb then
+          isExcluded = true
+        end
         local isHumanish = not isPoke and not isExcluded
         if isHumanish and safe(npc) and (isAmb or not d.trainerClass) then
           local id = tostring(npc.id or d.name or nm or "")
@@ -3368,6 +3462,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
 
     -- Gen2 sleep visuals: baseDraw always (voxel-safe); Zzz after; 2D side-lie when possible
     
+local _johtoSleepInvisibleSprite
 local function isVoxelPresentation()
       -- Any Battle Art / Dramatic Shape voxel level other than OFF
       local names = {
@@ -3661,7 +3756,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           -- own the body and props. Drawing 2D props here paints on the wrong
           -- canvas and produces the offset floating tents.
           if voxel then
-            if style == 1 then return nil end  -- tent: hide body; overlay draws tent
+            -- All accessory styles are owned by worldPresent (underlay/body/overlay).
+            -- Drawing here double-paints the BA body and fights the prop stack.
+            if style >= 1 then return nil end
             return baseDraw(self, ox, oy, scale)
           end
           local r = nil
@@ -3813,8 +3910,36 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             pcall(function() style = resolveSleepStyle(self) end)
             style = math.floor(tonumber(style) or 0)
             if style >= 1 then
-              return nil, px, py, facing, phase, flip, extra
+              self._johtoLifeVoxelSleepHidden = true
+              self.visible = false
+              self.hidden = true
+              self._johtoLifeSavedVisible = true
+              -- Fully transparent sprite so BA has nothing to extrude into a blob
+              if not _johtoSleepInvisibleSprite then
+                pcall(function()
+                  local img = love.graphics.newCanvas(2, 2)
+                  love.graphics.setCanvas(img)
+                  love.graphics.clear(0, 0, 0, 0)
+                  love.graphics.setCanvas()
+                  img:setFilter("nearest", "nearest")
+                  _johtoSleepInvisibleSprite = {
+                    image = img,
+                    frames = { [0] = love.graphics.newQuad(0,0,2,2,2,2) },
+                    frameWidth = 2, frameHeight = 2, frameCount = 1,
+                    def = { trueColor = true, frames = 1, walker = false, image = img },
+                    _johtoInvisible = true,
+                    _johtoSleepBaked = true, -- stop bakeRotated from restoring body art
+                  }
+                end)
+              end
+              return _johtoSleepInvisibleSprite or nil, px, py, facing, 0, false, extra
             end
+          elseif self and self._johtoLifeSavedVisible then
+            self.visible = true
+            self._johtoLifeSavedVisible = nil
+            self._johtoLifeVoxelSleepHidden = nil
+          elseif self then
+            self._johtoLifeVoxelSleepHidden = nil
           end
           local travel = self and self._johtoLifeTravelAnim
           if not travel then return sprite, px, py, facing, phase, flip, extra end
@@ -3923,9 +4048,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local px = tonumber(npc.px) or ((npc.cellX or 0) * 16)
         local py = tonumber(npc.py) or ((npc.cellY or 0) * 16)
         local gh = tonumber(npc.groundHeight) or tonumber(npc._groundHeight) or 0
-        local ok, sx, sy = pcall(V3.project, px + 8, gh + 8, py + 8)
+        -- Project at tile center slightly above ground so props center on NPC.
+        local ok, sx, sy = pcall(V3.project, px + 8, gh + 6, py + 8)
         if not (ok and type(sx) == "number" and type(sy) == "number") and gh ~= 0 then
-          ok, sx, sy = pcall(V3.project, px + 8, 8, py + 8)
+          ok, sx, sy = pcall(V3.project, px + 8, 6, py + 8)
         end
         if not (ok and type(sx) == "number" and type(sy) == "number") then
           return nil, nil, false
@@ -3945,16 +4071,39 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         return tonumber(ctx and ctx.scale) or 1
       end
 
-      local function drawFloatingZ(Gfx, sx, sy, scale)
-        local phase = (((love.timer and love.timer.getTime and love.timer.getTime()) or 0) * 1.2) % 2.4
+      local function drawFloatingZ(Gfx, sx, sy, scale, npc)
+        -- Same animated Zzz as drawSleepZzz (pre-230). Do not replace with static letters.
+        local v = opt("sleep_bubbles")
+        if v == false then return end
+        local seed = 0
+        if npc then
+          local x = tonumber(npc.cellX or npc.x) or 0
+          local y = tonumber(npc.cellY or npc.y) or 0
+          seed = math.floor(x * 17 + y * 31) % 1000
+        end
+        local side = (seed % 2 == 0) and -1 or 1
+        local t = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
         local s = math.max(0.85, (tonumber(scale) or 1) * 0.9)
-        local zx, zy = sx + 2 * s, sy - 22 * s - phase * 5 * s
         Gfx.push("all")
-        Gfx.setColor(1, 1, 1, 0.95)
-        Gfx.print("Z", zx - 1, zy, 0, s, s)
-        Gfx.print("Z", zx + 1, zy, 0, s, s)
-        Gfx.setColor(0.15, 0.05, 0.35, 0.95)
-        Gfx.print("Z", zx, zy, 0, s, s)
+        for i = 0, 2 do
+          local phase = t * 1.5 + i * 0.75 + seed * 0.05
+          local cycle = phase % 2.5
+          local rise = cycle * 4
+          local alpha = 1 - cycle / 2.5
+          if alpha > 0.25 then
+            local sc = (0.7 + i * 0.2) * s
+            local zx = sx + side * (3 + i * 3) * s
+            local zy = sy - 6 * s - rise * s - i * 2 * s
+            Gfx.setColor(1, 1, 1, alpha)
+            Gfx.print("Z", zx - 1, zy, 0, sc, sc)
+            Gfx.print("Z", zx + 1, zy, 0, sc, sc)
+            Gfx.print("Z", zx, zy - 1, 0, sc, sc)
+            Gfx.print("Z", zx, zy + 1, 0, sc, sc)
+            Gfx.setColor(0.1, 0.05, 0.3, alpha)
+            Gfx.print("Z", zx, zy, 0, sc, sc)
+          end
+        end
+        Gfx.setColor(1, 1, 1, 1)
         Gfx.pop()
       end
 
@@ -3970,10 +4119,14 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         local prop = sleepPropImage(style)
         local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
         if not prop and not propBase then return end
-        -- Props are 20×24; draw a bit larger than the 16px NPC footprint so
-        -- bed/bag/tent read clearly in voxel (screenshots: 0.8× was too small).
-        local pscale = math.max(1.0, (tonumber(scale) or 1) * 1.30)
-        local pang = (style == 1) and 0 or (npc.johtoLifeSleepAngle or (math.pi / 2))
+        -- Stable size independent of camera distance (canvasScale drifts in FP/TP).
+        -- Bed/bag share the sleeper's angle so the 3-layer stack lines up.
+        -- Tent stays upright and oversized so it covers any residual BA body.
+        local pscale = (style == 1) and 2.4 or 2.0
+        local pang = 0
+        if style == 2 or style == 3 then
+          pang = npc.johtoLifeSleepAngle or (math.pi / 2)
+        end
         Gfx.push("all")
         Gfx.setColor(1, 1, 1, 1)
         if propBase then
@@ -3981,10 +4134,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           Gfx.draw(propBase, sx, sy, pang, pscale, pscale, bw / 2, bh / 2)
         end
         -- Body between underlay and overlay for bed/bag only.
+        -- Baked sleep sprites already contain the side-lie rotation → draw at 0.
         if style == 2 or style == 3 then
           pcall(function()
             local spr = npc.sprite
-            if not spr then return end
+            if not spr or spr._johtoInvisible then return end
             local img = spr.image
             if type(spr.resolveImage) == "function" then
               local ok, r = pcall(spr.resolveImage, spr)
@@ -3994,12 +4148,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             local iw = tonumber(spr.frameWidth) or 16
             local ih = tonumber(spr.frameHeight) or 16
             local quad = spr.frames and (spr.frames[0] or spr.frames[1])
-            -- Keep body ~NPC size; props are larger so the frame frames the sleeper.
-            local nscale = math.max(0.9, (tonumber(scale) or 1) * 1.05)
+            local nscale = pscale * 0.85
+            local bang = spr._johtoSleepBaked and 0 or pang
             if quad then
-              Gfx.draw(img, quad, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+              Gfx.draw(img, quad, sx, sy, bang, nscale, nscale, iw / 2, ih / 2)
             else
-              Gfx.draw(img, sx, sy, 0, nscale, nscale, iw / 2, ih / 2)
+              Gfx.draw(img, sx, sy, bang, nscale, nscale, iw / 2, ih / 2)
             end
           end)
         end
@@ -4034,10 +4188,17 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         end
 
         for _, npc in ipairs(sleepers) do
-          local sx, sy, ok = projectNpc(npc, canvas)
-          if ok and sx and sy then
-            drawPropAt(Gfx, npc, sx, sy, scale)
-            if showZzz then drawFloatingZ(Gfx, sx, sy, scale) end
+          -- CharacterRenderers draws props + animated Zzz in WORLD space.
+          -- Screen stickers shrink with distance and can stick to the camera —
+          -- never use them when CR is live.
+          if _G._johtoLifeVoxelSleepCRInstalled or npc._johtoLifeCRSleepClaimed then
+            npc._johtoLifeCRSleepClaimed = nil
+          else
+            local sx, sy, ok = projectNpc(npc, canvas)
+            if ok and sx and sy then
+              drawPropAt(Gfx, npc, sx, sy, scale)
+              if showZzz then drawFloatingZ(Gfx, sx, sy, scale, npc) end
+            end
           end
         end
 
@@ -4141,6 +4302,330 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
       -- Do NOT wrap love.draw for props (wrong coordinate space → sliding duplicates).
     end)
+
+
+  ----------------------------------------------------------------
+  -- Public CharacterRenderers sleep for Gen2 voxel.
+  -- Ports Gen1's floor-geometry claim so beds/bags lie flat, tents stay
+  -- upright, BA does not draw a standing/duplicate body, and Zzz is large.
+  ----------------------------------------------------------------
+  local function installJohtoVoxelSleepCR()
+    if _G._johtoLifeVoxelSleepCRInstalled then return true end
+    local battle = nil
+    local names = {
+      "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL", "BATTLE_ART_VOXEL_GEN2",
+      "battle_art_voxel", "BattleArtVoxel", "POTATO_VOXEL", "PotatoVoxel",
+      "DRAMATIC_SHAPE", "DRAMALESS_SHAPE",
+    }
+    for _, id in ipairs(names) do
+      local ok, m = pcall(function() return mod.find(id) end)
+      if ok and m and m.exports then
+        local cr = m.exports.characterRenderers or m.exports.CharacterRenderers
+        if cr and type(cr.register) == "function" then
+          battle = m; break
+        end
+      end
+    end
+    if not battle then return false end
+    local api = battle.exports.characterRenderers or battle.exports.CharacterRenderers
+    local lib = battle.exports.lib
+    if not (lib and type(lib.require) == "function") then return false end
+    local okV, Voxel3D = pcall(lib.require, "Voxel3D")
+    local okM, Mat4 = pcall(lib.require, "Mat4")
+    local okB, SpriteBillboards = pcall(lib.require, "SpriteBillboards")
+    if not (okV and okM and okB and Voxel3D and Mat4 and SpriteBillboards
+            and type(Voxel3D.draw) == "function"
+            and type(Mat4.mul) == "function"
+            and type(Mat4.translate) == "function"
+            and type(Mat4.rotateX) == "function"
+            and type(Mat4.rotateY) == "function"
+            and type(SpriteBillboards.mesh) == "function") then
+      return false
+    end
+
+    local sleepImgCache = {}
+    local function ensureAssetHook()
+      pcall(function()
+        local okA, Assets = pcall(require, "src.render.Assets")
+        if not (okA and Assets and type(Assets.get) == "function") then return end
+        if Assets._johtoLifeSleepCRHooked then return end
+        local base = Assets.get
+        Assets.get = function(path, ...)
+          if path and sleepImgCache[path] then return sleepImgCache[path] end
+          return base(path, ...)
+        end
+        Assets._johtoLifeSleepCRHooked = true
+      end)
+    end
+
+    local propMeshCache, propBaseMeshCache, bodyMeshCache = {}, {}, {}
+
+    local function loadPropImg(rel)
+      if not rel then return nil end
+      if sleepImgCache[rel] then return sleepImgCache[rel] end
+      local path = "assets/" .. rel
+      if mod.assets and type(mod.assets.path) == "function" then
+        path = mod.assets:path("assets/" .. rel) or path
+      end
+      local ok, img = pcall(love.graphics.newImage, path)
+      if not ok or not img then
+        ok, img = pcall(love.graphics.newImage, "assets/" .. rel)
+      end
+      if ok and img then
+        pcall(img.setFilter, img, "nearest", "nearest")
+        sleepImgCache[rel] = img
+        sleepImgCache["assets/" .. rel] = img
+        return img
+      end
+      return nil
+    end
+
+    -- Match Gen1 mesh convention: anchorX=0, pivot with Mat4.translate(-8,0,0)
+    local function makeMesh(cacheKey, img, anchorY)
+      if not img then return nil end
+      local w, h = img:getDimensions()
+      local path = "johto_life_sleep_cr/" .. tostring(cacheKey) .. ".png"
+      sleepImgCache[path] = img
+      ensureAssetHook()
+      local def = {
+        id = "JOHTO_LIFE_SLEEP_CR_" .. tostring(cacheKey),
+        image = path, frames = 1,
+        frameWidth = w, frameHeight = h,
+        trueColor = true, walker = false,
+      }
+      local mesh = SpriteBillboards.mesh(def, 0, anchorY)
+      if mesh then return { mesh = mesh, image = img, w = w, h = h } end
+      return nil
+    end
+
+    local function propMesh(style)
+      style = math.floor(tonumber(style) or 0)
+      if style <= 0 then return nil end
+      if propMeshCache[style] then return propMeshCache[style] end
+      local names = {[1]="sleep_tent.png",[2]="sleeping_bag.png",[3]="sleep_bed.png"}
+      local img = loadPropImg(names[style]); if not img then return nil end
+      local _, ph = img:getDimensions()
+      -- Tent: bottom-anchored upright. Bed/bag: center for flat floor card.
+      local anchorY = (style == 1) and ph or (ph / 2)
+      propMeshCache[style] = makeMesh("prop_" .. style, img, anchorY)
+      return propMeshCache[style]
+    end
+
+    local function propBaseMesh(style)
+      style = math.floor(tonumber(style) or 0)
+      if style <= 1 then return nil end
+      if propBaseMeshCache[style] then return propBaseMeshCache[style] end
+      local names = {[2]="sleeping_bag_base.png",[3]="sleep_bed_base.png"}
+      local img = loadPropImg(names[style]); if not img then return nil end
+      local _, ph = img:getDimensions()
+      propBaseMeshCache[style] = makeMesh("propbase_" .. style, img, ph / 2)
+      return propBaseMeshCache[style]
+    end
+
+    local function bodyMeshFor(npc)
+      local spr = npc and npc.sprite
+      if not spr or spr._johtoInvisible then
+        -- Prefer original pre-hide image if we saved one
+        spr = npc and npc._johtoOrigSleepSprite or spr
+      end
+      if not spr then return nil end
+      local img = spr.image
+      if type(spr.resolveImage) == "function" then
+        local ok, r = pcall(spr.resolveImage, spr)
+        if ok and r then img = r end
+      end
+      if not img then return nil end
+      local fw = tonumber(spr.frameWidth) or 16
+      local fh = tonumber(spr.frameHeight) or 16
+      local key = tostring(spr) .. "#" .. tostring(fw) .. "x" .. tostring(fh)
+        .. (spr._johtoSleepBaked and "#baked" or "#raw")
+      if bodyMeshCache[key] then return bodyMeshCache[key] end
+      local drawImg = img
+      local quad = spr.frames and (spr.frames[0] or spr.frames[1])
+      if quad then
+        local okC, canvas = pcall(function()
+          local c = love.graphics.newCanvas(fw, fh)
+          local prev = love.graphics.getCanvas()
+          love.graphics.setCanvas(c)
+          love.graphics.clear(0, 0, 0, 0)
+          love.graphics.setColor(1, 1, 1, 1)
+          love.graphics.draw(img, quad, 0, 0)
+          love.graphics.setCanvas(prev)
+          return c
+        end)
+        if okC and canvas then drawImg = canvas end
+      end
+      bodyMeshCache[key] = makeMesh("body_" .. key, drawImg, fh / 2)
+      return bodyMeshCache[key]
+    end
+
+    -- World-space animated Z (not a screen sticker — no shrink / camera stick)
+    local zBillboard = nil
+    local function zMesh()
+      if zBillboard then return zBillboard end
+      local okC, canvas = pcall(function()
+        local c = love.graphics.newCanvas(12, 14)
+        local prev = love.graphics.getCanvas()
+        love.graphics.setCanvas(c)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.print("Z", 1, 0)
+        love.graphics.setColor(0.15, 0.05, 0.35, 1)
+        love.graphics.print("Z", 2, 1)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.setCanvas(prev)
+        return c
+      end)
+      if not (okC and canvas) then return nil end
+      zBillboard = makeMesh("zzz_anim", canvas, 7)
+      return zBillboard
+    end
+
+    local function facingYaw(facing)
+      if facing == "left" then return math.rad(-90) end
+      if facing == "up" then return math.rad(180) end
+      if facing == "right" then return math.rad(90) end
+      return 0
+    end
+
+    local function drawSleep3D(ctx)
+      local npc = ctx and ctx.actor
+      if not npc or not npc.nightlifeSleeping then return false end
+
+      local style = 0
+      if npc.kantoLifeNaturalSleepStyle ~= nil then
+        style = npc.kantoLifeNaturalSleepStyle
+      elseif npc.kantoLifeRandomSleepStyle ~= nil then
+        style = npc.kantoLifeRandomSleepStyle
+      else
+        local okR, rs = pcall(function() return resolveSleepStyle(npc) end)
+        if okR and rs ~= nil then style = rs
+        else
+          local okO, v = pcall(function() return opt("sleep_style") end)
+          if okO then style = v end
+        end
+      end
+      style = math.floor(tonumber(style) or 0)
+
+      local px = tonumber(ctx.px) or tonumber(npc.px) or ((npc.cellX or 0) * 16)
+      local py = tonumber(ctx.py) or tonumber(npc.py) or ((npc.cellY or 0) * 16)
+      local gh = tonumber(ctx.groundHeight) or tonumber(npc.groundHeight) or 0
+      local yaw = facingYaw(npc.facing or npc.kantoLifeSleepFacing)
+      -- Flat on the floor (Gen1): rotateX(-PI/2)
+      local flatRot = Mat4.mul(Mat4.rotateY(yaw), Mat4.rotateX(-math.pi / 2))
+
+      -- Underlay (bed/bag)
+      if style == 2 or style == 3 then
+        local pbm = propBaseMesh(style)
+        if pbm and pbm.mesh then
+          local baseModel = Mat4.mul(
+            Mat4.translate(px + 8, gh + 0.03, py + 8),
+            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
+          )
+          pcall(Voxel3D.draw, pbm.mesh, pbm.image, baseModel, 0, baseModel)
+        end
+      end
+
+      -- Body between layers (not under tent)
+      if style ~= 1 then
+        local bm = bodyMeshFor(npc)
+        if bm and bm.mesh then
+          local bodyModel = Mat4.mul(
+            Mat4.translate(px + 8, gh + 0.25, py + 8),
+            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
+          )
+          pcall(Voxel3D.draw, bm.mesh, bm.image, bodyModel, 0.1, bodyModel)
+        end
+      end
+
+      -- Overlay / upright tent
+      local pm = propMesh(style)
+      if pm and pm.mesh then
+        if style == 1 then
+          -- Upright tent, bottom on ground, fixed yaw (not camera-billboard)
+          local tentModel = Mat4.mul(
+            Mat4.translate(px + 8, gh + 0.05, py + 8),
+            Mat4.rotateY(0)
+          )
+          pcall(Voxel3D.draw, pm.mesh, pm.image, tentModel, 0.2, tentModel)
+        elseif style == 2 or style == 3 then
+          local propModel = Mat4.mul(
+            Mat4.translate(px + 8, gh + 0.45, py + 8),
+            Mat4.mul(flatRot, Mat4.translate(-8, 0, 0))
+          )
+          pcall(Voxel3D.draw, pm.mesh, pm.image, propModel, 0.2, propModel)
+        end
+      end
+
+      -- Animated world-space Zzz (rise over time, camera-facing only for legibility)
+      local zm = zMesh()
+      if zm and zm.mesh then
+        local host = ctx.host or {}
+        local fp = host.FirstPerson
+        local pitch = -math.pi / 2
+        local zyaw = 0
+        if fp and type(fp.cardBlend) == "function" then
+          local okBlend, blend = pcall(fp.cardBlend)
+          if okBlend and tonumber(blend) and blend > 0.5 and type(fp.cardYaw) == "function" then
+            local okYaw, v = pcall(fp.cardYaw, px + 8, py + 8)
+            if okYaw and tonumber(v) then zyaw = v end
+            pitch = 0
+          end
+        end
+        local zt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        -- Three rising Zs like the classic 2D animation, in WORLD space
+        for i = 0, 2 do
+          local phase = zt * 1.5 + i * 0.75
+          local cycle = phase % 2.5
+          local rise = cycle * 4
+          local alpha = 1 - cycle / 2.5
+          if alpha > 0.25 then
+            local zModel = Mat4.mul(
+              Mat4.translate(px + 8 + (i - 1) * 3, gh + 16 + rise + i * 2, py + 8),
+              Mat4.rotateY(zyaw)
+            )
+            if pitch ~= 0 then zModel = Mat4.mul(zModel, Mat4.rotateX(pitch)) end
+            pcall(Voxel3D.draw, zm.mesh, zm.image, zModel, 0.5, zModel)
+          end
+        end
+      end
+
+      npc._johtoLifeCRSleepClaimed = true
+      -- CLAIM: BA must not draw the standing / gray body
+      return true
+    end
+
+    local handle = api.register({
+      apiVersion = 1,
+      id = "JOHTO_LIFE_SLEEP_3D",
+      name = "Johto Life Sleeping NPCs",
+      priority = 10000,
+      drawEntity = drawSleep3D,
+    })
+    if handle then
+      _G._johtoLifeVoxelSleepCRInstalled = true
+      pcall(function() mod.log:info("Johto Life: Gen2 CharacterRenderers sleep installed") end)
+      return true
+    end
+    return false
+  end
+
+  pcall(installJohtoVoxelSleepCR)
+  pcall(function()
+    if mod.events and type(mod.events.on) == "function" then
+      mod.events:on("update", function()
+        if not _G._johtoLifeVoxelSleepCRInstalled then
+          pcall(installJohtoVoxelSleepCR)
+        end
+      end)
+    elseif mod.on and type(mod.on) == "function" then
+      mod.on("update", function()
+        if not _G._johtoLifeVoxelSleepCRInstalled then
+          pcall(installJohtoVoxelSleepCR)
+        end
+      end)
+    end
+  end)
 
   mod.log:info("Johto Life 0.1.52 loaded")
 end

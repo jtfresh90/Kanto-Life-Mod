@@ -74,7 +74,24 @@ return function(ctx)
   -- pickTravelKind above its definition point.
   local hash
 
-  local function pickTravelKind(npc, world)
+
+  -- FLY / TELEPORT toggle (pause menu > Options > Kanto Life). When OFF, NPCs
+  -- never use fly/teleport to depart or arrive; they use doors/routes instead.
+  local function flyTeleportEnabled()
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, "firered_npc_fly_teleport")
+      if ok and v ~= nil then return v ~= false and v ~= 0 end
+    end
+    return true
+  end
+  local function noFlyTele(kind)
+    if (kind == "fly" or kind == "teleport") and not flyTeleportEnabled() then
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
+  local function pickTravelKindRaw(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
     end
@@ -94,6 +111,10 @@ return function(ctx)
     elseif roll <= 50 then return "teleport"
     elseif roll <= 75 then return "door"
     else return "route" end
+  end
+
+  local function pickTravelKind(npc, world)
+    return noFlyTele(pickTravelKindRaw(npc, world))
   end
 
   -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)
@@ -165,6 +186,7 @@ return function(ctx)
   local SPIN_ORDER = { "down", "left", "up", "right" }
 
   local function startDepartEffect(npc, method)
+    method = noFlyTele(method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeFRDepartMethod = method
     npc._kantoLifeFRDepartUntil = now + 1.2
@@ -404,10 +426,27 @@ return function(ctx)
   end
 
   local BUBBLE_TEXT = { ":)", ":D", ":-)", ";)", "^_^", "!!", "?", "...", "<3", ":P", "^^", "o_o" }
+  -- Talk-bubble text hold: once an NPC shows a bubble text it keeps that exact
+  -- text for at least BUBBLE_TEXT_HOLD seconds (no flickering between faces).
+  local BUBBLE_TEXT_HOLD = 10
+  local function stableBubbleText(a, b, now)
+    for _, n in ipairs({ a, b }) do
+      if n._kantoLifeBubbleHoldText and now - (tonumber(n._kantoLifeBubbleHoldAt) or -1e9) < BUBBLE_TEXT_HOLD then
+        return n._kantoLifeBubbleHoldText, tonumber(n._kantoLifeBubbleHoldAt)
+      end
+    end
+    return BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)], now
+  end
+  local function nowSec()
+    return (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+  end
   local function collisionBubble(a, b)
     if not a or not b then return end
-    local text = BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)]
-    local untilAt = (love and love.timer and love.timer.getTime and love.timer.getTime() or 0) + 1.35
+    local now = nowSec()
+    local text, stamp = stableBubbleText(a, b, now)
+    a._kantoLifeBubbleHoldText, a._kantoLifeBubbleHoldAt = text, stamp
+    b._kantoLifeBubbleHoldText, b._kantoLifeBubbleHoldAt = text, stamp
+    local untilAt = now + 1.35
     a._kantoLifeCollisionBubbleText, a._kantoLifeCollisionBubbleUntil = text, untilAt
     b._kantoLifeCollisionBubbleText, b._kantoLifeCollisionBubbleUntil = text, untilAt
   end
@@ -1015,6 +1054,11 @@ return function(ctx)
       local kind = npc._kantoLifeFRTravelKind or st.travelKind
       if not kind then
         kind = pickTravelKind(npc, world)
+        npc._kantoLifeFRTravelKind = kind
+        st.travelKind = kind
+      end
+      if not st.specialDepartStarted then
+        kind = noFlyTele(kind)
         npc._kantoLifeFRTravelKind = kind
         st.travelKind = kind
       end
