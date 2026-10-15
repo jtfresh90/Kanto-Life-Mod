@@ -704,19 +704,10 @@ return function(mod)
         end
       end
     end
-    -- HGSS_SPRITES: load pokemon-overworld sheet by national dex when registry has no art.
-    -- Try the known mod ids (same fallback list as Gen 2): the id is not
-    -- guaranteed to be exactly "HGSS_SPRITES".
+    -- HGSS_SPRITES: load pokemon-overworld sheet by national dex when registry has no art
     pcall(function()
       if pokeSpriteCache[species] then return end
-      local hgss = nil
-      pcall(function() hgss = mod.find("HGSS_SPRITES") end)
-      if not hgss then
-        for _, id in ipairs({"hgss_sprites", "HGSS Visual Overhaul"}) do
-          local ok, m = pcall(function() return mod.find(id) end)
-          if ok and m then hgss = m; break end
-        end
-      end
+      local hgss = mod.find("HGSS_SPRITES")
       if not (hgss and hgss.assets and type(hgss.assets.path) == "function") then return end
       local DEX = {
         PIDGEY=16,PIDGEOTTO=17,PIDGEOT=18,SPEAROW=21,FEAROW=22,FARFETCHD=83,
