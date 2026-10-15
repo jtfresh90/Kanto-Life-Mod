@@ -53,11 +53,28 @@ return function(ctx)
     return true
   end
 
+
+  -- FLY / TELEPORT toggle (pause menu > Options > Kanto Life). When OFF, NPCs
+  -- never use fly/teleport to depart or arrive; they use doors/routes instead.
+  local function flyTeleportEnabled()
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, "npc_fly_teleport")
+      if ok and v ~= nil then return v ~= false and v ~= 0 end
+    end
+    return true
+  end
+  local function noFlyTele(kind)
+    if (kind == "fly" or kind == "teleport") and not flyTeleportEnabled() then
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
   -- Forward declaration: hash is defined further below but used by
   -- pickTravelKind above its definition point.
   local hash
 
-  local function pickTravelKind(npc, world)
+  local function pickTravelKindRaw(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
     end
@@ -79,15 +96,23 @@ return function(ctx)
     else return "route" end
   end
 
+  local function pickTravelKind(npc, world)
+    return noFlyTele(pickTravelKindRaw(npc, world))
+  end
+
   -- Forward declarations are required because startDepartEffect is defined
   -- before the animation implementations. Without these locals, Lua resolves
   -- the calls as globals and the Yellow/Gen1 departure effects silently fail.
   local npcTeleportOut, npcFlyOut, npcTeleportIn, npcFlyIn
+  -- Also forward-declared: teleportUnstick() (defined above its definition
+  -- point) calls it; without this it resolved to a nil global and threw.
+  local startArriveEffect
 
   -- Visual departure effect markers. The main controller's draw wrappers can
   -- use these for fancier effects; the routines themselves just need the
   -- timing. Fail-open: if nothing reads them, the NPC still despawns.
   local function startDepartEffect(npc, method)
+    method = noFlyTele(method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeDepartMethod = method
     npc._kantoLifeDepartUntil = now + 1.2
@@ -144,7 +169,8 @@ return function(ctx)
     return false
   end
 
-  local function startArriveEffect(npc, method)
+  startArriveEffect = function(npc, method)
+    method = noFlyTele(method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeArriveMethod = method
     npc._kantoLifeArriveUntil = now + 1.2
@@ -160,127 +186,240 @@ return function(ctx)
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
-  -- Random flying Pokémon species for fly animation.
-  -- User requirement: real bird/flying Pokémon (legendaries OK), not SPRITE_BIRD.
-  local flyingSpeciesCache = nil
-  local function randomFlyingSpecies()
-    if flyingSpeciesCache and #flyingSpeciesCache > 0 then
-      return flyingSpeciesCache[math.random(#flyingSpeciesCache)]
+  -- ---------------------------------------------------------------------
+  -- Travel species selection.
+  --   fly      -> a random Pokemon that can learn FLY (HM Fly / Fly learnset)
+  --   teleport -> a random PSYCHIC-type Pokemon
+  -- Game data is used when it describes the information; otherwise a canonical
+  -- list is used. Only species with their own art are picked, so the visible
+  -- sprite swap can never silently fall back to the NPC's trainer sprite.
+  -- ---------------------------------------------------------------------
+  local function normSpecies(s)
+    return (tostring(s or ""):upper():gsub("[^%w]", ""))
+  end
+
+  local function gameData()
+    local g = getGame()
+    local d = g and g.data
+    if type(d) == "table" then return d end
+    return _G._kantoLifeGameData
+  end
+
+  local function pokemonTable()
+    local d = gameData()
+    local t = d and d.pokemon
+    if type(t) == "table" then return t end
+    return nil
+  end
+
+  local function speciesHasType(pdef, want)
+    if type(pdef) ~= "table" then return false end
+    local function match(v) return type(v) == "string" and v:upper() == want end
+    if type(pdef.types) == "table" then
+      for _, t in pairs(pdef.types) do if match(t) then return true end end
     end
-    -- Try to get game data (set by KantoMain)
-    local gd = _G._kantoLifeGameData
-    local data = gd and gd.pokemon
-    if type(data) ~= "table" then return nil end
-    local flyers = {}
-    for name, pdef in pairs(data) do
-      if type(pdef) == "table" and type(pdef.types) == "table" then
-        for _, ty in ipairs(pdef.types) do
-          if tostring(ty):upper() == "FLYING" then
-            flyers[#flyers + 1] = name
-            break
+    for _, k in ipairs({ "type", "type1", "type2", "primaryType", "secondaryType" }) do
+      if match(pdef[k]) then return true end
+    end
+    return false
+  end
+
+  local function speciesLearnsFly(pdef)
+    if type(pdef) ~= "table" then return false end
+    local function isFly(v)
+      if type(v) ~= "string" then return false end
+      local u = v:upper():gsub("[%s%-]", "_")
+      return u == "FLY" or u == "HM_FLY" or u == "HM02" or u == "HM_02" or u == "HM02_FLY"
+    end
+    local function scan(t, depth)
+      if type(t) ~= "table" or depth > 2 then return false end
+      for k, v in pairs(t) do
+        if isFly(v) then return true end
+        if v and isFly(k) then return true end
+        if type(v) == "table" and scan(v, depth + 1) then return true end
+      end
+      return false
+    end
+    for _, key in ipairs({ "hms", "hm", "tmhm", "tms", "machines", "learnable",
+                           "compat", "teachable", "learnset", "levelMoves",
+                           "learnableMoves" }) do
+      if scan(pdef[key], 0) then return true end
+    end
+    return false
+  end
+
+  -- Canonical fallbacks (used only when the data does not expose this info).
+  -- FLY: HM02/Fly-compatible species. PSYCHIC: Psychic-typed species.
+  local FLY_FALLBACK = {
+    "PIDGEY", "PIDGEOTTO", "PIDGEOT", "SPEAROW", "FEAROW", "FARFETCHD", "FARFETCH_D",
+    "DODUO", "DODRIO", "CHARIZARD", "DRAGONITE", "AERODACTYL",
+    "ARTICUNO", "ZAPDOS", "MOLTRES", "MEW",
+    -- Gen 2 additions (only used if present in the loaded data)
+    "HOOTHOOT", "NOCTOWL", "NATU", "XATU", "SKARMORY", "LUGIA", "HO_OH",
+  }
+  local PSY_FALLBACK = {
+    "ABRA", "KADABRA", "ALAKAZAM", "SLOWPOKE", "SLOWBRO",
+    "DROWZEE", "HYPNO", "EXEGGCUTE", "EXEGGUTOR", "STARMIE",
+    "MR_MIME", "JYNX", "MEWTWO", "MEW",
+    -- Gen 2 additions (only used if present in the loaded data)
+    "NATU", "XATU", "ESPEON", "UNOWN", "WOBBUFFET", "GIRAFARIG",
+    "SMOOCHUM", "LUGIA", "CELEBI",
+  }
+
+  local travelPools = {}
+  local travelArtCache = {}
+
+  local function buildTravelPool(kind)
+    local data = pokemonTable()
+    local out, seen = {}, {}
+    local function add(key)
+      if key and not seen[key] then seen[key] = true; out[#out + 1] = key end
+    end
+    if data then
+      for key, pdef in pairs(data) do
+        if type(key) == "string" and type(pdef) == "table" then
+          if kind == "fly" then
+            if speciesLearnsFly(pdef) or speciesHasType(pdef, "FLYING") then
+              add(key)
+            end
+          elseif kind == "teleport" then
+            if speciesHasType(pdef, "PSYCHIC") then add(key) end
           end
         end
       end
     end
-    flyingSpeciesCache = flyers
-    if #flyers == 0 then return nil end
-    return flyers[math.random(#flyers)]
+    -- Always merge the canonical list so the pool is never empty / never
+    -- collapses to water-only species that happen to have overworld art.
+    local index = {}
+    if data then
+      for key in pairs(data) do
+        if type(key) == "string" then index[normSpecies(key)] = key end
+      end
+    end
+    for _, name in ipairs(kind == "fly" and FLY_FALLBACK or PSY_FALLBACK) do
+      local k = index[normSpecies(name)] or name
+      add(k)
+    end
+    return out
+  end
+
+  local function hasTravelArt(species)
+    local c = travelArtCache[species]
+    if c ~= nil then return c end
+    local avail = ctx.travelSpriteAvailable
+    if type(avail) ~= "function" then return false end
+    local ok, has = pcall(avail, species)
+    c = (ok and has) and true or false
+    travelArtCache[species] = c
+    return c
+  end
+
+  local function pickTravelSpecies(kind)
+    local pool = travelPools[kind]
+    if not pool or #pool == 0 then
+      pool = buildTravelPool(kind)
+      travelPools[kind] = pool
+    end
+    if #pool == 0 then return nil end
+    -- Prefer species with dedicated art, but NEVER drop to a different type
+    -- pool. Battle-front fallback in getPokeSpriteObject covers the rest.
+    local usable = {}
+    for _, sp in ipairs(pool) do
+      if hasTravelArt(sp) then usable[#usable + 1] = sp end
+    end
+    local list = (#usable > 0) and usable or pool
+    return list[math.random(#list)]
+  end
+
+  -- Layered sprite swap used when the engine's NATIVE fly/teleport script drives
+  -- the motion: the draw/pose wrappers in KantoMain substitute the Pokemon
+  -- sprite for the NPC's own for the duration. Expires by timer (see
+  -- updateTravelAnimation); never mutates npc.sprite.
+  local function beginTravelSwap(npc, species, mode, kind, ttl)
+    if not species then return end
+    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    npc.kantoLifeTravelSwap = {
+      species = species, mode = mode, kind = kind,
+      ttl = ttl or 1.6, born = now,
+    }
+  end
+
+  local function playTravelSound(name)
+    pcall(function()
+      local gd = gameData()
+      if gd then require("src.core.Sound").play(gd, name) end
+    end)
   end
 
   -- NPC Teleport OUT animation.
-  -- Gen 2: uses built-in npc:scriptTeleport("from").
-  -- Gen 1/3: custom spin + rise (mirrors Player:pose logic).
+  -- Native engine script when exposed (GBC-faithful motion); the NPC is shown
+  -- as a random Psychic-type Pokemon from the very first frame either way.
   npcTeleportOut = function(npc)
-    local psychicTypes = {
-      "ABRA", "KADABRA", "ALAKAZAM",
-      "SLOWPOKE", "SLOWBRO",
-      "DROWZEE", "HYPNO",
-      "EXEGGCUTE", "EXEGGUTOR",
-      "STARYU", "STARMIE",
-      "MR_MIME", "JYNX",
-      "MEWTWO", "MEW",
-    }
-    local psySpecies = psychicTypes[math.random(#psychicTypes)]
+    local species = pickTravelSpecies("teleport")
+    playTravelSound("Teleport_Exit2")
+    beginTravelSwap(npc, species, "out", "teleport", 2.5)
+    -- Always set custom state so pose/draw substitute the psychic mon even when
+    -- the native script owns the camera motion (script success used to skip this).
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,
       mode = "out",
       origFacing = npc.facing or "down",
-      psySpecies = psySpecies,
+      psySpecies = species,
     }
     npc.frozen = true
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
-    end)
     if type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "from")
     end
     return true
   end
 
-  -- NPC Teleport IN animation (arrival).
+  -- NPC Teleport IN animation (arrival): same Psychic-Pokemon swap, descending.
   npcTeleportIn = function(npc)
-    local psychicTypesIn = {
-      "ABRA", "KADABRA", "ALAKAZAM", "SLOWPOKE", "SLOWBRO",
-      "DROWZEE", "HYPNO", "EXEGGCUTE", "EXEGGUTOR",
-      "STARYU", "STARMIE", "MR_MIME", "JYNX", "MEWTWO", "MEW",
-    }
+    local species = pickTravelSpecies("teleport")
+    playTravelSound("Teleport_Exit2")
+    beginTravelSwap(npc, species, "in", "teleport", 2.5)
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,
       mode = "in",
       origFacing = npc.facing or "down",
-      psySpecies = psychicTypesIn[math.random(#psychicTypesIn)],
+      psySpecies = species,
     }
     npc.frozen = true
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Teleport_Exit2") end
-    end)
     if type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "to")
     end
     return true
   end
 
-  -- NPC Fly OUT animation.
-  -- Hides NPC, shows random flying Pokémon sprite flying up and away.
+  -- NPC Fly OUT animation: shown as a random Pokemon that can learn FLY.
   npcFlyOut = function(npc)
-    local species = randomFlyingSpecies()
-    if not species then
-      local fallback = { "PIDGEY", "PIDGEOTTO", "PIDGEOT", "SPEAROW", "FEAROW",
-        "ZUBAT", "GOLBAT", "FARFETCHD", "DODUO", "DODRIO", "AERODACTYL" }
-      species = fallback[math.random(#fallback)]
-    end
+    local species = pickTravelSpecies("fly")
+    playTravelSound("Fly")
+    beginTravelSwap(npc, species, "out", "fly", 2.5)
     npc.kantoLifeFly = {
-      species = species,
       frame = 0,
       total = 90,
       mode = "out",
-      startPx = npc.px or (npc.cellX or 0) * 16,
-      startPy = npc.py or (npc.cellY or 0) * 16,
+      species = species,
+      startPx = npc.px,
+      startPy = npc.py,
     }
     npc.kantoLifeFlyHidden = true
     npc.frozen = true
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Fly") end
-    end)
     if type(npc.scriptFly) == "function" then
       pcall(npc.scriptFly, npc, "from")
     end
     return true
   end
 
-  -- NPC Fly IN animation (arrival).
+  -- NPC Fly IN animation (arrival): Fly-capable Pokemon descends and lands.
   npcFlyIn = function(npc)
-    local species = randomFlyingSpecies()
+    local species = pickTravelSpecies("fly")
     if not species then return false end
-    pcall(function()
-      local gd = _G._kantoLifeGameData
-      if gd then require("src.core.Sound").play(gd, "Fly") end
-    end)
+    playTravelSound("Fly")
+    beginTravelSwap(npc, species, "in", "fly", 2.2)
     npc.kantoLifeFly = {
       species = species,
       frame = 0,
@@ -297,10 +436,18 @@ return function(ctx)
   -- Update teleport/fly animations. Called every frame before the frozen check.
   -- Returns true if the NPC is currently animating (skip normal routine).
   local function updateTravelAnimation(npc, dt)
-    -- Travel animations render at POSE TIME (NPC:pose wrapper in KantoMain).
-    -- This function ONLY advances frame counters. It never mutates
-    -- npc.sprite, npc.py, npc.px, or npc.facing. The pose wrapper reads
-    -- tp.frame/fl.frame and returns substituted sprite + Y offset.
+    -- Travel animations render at POSE/DRAW TIME (wrappers in KantoMain).
+    -- This function ONLY advances counters. It never mutates npc.sprite,
+    -- npc.py, npc.px, or npc.facing.
+    local sw = npc.kantoLifeTravelSwap
+    if sw then
+      sw.ttl = (tonumber(sw.ttl) or 0) - (tonumber(dt) or 0)
+      if sw.ttl <= 0 then
+        npc.kantoLifeTravelSwap = nil
+        if sw.mode == "out" then npc._kantoLifeTravelDone = true end
+      end
+    end
+
     local tp = npc.kantoLifeTeleport
     if tp then
       tp.frame = (tp.frame or 0) + 1
@@ -310,6 +457,7 @@ return function(ctx)
         npc.frozen = false
         if tp.mode == "out" then
           npc._kantoLifeTravelHidden = true
+          npc._kantoLifeTravelDone = true
         end
       end
       return true  -- Animating, skip normal routine
@@ -320,9 +468,11 @@ return function(ctx)
       fl.frame = (fl.frame or 0) + 1
       if fl.frame >= (fl.total or 90) then
         npc.kantoLifeFly = nil
+        npc.kantoLifeFlyHidden = nil
         npc.frozen = false
         if fl.mode == "out" then
           npc._kantoLifeTravelHidden = true
+          npc._kantoLifeTravelDone = true
         end
       end
       return true  -- Animating, skip normal routine
@@ -382,10 +532,26 @@ return function(ctx)
   end
 
   local BUBBLE_TEXT = { ":)", ":D", ":-)", ";)", "^_^", "!!", "?", "...", "<3", ":P", "^^", "o_o" }
+  -- Talk-bubble text hold: once an NPC shows a bubble text it keeps that exact
+  -- text for at least BUBBLE_TEXT_HOLD seconds (no flickering between faces).
+  local BUBBLE_TEXT_HOLD = 10
+  local function stableBubbleText(a, b, now)
+    for _, n in ipairs({ a, b }) do
+      if n._kantoLifeBubbleHoldText and now - (tonumber(n._kantoLifeBubbleHoldAt) or -1e9) < BUBBLE_TEXT_HOLD then
+        return n._kantoLifeBubbleHoldText, tonumber(n._kantoLifeBubbleHoldAt)
+      end
+    end
+    return BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)], now
+  end
+  local function nowSec()
+    return (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+  end
   local function setCollisionBubble(a, b)
     if not a or not b then return end
-    local text = BUBBLE_TEXT[math.random(1, #BUBBLE_TEXT)]
-    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+    local now = nowSec()
+    local text, stamp = stableBubbleText(a, b, now)
+    a._kantoLifeBubbleHoldText, a._kantoLifeBubbleHoldAt = text, stamp
+    b._kantoLifeBubbleHoldText, b._kantoLifeBubbleHoldAt = text, stamp
     a._kantoLifeCollisionBubbleText, a._kantoLifeCollisionBubbleUntil = text, now + 1.35
     b._kantoLifeCollisionBubbleText, b._kantoLifeCollisionBubbleUntil = text, now + 1.35
   end
@@ -1409,7 +1575,10 @@ return function(ctx)
       end
       -- RESEARCH FIX: Skip frozen NPCs (talking) without deleting state.
       -- They'll resume their routine when unfrozen.
-      if npc and npc.frozen then goto continue end
+      -- Exception: a fly/teleport departure only counts down and despawns, and
+      -- the native Fly/Teleport scripts leave the NPC frozen, which would
+      -- otherwise stall the departure forever.
+      if npc and npc.frozen and st.phase ~= "special_depart" then goto continue end
       -- pcall: the NPC may have been removed/modified by another mod.
       local ok, isEligible = pcall(eligible, npc)
       if not npc or not ok or not isEligible then
@@ -1458,11 +1627,14 @@ return function(ctx)
           local kind = st.travelKind
           if not kind then
             kind = pickTravelKind(npc, world)
-            st.travelKind = kind
           end
+          kind = noFlyTele(kind)
+          st.travelKind = kind
           if kind == "fly" or kind == "teleport" or kind == "surf" then
             st.phase = "special_depart"
-            st.wait = 1.2
+            -- Fly/teleport animations run ~1.5s; give them room to finish.
+            st.wait = (kind == "fly" or kind == "teleport") and 1.7 or 1.2
+            npc._kantoLifeTravelDone = nil
             startDepartEffect(npc, kind)
           else
             st.phase = "outbound"
@@ -1479,7 +1651,7 @@ return function(ctx)
       -- place, then despawns and a replacement spawns at a random exit.
       if st.phase == "special_depart" then
         st.wait = (st.wait or 0) - (dt or 0)
-        if st.wait <= 0 then
+        if st.wait <= 0 or npc._kantoLifeTravelDone then
           local kind = st.travelKind
           local dest = destinationFor(world, npc, nil, "door")
           if not dest then dest = destinationFor(world, npc, nil, "route") end
@@ -1493,6 +1665,7 @@ return function(ctx)
             elseif arriveRoll <= 60 then arriveMethod = "route"
             elseif arriveRoll <= 80 then arriveMethod = "fly"
             else arriveMethod = "teleport" end
+            arriveMethod = noFlyTele(arriveMethod)
             -- Mark the replacement with the arrival method for effect hooks.
             local ok = spawnReplacement(world, npc, dest, nil)
             if ok then
@@ -1509,6 +1682,10 @@ return function(ctx)
           -- Fallback: couldn't spawn, return to wandering.
           st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil
           npc._kantoLifeDepartMethod = nil
+          npc._kantoLifeTravelDone = nil
+          npc._kantoLifeTravelHidden = nil
+          npc.kantoLifeTravelSwap = nil
+          npc.frozen = false
         end
         goto continue
       end
