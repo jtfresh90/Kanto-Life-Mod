@@ -9,43 +9,26 @@ return function(mod)
 
     -- Runtime patching for two targeted issues:
     -- 1) Prefer travel species that actually have overworld/travel art (HGSS-aware)
-    --    to avoid tiny/fallback pools producing repeated legendaries.
+    --    to avoid tiny/fallback pools producing repeated legendaries. This is
+    --    KIND-SPECIFIC: selection remains within the kind pool (fly/teleport)
+    --    but prefers species that have travel art.
     -- 2) Prevent sleep accessory props from being scaled by fractional
     --    BattleArt/voxel camera scales. Match JohtoMain's world-space behavior.
     if rel == "lib/KantoRoutines.lua" then
-      -- Replace the simple fallback selection with an Any-Species option (A):
-      -- Pick from the full pokemon table when available, preferring species with
-      -- travel art. Fall back to the kind-specific pool if game data is absent.
+      -- Replace the simple fallback selection with a kind-specific prefer-art selection.
       source = source:gsub(
         "return pool%[math.random%(%#pool%)%]",
         [[
-        -- Option A: prefer any species from game data when available
+        -- Prefer species from the kind-specific pool that have travel/overworld art.
         (function()
-          local full = {}
-          local ok_data, data = pcall(pokemonTable)
-          if ok_data and type(data) == "table" then
-            for k in pairs(data) do full[#full+1] = k end
-          end
-          if #full == 0 then
-            -- No game-table available: pick from the kind pool, preferring art
-            if type(hasTravelArt) == "function" then
-              for i = 1, 6 do
-                local sp = pool[math.random(#pool)]
-                local ok, got = pcall(hasTravelArt, sp)
-                if ok and got then return sp end
-              end
-            end
-            return pool[math.random(#pool)]
-          end
-          -- Prefer species with travel art from the full list
           if type(hasTravelArt) == "function" then
-            for i = 1, 8 do
-              local sp = full[math.random(#full)]
+            for i = 1, 6 do
+              local sp = pool[math.random(#pool)]
               local ok, got = pcall(hasTravelArt, sp)
               if ok and got then return sp end
             end
           end
-          return full[math.random(#full)]
+          return pool[math.random(#pool)]
         end)()
         ]]
       )
