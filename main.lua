@@ -6,6 +6,48 @@ return function(mod)
     if type(source) ~= "string" then
       error("Kanto Life: missing bundled module " .. rel .. ": " .. tostring(err), 0)
     end
+
+    -- Runtime patching for two targeted issues:
+    -- 1) Prefer travel species that actually have overworld/travel art (HGSS-aware)
+    --    to avoid tiny/fallback pools producing repeated legendaries.
+    -- 2) Prevent sleep accessory props from being scaled by fractional
+    --    BattleArt/voxel camera scales. Match JohtoMain's world-space behavior.
+    if rel == "lib/KantoRoutines.lua" then
+      -- Replace the simple fallback selection with a prefer-art attempt.
+      source = source:gsub(
+        "return pool%[math.random%(%#pool%)%]",
+        [[
+        -- Prefer species that have travel/overworld art when available to
+        -- avoid tiny repeated pools. Try a few times then fall back.
+        (function()
+          if type(hasTravelArt) == "function" then
+            for _ = 1, 6 do
+              local sp = pool[math.random(#pool)]
+              local ok, got = pcall(hasTravelArt, sp)
+              if ok and got then return sp end
+            end
+          end
+          return pool[math.random(#pool)]
+        end)()
+        ]]
+      )
+    end
+
+    if rel == "lib/KantoMain.lua" then
+      -- Replace direct pushSleepTransform(self, ox, oy, scale) with guarded
+      -- renderScale logic so fractional camera scales do not shrink props.
+      source = source:gsub(
+        "pushSleepTransform%(%s*self,%s*ox,%s*oy,%s*scale%s*%)",
+        [[
+      local renderScale = 1
+      if type(scale) == "number" and tonumber(scale) and scale > 0 and scale >= 1 then
+        renderScale = scale
+      end
+      pushSleepTransform(self, ox, oy, renderScale)
+      ]]
+      )
+    end
+
     local compile = loadstring or load
     local chunk, compileErr = compile(source, "@" .. mod.path .. "/" .. rel)
     if not chunk then
