@@ -160,8 +160,34 @@ return function(ctx)
     return kind
   end
 
+
+  -- Flashy departures (fly/teleport) rate-limit: Frequent = no cooldown,
+  -- Medium = 5s, Low = 10s. During the cooldown, NPCs use door/route exits.
+  local lastFlashyDepartAt = 0
+  local function flashyCooldownSecs()
+    local key = "firered_npc_fly_teleport_freq"
+    if type(ctx.getOption) == "function" then
+      local ok, v = pcall(ctx.getOption, key)
+      local n = math.floor(tonumber(v) or 0)
+      if n == 1 then return 5 end
+      if n == 2 then return 10 end
+    end
+    return 0
+  end
   local function pickTravelKind(npc, world)
-    return restrictPokeTravelKind(npc, noFlyTele(pickTravelKindRaw(npc, world)))
+    local kind = restrictPokeTravelKind(npc, noFlyTele(pickTravelKindRaw(npc, world)))
+    if kind == "fly" or kind == "teleport" then
+      local cd = flashyCooldownSecs()
+      if cd > 0 then
+        local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+        if now - lastFlashyDepartAt < cd then
+          kind = (math.random(2) == 1) and "door" or "route"
+        else
+          lastFlashyDepartAt = now
+        end
+      end
+    end
+    return kind
   end
 
   -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)

@@ -37,6 +37,8 @@ return function(mod)
     { key = "firered_npc_travel_pct", type = "number", label = "NPC TRAVEL %", default = 70, min = 0, max = 100, step = 10 },
     { key = "firered_npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "firered_npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
+    { key = "firered_npc_fly_teleport_freq", type = "choice", label = "FLY/TELEPORT FREQ",
+      default = 0, choices = { { "Frequent", 0 }, { "Medium (5s)", 1 }, { "Low (10s)", 2 } } },
     { key = "firered_npc_agenda", type = "choice", label = "NPC AGENDA", default = 0, choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } } },
     { key = "firered_exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
     { key = "firered_exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
@@ -460,6 +462,7 @@ return function(mod)
 
       local function rows()
         local agendaNames = { [0] = "OFF", [1] = "DAY", [2] = "FULL" }
+        local freqNames = { [0] = "Frequent", [1] = "Medium (5s)", [2] = "Low (10s)" }
         return {
           { key="firered_extra_npcs", label="EXTRA NPCS", kind="bool", default=true },
           { key="firered_extra_npc_count", label="EXTRA NPC COUNT", kind="number", default=0, min=0, max=150, step=1 },
@@ -479,6 +482,7 @@ return function(mod)
           { key="firered_npc_travel_pct", label="NPC TRAVEL %", kind="number", default=70, min=0, max=100, step=10 },
           { key="firered_npc_travel_methods", label="TRAVEL METHODS", kind="bool", default=true },
           { key="firered_npc_fly_teleport", label="FLY / TELEPORT", kind="bool", default=true },
+          { key="firered_npc_fly_teleport_freq", label="FLY/TELEPORT FREQ", kind="agenda", default=0, min=0, max=2, names=freqNames },
           { key="firered_npc_agenda", label="NPC AGENDA", kind="agenda", default=0, min=0, max=2, names=agendaNames },
           { key="firered_exp_greetings", label="LIFELIKE GREETINGS", kind="bool", default=true },
           { key="firered_exp_chatter", label="NPC CHATTER", kind="bool", default=true },

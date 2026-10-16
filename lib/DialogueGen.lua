@@ -144,13 +144,13 @@ local TEMPLATES = {
   "The LEAGUE is getting\nmore competitive!",
   "I want to challenge\nthe next GYM!",
 
-  -- Personal (uses NPC name/agenda)
-  "I'm {name}, and I\nlove {activity}!",
+  -- Personal (uses NPC agenda)
+  "I just love\n{activity}!",
   "As a {agenda}, I\nvisit {location} often.",
   "My dream is to see\nevery {pokemon}!",
   "I named my {pokemon}\nafter my hometown!",
   "Being a {agenda} is\nthe best life!",
-  "{name} here! Have you\ntried {activity}?",
+  "Have you tried\n{activity} yet?",
 
   -- Questions (engaging)
   "What's your favorite\n{pokemon}?",

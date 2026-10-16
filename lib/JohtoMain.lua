@@ -355,6 +355,8 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
+    { key = "npc_fly_teleport_freq", type = "choice", label = "FLY/TELEPORT FREQ",
+      default = 0, choices = { { "Frequent", 0 }, { "Medium (5s)", 1 }, { "Low (10s)", 2 } } },
     { key = "exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
     { key = "exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
     { key = "exp_moods", type = "toggle", label = "NPC MOODS", default = true },
@@ -1194,6 +1196,17 @@ return function(mod)
           end },
         { label = "FLY / TELEPORT", right = opt("npc_fly_teleport") ~= false and "ON" or "OFF", stepper = true,
           onSelect = function() setOpt("npc_fly_teleport", not (opt("npc_fly_teleport") ~= false)) end },
+        { label = "FLY/TELEPORT FREQ", right = ({[0] = "Frequent", [1] = "Medium (5s)", [2] = "Low (10s)"})[math.floor(tonumber(opt("npc_fly_teleport_freq")) or 0)] or "Frequent", stepper = true,
+          step = function(dir)
+            local n = math.floor(tonumber(opt("npc_fly_teleport_freq")) or 0) + (dir or 1)
+            if n < 0 then n = 2 elseif n > 2 then n = 0 end
+            setOpt("npc_fly_teleport_freq", n); refreshCurrentMap()
+          end,
+          onSelect = function()
+            local n = math.floor(tonumber(opt("npc_fly_teleport_freq")) or 0) + 1
+            if n > 2 then n = 0 end
+            setOpt("npc_fly_teleport_freq", n); refreshCurrentMap()
+          end },
         { label = "NPC AGENDA", right = ({[0] = "OFF", [1] = "DAY", [2] = "FULL"})[math.floor(tonumber(opt("npc_agenda")) or 0)] or "OFF", stepper = true,
           step = function(dir)
             local n = math.floor(tonumber(opt("npc_agenda")) or 0) + (dir or 1)

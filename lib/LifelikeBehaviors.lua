@@ -463,7 +463,7 @@ return function(ctx)
   end
 
   local function meetupStart(a, b, t)
-    local dur = 5 + math.random() * 5 -- 5-10 second conversation
+    local dur = 10 -- fixed 10-second conversation
     local lines = CONVO_LINES[math.random(1, #CONVO_LINES)]
     local untilT = t + 25 -- approach timeout; the talk phase ends itself
     a._kantoLifeMeetup = { partner = b, phase = "approach", untilT = untilT,
@@ -472,7 +472,7 @@ return function(ctx)
       nextStep = 0, stalls = 0,
       lines = { lines[2], lines[1], lines[4], lines[3] }, dur = dur }
     -- Walking up together can bond them into companions.
-    if math.random() < 0.3 then
+    if math.random() < 0.8 then
       a._kantoLifeCompanion = b
       b._kantoLifeCompanion = a
     end
@@ -505,12 +505,15 @@ return function(ctx)
       return
     end
     if mu.phase == "approach" then
-      if manhattan(nx, ny, px, py) <= 1 and not n.moving then
-        -- Arrived and settled: hold a 5-10s chat. The anim freezes them
-        -- other; we trade four lines across the duration below.
+      -- Arrived: within 2 cells and settled. Start the 10s conversation.
+      -- (Allows a 1-cell gap so blocked paths don't prevent the talk.)
+      if manhattan(nx, ny, px, py) <= 2 and not n.moving then
+        -- Arrived and settled: hold a 10s chat. The anim freezes them;
+        -- we trade four lines across the duration below.
         mu.phase = "talk"
         mu.talkT0 = t
         mu.talkUntil = t + mu.dur
+        mu.untilT = t + mu.dur + 2 -- approach timeout no longer applies; let the talk finish
         mu.saidIdx = 0
         startAnim(n, "chat", { duration = mu.dur, partner = p,
           targetX = px, targetY = py, force = true })
@@ -952,7 +955,7 @@ return function(ctx)
             startAnim(b, "chat", { duration = 1.8, partner = a, bubble = pair[2], targetX = ax, targetY = ay })
             a._kantoLifeLastChat = t
             b._kantoLifeLastChat = t
-            if enabled("exp_companions") and math.random() < 0.3 then
+            if enabled("exp_companions") and math.random() < 0.8 then
               a._kantoLifeCompanion = b
               b._kantoLifeCompanion = a
             end
