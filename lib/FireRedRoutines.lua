@@ -113,8 +113,55 @@ return function(ctx)
     else return "route" end
   end
 
+  -- Pokemon ambient NPCs may only fly if Flying-type and only teleport if
+  -- Psychic-type; otherwise doors / routes / caves only.
+  local function isPokeAmbientNpc(npc)
+    if not npc then return false end
+    local d = npc.def or {}
+    return npc.kantoLifePokeAmbient == true or d.kantoLifePokeAmbient == true
+        or npc.fireredPokeAmbient == true or d.fireredPokeAmbient == true
+  end
+  local function pokeAmbientSpecies(npc)
+    local d = npc.def or {}
+    local s = d.species or d.pokemon or npc.species or npc.kantoLifeSpecies
+    if type(s) == "string" and s ~= "" then
+      return tostring(s):upper():gsub(" ", "_"):gsub("'", "")
+    end
+    return nil
+  end
+  local function speciesHasTypeLocal(species, want)
+    if not species or not want then return false end
+    want = tostring(want):upper()
+    local g = type(ctx.game) == "function" and ctx.game() or nil
+    local data = g and g.data and g.data.pokemon
+    local pdef = data and (data[species] or data[tostring(species):lower()])
+    if type(pdef) ~= "table" then return false end
+    local function match(t)
+      return t and tostring(t):upper():find(want, 1, true)
+    end
+    if match(pdef.type1) or match(pdef.type2) or match(pdef.type) then return true end
+    if type(pdef.types) == "table" then
+      for _, t in pairs(pdef.types) do if match(t) then return true end end
+    end
+    return false
+  end
+  local function restrictPokeTravelKind(npc, kind)
+    if not isPokeAmbientNpc(npc) then return kind end
+    if kind ~= "fly" and kind ~= "teleport" then return kind end
+    local species = pokeAmbientSpecies(npc)
+    if kind == "fly" then
+      if species and speciesHasTypeLocal(species, "FLYING") then return "fly" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    if kind == "teleport" then
+      if species and speciesHasTypeLocal(species, "PSYCHIC") then return "teleport" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
   local function pickTravelKind(npc, world)
-    return noFlyTele(pickTravelKindRaw(npc, world))
+    return restrictPokeTravelKind(npc, noFlyTele(pickTravelKindRaw(npc, world)))
   end
 
   -- Bird Pokemon graphics IDs for fly animation (OBJ_EVENT_GFX_* IDs)
@@ -186,7 +233,7 @@ return function(ctx)
   local SPIN_ORDER = { "down", "left", "up", "right" }
 
   local function startDepartEffect(npc, method)
-    method = noFlyTele(method)
+    method = restrictPokeTravelKind(npc, noFlyTele(method))
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._kantoLifeFRDepartMethod = method
     npc._kantoLifeFRDepartUntil = now + 1.2
@@ -1053,14 +1100,14 @@ return function(ctx)
         st.travelKind = kind
       end
       if not st.specialDepartStarted then
-        kind = noFlyTele(kind)
+        kind = restrictPokeTravelKind(npc, noFlyTele(kind))
         npc._kantoLifeFRTravelKind = kind
         st.travelKind = kind
       end
       if kind == "fly" or kind == "teleport" or kind == "surf" then
         if not st.specialDepartStarted then
           st.specialDepartStarted = true
-          st.specialDepartWait = 1.2
+          st.specialDepartWait = 1.35
           startDepartEffect(npc, kind)
           return
         end

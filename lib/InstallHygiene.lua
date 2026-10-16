@@ -115,9 +115,9 @@ local function writeInstallFlag(mod)
   return true
 end
 
--- Runtime globals / pipeline wraps left by a previous install of this mod.
+-- Runtime globals / soft caches left by a previous install of this mod.
 -- These are not in mod.save or mod.cache; without clearing them, a reinstall
--- can keep stale worldPresent wraps, Voxel3D handles, and sleep bake caches.
+-- can keep stale Voxel3D handles and sleep bake caches.
 local RUNTIME_GLOBALS = {
   "_johtoLifeVoxel3D",
   "_johtoLifeVoxelLib",
@@ -125,9 +125,13 @@ local RUNTIME_GLOBALS = {
   "_johtoLifeVoxelSleepWorldSpace",
   "_johtoLifeLoveDrawWrapped",
   "_johtoLifePropImages",
+  "_johtoLifeClearSoftCaches",   -- function registered by JohtoMain
+  "_kantoLifeClearSoftCaches",   -- function registered by KantoMain
   "_kantoLifeGameData",
   "_kantoLifeBattleArtMod",
   "_kantoLifeVoxel3D",
+  "_kantoLifePokeSpriteCache",
+  "_fireredLifeClearSoftCaches",
 }
 
 local function clearRuntimeState()
@@ -136,6 +140,16 @@ local function clearRuntimeState()
   -- save.loaded AFTER that install. Unwrapping there deleted the Gen2 voxel
   -- sleep-prop and speech-bubble overlay for the whole session.
   if type(_G) ~= "table" then return end
+  -- Ask each generation's soft-cache clearer to empty tables in place
+  -- (registered by Main after first install of this session).
+  for _, key in ipairs({
+    "_johtoLifeClearSoftCaches",
+    "_kantoLifeClearSoftCaches",
+    "_fireredLifeClearSoftCaches",
+  }) do
+    local fn = _G[key]
+    if type(fn) == "function" then pcall(fn) end
+  end
   for _, key in ipairs(RUNTIME_GLOBALS) do
     pcall(function() _G[key] = nil end)
   end
@@ -208,9 +222,19 @@ return function(mod)
     return true, reason
   end
 
-  -- Normal boot / save.loaded with same version: do NOT clear runtime state.
-  -- JohtoMain already installed worldPresent wraps; clearing them here is what
-  -- made Gen2 voxel sleep accessories and speech bubbles vanish after load.
+  -- Same version boot: still flush soft image/mesh caches so a mid-session
+  -- reload or partial update cannot keep stale sleep composites / poke sprites.
+  -- Does NOT unwrap pipeline wraps (those must stay for the session).
+  pcall(function()
+    for _, key in ipairs({
+      "_johtoLifeClearSoftCaches",
+      "_kantoLifeClearSoftCaches",
+      "_fireredLifeClearSoftCaches",
+    }) do
+      local fn = rawget(_G, key)
+      if type(fn) == "function" then pcall(fn) end
+    end
+  end)
   writeInstallFlag(mod)
   return false, "current"
 end

@@ -1526,6 +1526,13 @@ return function(mod)
       markTrespass(world, toMap, fromMap, px, py)
     end)
     local function onMapIn(p)
+      -- Soft caches (sleep composites / meshes) can pin images from the
+      -- previous map; clear on every map enter so HGSS/body layers refresh.
+      pcall(function()
+        if type(_G._johtoLifeClearSoftCaches) == "function" then
+          _G._johtoLifeClearSoftCaches()
+        end
+      end)
       local id = p and (p.mapId or p.id)
       if id then spawnAmbient(id); tryEject(liveWorld(), id) end
     end
@@ -1554,6 +1561,10 @@ return function(mod)
       -- Immediately re-apply sleep when rate / toggle / day-sleepers / style change
       if p.key == "sleep_pct" or p.key == "sleeping_npcs" or p.key == "day_sleepers"
          or p.key == "sleep_style" or p.key == "sleep_bubbles" then
+        -- Style change must drop composite/mesh caches or beds stay the old size.
+        if p.key == "sleep_style" and type(_G._johtoLifeClearSoftCaches) == "function" then
+          pcall(_G._johtoLifeClearSoftCaches)
+        end
         local ow = mod.world and type(mod.world.overworld) == "function" and mod.world:overworld()
         if ow then pcall(johtoSleepTick, ow) end
       end
@@ -1692,17 +1703,12 @@ return function(mod)
           or nm:find("RECEPTION", 1, true) or spr:find("ATTENDANT", 1, true)
           or spr:find("GYM_GUIDE", 1, true) or d.isPlayer or npc.isPlayer
         local isAmb = d.johtoLifeAmbient or npc.johtoLifeAmbient
-        -- Map staff in marts / centers must never sleep (only ambient visitors may).
-        local mapId = tostring((world.map and world.map.id) or ""):upper()
-        local isServiceMap = mapId:find("MART", 1, true)
-          or mapId:find("CENTER", 1, true)
-          or mapId:find("POKECENTER", 1, true)
-          or mapId:find("POKE_CENTER", 1, true)
-        if isServiceMap and not isAmb then
-          isExcluded = true
-        end
+          or d.johtoLifePokeAmbient or npc.johtoLifePokeAmbient
+        -- ONLY mod-spawned ambients sleep. Built-in story/house NPCs (e.g.
+        -- Cherrygrove house man/girl) keep their native sprites and dialogue;
+        -- HGSS sheet sizes on those defs are what broke bed/body bake.
         local isHumanish = not isPoke and not isExcluded
-        if isHumanish and safe(npc) and (isAmb or not d.trainerClass) then
+        if isHumanish and safe(npc) and isAmb then
           local id = tostring(npc.id or d.name or nm or "")
           local h = 0; for i = 1, #id do h = (h + id:byte(i) * i) % 10000 end
           humanCandidates[#humanCandidates + 1] = { npc = npc, hash = h }
@@ -1752,6 +1758,18 @@ return function(mod)
     for _, entry in ipairs(pokeCandidates) do
       local npc = entry.npc
       if pokeChosen[npc] then putAsleep(npc) else wakeUp(npc) end
+    end
+    -- Wake any non-ambient that was put to sleep by older builds (built-in
+    -- house NPCs etc.) so they return to normal sprites/dialogue.
+    for _, npc in ipairs(world.npcs or {}) do
+      if npc and npc.nightlifeSleeping then
+        local d = npc.def or {}
+        local amb = d.johtoLifeAmbient or npc.johtoLifeAmbient
+          or d.johtoLifePokeAmbient or npc.johtoLifePokeAmbient
+        if not amb then
+          pcall(wakeUp, npc)
+        end
+      end
     end
   end
 
@@ -2777,12 +2795,23 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
 
     local _johtoSleepInvisibleSprite
     local _johtoCompositeCache = {}
+    local _johtoSoftMeshCaches = {}  -- registered mesh tables for soft-clear
+    -- Soft-cache clearer: emptied on hygiene / map change so stale sleep
+    -- composites and meshes cannot survive a version update mid-session.
+    _G._johtoLifeClearSoftCaches = function()
+      for k in pairs(_johtoCompositeCache) do _johtoCompositeCache[k] = nil end
+      for _, t in pairs(_johtoSoftMeshCaches) do
+        if type(t) == "table" then
+          for k in pairs(t) do t[k] = nil end
+        end
+      end
+    end
 
     -- One card BA draws like any other NPC (same FP/TP sizing as default sleepers).
     local function bakeVoxelSleepComposite(npc)
       if not npc then return nil end
-      local style = 0
-      pcall(function() style = resolveSleepStyle(npc) end)
+      -- FP/TP: body-only composite (no bed/bag/tent layers).
+      local style = effectiveSleepStyle(npc)
       style = math.floor(tonumber(style) or 0)
 
       local bodySrc = npc._johtoSleepBodyImage
@@ -2804,8 +2833,9 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
       if style == 0 and not bodySrc then return nil end
       if (style == 2 or style == 3) and not (prop or propBase or bodySrc) then return nil end
 
-      local cacheKey = tostring(npc) .. "#" .. tostring(style) .. "#"
+      local cacheKey = "v250#" .. tostring(npc) .. "#" .. tostring(style) .. "#"
         .. tostring(bodySrc) .. "#" .. tostring(prop) .. "#" .. tostring(propBase)
+        .. "#" .. tostring(isFirstOrThirdPersonCamera and isFirstOrThirdPersonCamera())
       if _johtoCompositeCache[cacheKey] then return _johtoCompositeCache[cacheKey] end
 
       -- Use 32 so HGSS human bakes (32px) are not crushed in the composite card.
@@ -2892,6 +2922,63 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
       return false
     end
 
+    -- True in free-look 1ST / 3RD camera only (not diorama/orbit/flat voxel).
+    -- Sleep accessories (bed/bag/tent) are disabled here because their flat
+    -- world-space cards swim in size under the FP/TP projection; body + Zzz
+    -- still draw. Orbit/diorama keep full 3-layer accessories.
+    local function isFirstOrThirdPersonCamera()
+      local ok = false
+      pcall(function()
+        local names = {
+          "BATTLE_ART_VOXEL_GEN2", "BATTLE_ART_VOXEL_FORK", "BATTLE_ART_VOXEL",
+          "DRAMATIC_SHAPE", "DRAMALESS_SHAPE", "battle_art_voxel", "POTATO_VOXEL",
+        }
+        local battle = nil
+        if type(mod.find) == "function" then
+          for _, id in ipairs(names) do
+            local okF, m = pcall(mod.find, id)
+            if okF and m and m.exports and m.exports.lib and type(m.exports.lib.require) == "function" then
+              battle = m
+              break
+            end
+          end
+        end
+        if not battle then return end
+        local lib = battle.exports.lib
+        local okFP, FP = pcall(lib.require, "FirstPerson")
+        if okFP and FP then
+          if type(FP.cardBlend) == "function" then
+            local okB, b = pcall(FP.cardBlend)
+            if okB and tonumber(b) and tonumber(b) > 0.15 then ok = true; return end
+          end
+          if type(FP.hidePlayer) == "function" then
+            local okH, h = pcall(FP.hidePlayer)
+            if okH and h then ok = true; return end
+          end
+        end
+        local okTP, TP = pcall(lib.require, "ThirdPerson")
+        if okTP and TP and type(TP.showsPlayer) == "function" then
+          local okS, s = pcall(TP.showsPlayer)
+          if okS and s then ok = true; return end
+        end
+        -- Option-string fallback when lib is not ready yet
+        if battle.options and type(battle.options.get) == "function" then
+          for _, key in ipairs({ "voxel", "VOXEL", "mode" }) do
+            local v = battle.options:get(key)
+            if type(v) == "string" then
+              local u = v:upper()
+              if u:find("1ST", 1, true) or u:find("FIRST", 1, true)
+                 or u:find("3RD", 1, true) or u:find("THIRD", 1, true) then
+                ok = true
+                return
+              end
+            end
+          end
+        end
+      end)
+      return ok
+    end
+
     local function sleepAccessoryImage(style) return sleepPropImage(style) end
       -- Resolve sleep style, handling Random (4) by assigning a stable per-NPC random 0-3
   local function resolveSleepStyle(npc)
@@ -2919,6 +3006,15 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
     end
     return cached
   end
+
+  -- Effective style for DRAW only: in free-look 1ST/3RD camera, force
+  -- default (no bed/bag/tent). Orbit/diorama/flat voxel keep accessories.
+  local function effectiveSleepStyle(npc)
+    local style = math.floor(tonumber(resolveSleepStyle(npc)) or 0)
+    if isFirstOrThirdPersonCamera() then return 0 end
+    return style
+  end
+
     -- Draw the opaque base layer UNDER the NPC (3-layer system).
     -- Handles BOTH Gen2 NPC:draw forms:
     --   scale ~= nil  → translate(ox,oy); scale(s); world-space draw
@@ -2956,7 +3052,8 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
     end
     local function drawSleepAccessoryBase(self, ox, oy, scale)
       if not self.nightlifeSleeping then return end
-      local style = resolveSleepStyle(self)
+      -- 2D always uses real style; voxel FP/TP suppresses accessories.
+      local style = isVoxelPresentation() and effectiveSleepStyle(self) or resolveSleepStyle(self)
       if style == 0 or style == 1 then return end
       local img = sleepPropBaseImage(style); if not img then return end
       local iw, ih = img:getDimensions()
@@ -2968,7 +3065,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
     end
     local function drawSleepAccessory(self, ox, oy, scale)
       if not self.nightlifeSleeping then return end
-      local style = resolveSleepStyle(self)
+      local style = isVoxelPresentation() and effectiveSleepStyle(self) or resolveSleepStyle(self)
       if style == 0 then return end
       local img = sleepAccessoryImage(style); if not img then return end
       local iw, ih = img:getDimensions()
@@ -3089,24 +3186,28 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local frame = tonumber(travel.frame) or 0
           local total = tonumber(travel.total) or 72
           local progress = math.max(0, math.min(1, frame / total))
-          local lift = progress * progress * (travel.kind == "fly" and 140 or 100)
-          local drift = travel.kind == "fly" and progress * 48 or 0
-          local oldPx, oldPy, oldFacing, oldSprite = self.px, self.py, self.facing, self.sprite
+          -- Teleport: spin in place for first ~40% of the anim, then rise
+          -- (matches Gen1 GBC-style spinRise). Fly: lift + drift the whole time.
+          local lift, drift = 0, 0
+          if travel.kind == "fly" then
+            lift = progress * progress * 140
+            drift = progress * 48
+          elseif travel.kind == "teleport" then
+            local riseP = math.max(0, (progress - 0.4) / 0.6)
+            lift = riseP * riseP * 100
+          end
+          local oldPx, oldPy, oldFacing, oldDir = self.px, self.py, self.facing, self.direction
           self.px = (tonumber(travel.basePx) or tonumber(self.px) or 0) + drift
           self.py = (tonumber(travel.basePy) or tonumber(self.py) or 0) - lift
           if travel.kind == "teleport" then
-            self.facing = ({"down", "left", "up", "right"})[(math.floor(frame / 3) % 4) + 1]
+            local spin = travel.spinFacing
+              or ({"down", "left", "up", "right"})[(math.floor(frame / 2) % 4) + 1]
+            self.facing = spin
+            self.direction = spin
           end
-          -- Reuse the pose-path mon sprite if pose wrap already built it.
-          if type(NPC.pose) == "function" then
-            local okP, spr = pcall(function()
-              local s = select(1, NPC.pose(self))
-              return s
-            end)
-            if okP and spr and spr ~= oldSprite then self.sprite = spr end
-          end
+          -- Gen2: animate on the NPC's own sprite only (no mon substitution).
           local okTravel, result = pcall(baseDraw, self, ox, oy, scale)
-          self.px, self.py, self.facing, self.sprite = oldPx, oldPy, oldFacing, oldSprite
+          self.px, self.py, self.facing, self.direction = oldPx, oldPy, oldFacing, oldDir
           if not okTravel then error(result, 0) end
           return result
         end
@@ -3492,8 +3593,7 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           -- Hide the engine billboard so it does not sit under the underlay
           -- (or show beside a tent). drawPropAt paints underlay → body → overlay.
           if self and self.nightlifeSleeping and isVoxelPresentation() then
-            local style = 0
-            pcall(function() style = resolveSleepStyle(self) end)
+            local style = effectiveSleepStyle(self)
             style = math.floor(tonumber(style) or 0)
             -- Ensure bake ran (HGSS humans often need the robust resolve path).
             if self.sprite and not self.sprite._johtoSleepBaked then
@@ -3538,13 +3638,19 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local frame = tonumber(travel.frame) or 0
           local total = tonumber(travel.total) or 72
           local progress = math.max(0, math.min(1, frame / total))
-          local lift = progress * progress * (travel.kind == "fly" and 140 or 100)
-          local drift = travel.kind == "fly" and progress * 48 or 0
-          if travel.kind == "teleport" then
-            facing = ({"down", "left", "up", "right"})[(math.floor(frame / 3) % 4) + 1]
+          local lift, drift = 0, 0
+          if travel.kind == "fly" then
+            lift = progress * progress * 140
+            drift = progress * 48
+          elseif travel.kind == "teleport" then
+            -- Spin first (no lift), then rise — readable facing changes.
+            local riseP = math.max(0, (progress - 0.4) / 0.6)
+            lift = riseP * riseP * 100
+            facing = travel.spinFacing
+              or ({"down", "left", "up", "right"})[(math.floor(frame / 2) % 4) + 1]
           end
-          local mon = travelPokemonSprite(travel.species)
-          return mon or sprite, (tonumber(px) or 0) + drift, (tonumber(py) or 0) - lift, facing, phase or 0, flip, extra
+          -- Gen2: keep the NPC's own sprite (no flying/psychic mon swap).
+          return sprite, (tonumber(px) or 0) + drift, (tonumber(py) or 0) - lift, facing, phase or 0, flip, extra
         end
         NPC._johtoLifeTravelPoseWrapped = true
       end
@@ -3704,10 +3810,9 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       --   bag/bed (2/3): underlay → baked body → overlay (engine body hidden)
       -- Hiding the engine billboard prevents the "sprite under the bed" look.
       local function drawPropAt(Gfx, npc, sx, sy, scale)
-        local style = 0
-        pcall(function() style = resolveSleepStyle(npc) end)
+        local style = effectiveSleepStyle(npc)
         style = math.floor(tonumber(style) or 0)
-        if style <= 0 then return end
+        if style <= 0 then return end  -- also skips entire prop path in 1ST/3RD
         local prop = sleepPropImage(style)
         local propBase = (style == 2 or style == 3) and sleepPropBaseImage(style) or nil
         if not prop and not propBase then return end
@@ -4013,6 +4118,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     end
 
     local propMeshCache, propBaseMeshCache, bodyMeshCache = {}, {}, {}
+    _johtoSoftMeshCaches.meshCache = meshCache
+    _johtoSoftMeshCaches.propMeshCache = propMeshCache
+    _johtoSoftMeshCaches.propBaseMeshCache = propBaseMeshCache
+    _johtoSoftMeshCaches.bodyMeshCache = bodyMeshCache
+    _johtoSoftMeshCaches.sleepImgCache = sleepImgCache
     local zBillboard = nil
 
     -- Scale prop images up so beds/bags match human tile size in voxel (~24 world units).
@@ -4237,20 +4347,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
     end
 
     local function resolveStyle(npc)
-      local style = 0
-      if npc.kantoLifeNaturalSleepStyle ~= nil then
-        style = npc.kantoLifeNaturalSleepStyle
-      elseif npc.kantoLifeRandomSleepStyle ~= nil then
-        style = npc.kantoLifeRandomSleepStyle
-      else
-        local okR, rs = pcall(function() return resolveSleepStyle(npc) end)
-        if okR and rs ~= nil then style = rs
-        else
-          local okO, v = pcall(function() return opt("sleep_style") end)
-          if okO then style = v end
-        end
-      end
-      return math.floor(tonumber(style) or 0)
+      -- Uses effectiveSleepStyle so 1ST/3RD skip accessories; other voxel modes keep them.
+      return effectiveSleepStyle(npc)
     end
 
     local function drawSleeperWorld(npc, px, py, gh)
@@ -4353,27 +4451,73 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           npc = findSleeperAt(px, py)
         end
         if npc and npc.nightlifeSleeping then
-          -- Composite sprite is already what pose() returned; let BA draw it
-          -- with the normal billboard path (same FP/TP sizing as default sleepers).
-          local result = baseDrawEntity(sprite, px, py, facing, phase, flip, gh, colors, lift)
-          -- World-space Zzz only (small, same upright card matrix as NPCs)
-          pcall(function()
-            local zm = zMesh and zMesh() or nil
-            if not (zm and zm.mesh) then return end
-            local zt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-            for i = 0, 2 do
-              local phaseZ = zt * 1.5 + i * 0.75
-              local cycle = phaseZ % 2.5
-              local rise = cycle * 4
-              local alpha = 1 - cycle / 2.5
-              if alpha > 0.25 then
-                local model = uprightCardMatrix(px + (i - 1) * 3, py, (gh or 0) + 14 + rise + i * 2, 6)
-                pcall(Voxel3D.draw, zm.mesh, zm.image, model, 0.5, model)
-              end
+          -- Prefer the composite image pose() prepared (body + bed/bag layers).
+          -- Draw it as a FIXED world-space flat quad (Gen1-style matrix), NOT
+          -- through BA's upright billboard path (that caused FP/TP size swim).
+          -- Falling back to drawSleeperWorld keeps 3 separate layers if composite
+          -- is missing — same visibility as 1.4.244.
+          local style = resolveStyle(npc)
+          local yaw = facingYaw(npc.facing or npc.kantoLifeSleepFacing)
+          local sleepSide = (npc.kantoLifeSleepSide or 1) >= 0 and 1 or -1
+          local bedYaw = yaw - sleepSide * (math.pi / 2)
+          local drawn = false
+
+          local compImg = sprite and sprite.image
+          if (not compImg or type(compImg.getDimensions) ~= "function")
+             and npc.sprite and npc.sprite._johtoSleepComposite then
+            compImg = npc.sprite.image
+          end
+          if compImg and type(compImg.getDimensions) == "function" then
+            local key = "compflat#" .. tostring(compImg)
+            local entry = meshCache[key]
+            if not entry then
+              entry = makeMesh(key, compImg)
             end
-          end)
+            if entry and entry.mesh then
+              local half = (entry.w or 32) / 2
+              if style == 1 then
+                -- Tent: upright, fixed world size (no FirstPerson.cardBlend)
+                local m = Mat4.mul(
+                  Mat4.translate(px + half, (gh or 0) + 0.05, py + half),
+                  Mat4.translate(-half, 0, 0)
+                )
+                pcall(Voxel3D.draw, entry.mesh, entry.image, m, 0.2, m)
+              else
+                local m = flatMatrix(px, py, (gh or 0) + 0.2, style >= 2 and bedYaw or yaw, half)
+                pcall(Voxel3D.draw, entry.mesh, entry.image, m, 0.1, m)
+              end
+              drawn = true
+            end
+          end
+
+          if not drawn then
+            -- Composite unavailable: layered world draw (beds/body/overlay)
+            pcall(drawSleeperWorld, npc, px, py, gh)
+          else
+            -- Zzz only (props/body already in the composite)
+            pcall(function()
+              local zm = zMesh and zMesh() or nil
+              if not (zm and zm.mesh) then return end
+              local zt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
+              for i = 0, 2 do
+                local phaseZ = zt * 1.5 + i * 0.75
+                local cycle = phaseZ % 2.5
+                local rise = cycle * 4
+                local alpha = 1 - cycle / 2.5
+                if alpha > 0.25 then
+                  local m = Mat4.mul(
+                    Mat4.translate(px + 8 + (i - 1) * 3, (gh or 0) + 14 + rise + i * 2, py + 8),
+                    Mat4.translate(-6, 0, 0)
+                  )
+                  pcall(Voxel3D.draw, zm.mesh, zm.image, m, 0.5, m)
+                end
+              end
+            end)
+          end
+
           npc._johtoLifeCRSleepClaimed = true
-          return result ~= nil and result or true
+          npc._johtoLifeVoxelCompositeDrawn = true  -- worldPresent must not double-paint
+          return true  -- claim: do not also run BA upright billboard
         end
         return baseDrawEntity(sprite, px, py, facing, phase, flip, gh, colors, lift)
       end
