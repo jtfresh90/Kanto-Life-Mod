@@ -45,7 +45,7 @@ return function(ctx)
   local function stateKey(npc)
     local def = npc and npc.def or {}
     local mapId = (engine("src.core.game3.map") or {}).current or ""
-    local kind = def.kantoLifePokemon and "poke" or "human"
+    local kind = (def.kantoLifePokemon or (npc and npc.kantoLifePokemon) or (type(GFX_SPECIES)=="table" and GFX_SPECIES[tonumber(npc and npc.graphicsId or def.graphicsId)])) and "poke" or "human"
     -- Runtime actors move.  Their cell is not a stable identity; using it
     -- made the conversation counter reset whenever routines moved an NPC.
     local stableId = npc.id or npc.localId or def.localId or def.index or def.name
@@ -759,6 +759,21 @@ return function(ctx)
     end
   end
 
+  -- True for mod-spawned Pokemon ambients. Check the event object AND def,
+  -- and fall back to graphicsId -> species table so Rayquaza/etc. never
+  -- take the human dialogue path when the flag was only set on the EO.
+  local function isPokeActor(npc)
+    if not npc then return false end
+    local def = npc.def or {}
+    if npc.kantoLifePokemon == true or def.kantoLifePokemon == true then return true end
+    if npc.kantoLifePokeAmbient == true or def.kantoLifePokeAmbient == true then return true end
+    if type(npc.kantoLifeSpecies) == "string" and npc.kantoLifeSpecies ~= "" then return true end
+    if type(def.kantoLifeSpecies) == "string" and def.kantoLifeSpecies ~= "" then return true end
+    local gid = tonumber(npc.graphicsId or def.graphicsId or def.graphics)
+    if gid and type(GFX_SPECIES) == "table" and GFX_SPECIES[gid] then return true end
+    return false
+  end
+
   local function progressive(game, npc)
     -- The routine controller honors this flag until the message/event closes.
     -- This prevents an actor from walking through the player while its dialogue
@@ -768,9 +783,20 @@ return function(ctx)
     local st, key, all = getState(npc)
     st.count = (tonumber(st.count) or 0) + 1
     putState(key, st, all)
-    local isPoke = def.kantoLifePokemon == true
-    local species = def.kantoLifeSpecies
-    if isPoke and not species then species = GFX_SPECIES[tonumber(npc.graphicsId or def.graphicsId)] or "PIKACHU" end
+    local isPoke = isPokeActor(npc)
+    local species = def.kantoLifeSpecies or npc.kantoLifeSpecies
+    if isPoke and not species then
+      species = (type(GFX_SPECIES) == "table" and GFX_SPECIES[tonumber(npc.graphicsId or def.graphicsId)]) or "PIKACHU"
+    end
+    -- Keep flags in sync so later paths (fifth event, cry) stay consistent.
+    if isPoke then
+      npc.kantoLifePokemon = true
+      if type(def) == "table" then def.kantoLifePokemon = true end
+      if species then
+        npc.kantoLifeSpecies = species
+        if type(def) == "table" then def.kantoLifeSpecies = species end
+      end
+    end
     local display = displayFor(npc, def, isPoke, species)
 
     if npc.kantoLifeSleeping or def.kantoLifeSleeping then
