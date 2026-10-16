@@ -437,7 +437,7 @@ return function(ctx)
     local bx, by = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
     local ok = false
     if type(h.stepNow) == "function" then
-      npc.stepFrames = 21
+      npc.stepFrames = 26
       ok = pcall(h.stepNow, h, dir)
     elseif type(h.scriptMove) == "function" then
       ok = pcall(h.scriptMove, h, dir, 1)
@@ -1277,7 +1277,7 @@ return function(ctx)
       local Objects = engine("src.core.game3.objects")
       if Objects and type(Objects.scriptJump) == "function" then
         local wasFrozen = npc.frozen
-        npc.stepFrames = 21
+        npc.stepFrames = 26
         local okJump = pcall(Objects.scriptJump, npc, dir, 2)
         npc.frozen = wasFrozen
         npc.scriptBusy = false
