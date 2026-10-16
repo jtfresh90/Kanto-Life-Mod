@@ -152,24 +152,57 @@ return function(mod)
     local angle = npc.johtoLifeSleepAngle or (math.pi / 2)
     local fw = tonumber(sprite.frameWidth) or 16
     local fh = tonumber(sprite.frameHeight) or 16
-    -- Normalize to 16x16 so HGSS 32px (and other oversized) sprites do not
-    -- become massive in voxel / 2D after the ±90° bake.
-    local useFw, useFh = 16, 16
+    -- Bake at source size (HGSS is typically 32px). Forcing 16x16 made voxel
+    -- bodies tiny gray stickers that clipped into the ground. 2D draw paths
+    -- already scale; voxel bodyMesh uses the full bake size.
     local srcFw, srcFh = fw, fh
     if sprite.def and (sprite.def.hgssNativeImage or sprite.def.hgssFrameWidth or sprite.def.hgssVoxelWidth) then
       srcFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.hgssVoxelWidth or sprite.def.frameWidth) or 32
       srcFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.hgssVoxelHeight or sprite.def.frameHeight) or srcFw
     end
+    -- Cap at 32 so we never produce massive canvases; floor at 16.
+    local useFw = math.max(16, math.min(32, math.floor(srcFw)))
+    local useFh = math.max(16, math.min(32, math.floor(srcFh)))
 
     local ok, canvas = pcall(function()
+      -- HGSS human OW sprites often store art as a path string / hgssNativeImage
+      -- rather than a live Image on sprite.image. Resolve every known source
+      -- before giving up — bake failure is what made human sleepers vanish.
       local img = nil
+      local function asImage(v)
+        if not v then return nil end
+        if type(v) == "userdata" and type(v.getDimensions) == "function" then return v end
+        if type(v) == "string" and v ~= "" then
+          local okI, i = pcall(love.graphics.newImage, v)
+          if okI and i then return i end
+        end
+        return nil
+      end
       if type(sprite.resolveImage) == "function" then
         local ok2, r = pcall(function() return sprite:resolveImage() end)
-        if ok2 then img = r end
+        if ok2 then img = asImage(r) or (type(r) == "userdata" and r) or img end
       end
-      if not img then img = sprite.image end
+      if not img then img = asImage(sprite.image) end
+      local def = sprite.def or {}
+      if not img and type(def.hgssNativeImage) == "string" then
+        img = asImage(def.hgssNativeImage)
+      end
+      if not img and def.image then
+        img = asImage(def.image)
+        if not img and type(def.image) == "string" then
+          pcall(function()
+            local okA, Assets = pcall(require, "src.render.Assets")
+            if okA and Assets and type(Assets.image) == "function" then
+              local okR, r = pcall(Assets.image, def.image)
+              if okR then img = asImage(r) or r end
+            end
+          end)
+        end
+      end
       if not img then return nil end
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
+      -- For HGSS sheets, frame 0 may be a standing frame; prefer a single
+      -- top-left cell when we have no usable quad.
       local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
@@ -182,12 +215,21 @@ return function(mod)
       love.graphics.translate(useFw / 2, useFh / 2)
       love.graphics.rotate(angle)
       love.graphics.translate(-useFw / 2, -useFh / 2)
-      local scaleX = useFw / srcFw
-      local scaleY = useFh / srcFh
+      local iw, ih = img:getDimensions()
+      local scaleX = useFw / math.max(1, srcFw)
+      local scaleY = useFh / math.max(1, srcFh)
       if quad then
         love.graphics.draw(img, quad, 0, 0, 0, scaleX, scaleY)
       else
-        love.graphics.draw(img, 0, 0, 0, scaleX, scaleY)
+        -- Draw first cell of the sheet (standing down) scaled into the canvas.
+        local cellW = math.min(srcFw, iw)
+        local cellH = math.min(srcFh, ih)
+        local okQ, q = pcall(love.graphics.newQuad, 0, 0, cellW, cellH, iw, ih)
+        if okQ and q then
+          love.graphics.draw(img, q, 0, 0, 0, useFw / cellW, useFh / cellH)
+        else
+          love.graphics.draw(img, 0, 0, 0, scaleX, scaleY)
+        end
       end
       love.graphics.pop()
       love.graphics.setShader()
@@ -2766,7 +2808,8 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
         .. tostring(bodySrc) .. "#" .. tostring(prop) .. "#" .. tostring(propBase)
       if _johtoCompositeCache[cacheKey] then return _johtoCompositeCache[cacheKey] end
 
-      local SIZE = 16
+      -- Use 32 so HGSS human bakes (32px) are not crushed in the composite card.
+      local SIZE = 32
       local okC, canvas = pcall(function()
         local c = love.graphics.newCanvas(SIZE, SIZE)
         local prev = love.graphics.getCanvas()
@@ -2774,11 +2817,13 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
         love.graphics.clear(0, 0, 0, 0)
         love.graphics.setColor(1, 1, 1, 1)
         local function blit(img, scaleMul)
-          if not img or type(img.getDimensions) ~= "function" then return end
+          if not img then return end
+          if type(img) == "string" then
+            local okI, i = pcall(love.graphics.newImage, img)
+            if okI then img = i else return end
+          end
+          if type(img.getDimensions) ~= "function" then return end
           local iw, ih = img:getDimensions()
-          -- scaleMul is a multiplier on the fit-to-SIZE scale (not an absolute
-          -- scale): blit(bodySrc, 0.85) draws the body at 85% of its fitted
-          -- size instead of overflowing the 16x16 canvas.
           local s = (SIZE / math.max(iw, ih, 1)) * (scaleMul or 1)
           local dx = (SIZE - iw * s) / 2
           local dy = (SIZE - ih * s) / 2
@@ -2788,7 +2833,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
           blit(prop)
         elseif style == 2 or style == 3 then
           if propBase then blit(propBase) end
-          if bodySrc then blit(bodySrc, 0.85) end
+          if bodySrc then blit(bodySrc, 0.9) end
           if prop then blit(prop) end
         else
           if bodySrc then blit(bodySrc) end
@@ -3073,6 +3118,10 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           local sleeping = self and self.nightlifeSleeping
           if sleeping then
             local style = resolveSleepStyle(self)
+            -- Retry bake for HGSS humans that were not ready on first sleep.
+            if self.sprite and not self.sprite._johtoSleepBaked then
+              pcall(bakeRotatedSleepSprite, self)
+            end
             if isVoxelPresentation() then
               if style ~= 1 then r = baseDraw(self, ox, oy) end
             else
@@ -3084,6 +3133,8 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                   pcall(drawSleepBodyCentered, self, ox, oy, nil)
                   r = true
                 else
+                  -- Bake still failed: draw standing sprite gray so humans
+                  -- never fully disappear (HGSS path image may be path-only).
                   r = baseDraw(self, ox, oy)
                 end
               end
@@ -3204,43 +3255,48 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
           -- (35 canonical species keep SPRITE_<SPECIES>). Try the HGSS id FIRST
           -- so HGSS art wins over any default-art def when the mod is on; the
           -- order-arbitrary fuzzy scan below must never shadow it.
+          -- Prefer every known HGSS id form BEFORE any default SPRITE_ entry.
           local candidates = {
             "SPRITE_HGSS_GEN2_" .. species,
-            "SPRITE_" .. species, species, "SPRITE_POKEMON_" .. species,
+            "SPRITE_HGSS_" .. species,
+            "SPRITE_HGSS_GEN1_" .. species,
+            "HGSS_" .. species,
+            "SPRITE_" .. species,
+            species,
+            "SPRITE_POKEMON_" .. species,
             "SPRITE_POKE_" .. species,
           }
           if sprites then
+            -- Pass A: explicit HGSS ids only
             for _, id in ipairs(candidates) do
-              local def = sprites[id]
-              if type(def) == "table" then
-                local okS, spr = pcall(Renderer.new, def)
-                if okS and accept(spr) then return spr end
+              if tostring(id):upper():find("HGSS", 1, true) then
+                local def = sprites[id]
+                if type(def) == "table" then
+                  local okS, spr = pcall(Renderer.new, def)
+                  if okS and accept(spr) then return spr end
+                end
               end
             end
-            for id, def in pairs(sprites) do
-              local up = tostring(id):upper()
-              if up:find(species, 1, true) and not up:find("BACK", 1, true)
-                 and not up:find("TRAINER", 1, true)
-                 and type(def) == "table" then
-                local okS, spr = pcall(Renderer.new, def)
-                if okS and accept(spr) then return spr end
-              end
-            end
-          end
-
-          -- 2) Prefer registry defs already patched by HGSS_SPRITES
-          if sprites then
-            local best
+            -- Pass B: any registry def patched with HGSS native fields
             for id, def in pairs(sprites) do
               local up = tostring(id):upper()
               if type(def) == "table" and up:find(species, 1, true)
                  and not up:find("BACK", 1, true)
-                 and not up:find("TRAINER", 1, true) then
-                if def.hgssNativeImage or def.hgssVoxelWidth or def.hgssFrameWidth then
+                 and not up:find("TRAINER", 1, true)
+                 and (def.hgssNativeImage or def.hgssVoxelWidth or def.hgssFrameWidth
+                      or up:find("HGSS", 1, true)) then
+                local okS, spr = pcall(Renderer.new, def)
+                if okS and accept(spr) then return spr end
+              end
+            end
+            -- Pass C: plain SPRITE_ / fuzzy (last resort — default art)
+            for _, id in ipairs(candidates) do
+              if not tostring(id):upper():find("HGSS", 1, true) then
+                local def = sprites[id]
+                if type(def) == "table" then
                   local okS, spr = pcall(Renderer.new, def)
                   if okS and accept(spr) then return spr end
                 end
-                if not best then best = def end
               end
             end
           end
@@ -3294,15 +3350,21 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             if not (okI and img) then return end
             pcall(img.setFilter, img, "nearest", "nearest")
             local iw, ih = img:getDimensions()
+            -- Keep HGSS overworld at native 32px (do not crush to 16 — that
+            -- made travel swaps look like default/tiny sprites).
             local fw, fh = math.min(32, iw), math.min(32, ih)
+            local out = math.max(fw, fh, 16)
             local okC, canvas = pcall(function()
-              local c = love.graphics.newCanvas(16, 16)
+              local c = love.graphics.newCanvas(out, out)
               local prev = love.graphics.getCanvas()
               love.graphics.setCanvas(c)
               love.graphics.clear(0, 0, 0, 0)
               love.graphics.setColor(1, 1, 1, 1)
               local q = love.graphics.newQuad(0, 0, fw, fh, iw, ih)
-              love.graphics.draw(img, q, 0, 0, 0, 16 / fw, 16 / fh)
+              local s = out / math.max(fw, fh, 1)
+              local dx = (out - fw * s) / 2
+              local dy = (out - fh * s) / 2
+              love.graphics.draw(img, q, dx, dy, 0, s, s)
               love.graphics.setCanvas(prev)
               return c
             end)
@@ -3433,6 +3495,13 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
             local style = 0
             pcall(function() style = resolveSleepStyle(self) end)
             style = math.floor(tonumber(style) or 0)
+            -- Ensure bake ran (HGSS humans often need the robust resolve path).
+            if self.sprite and not self.sprite._johtoSleepBaked then
+              pcall(bakeRotatedSleepSprite, self)
+              if self.sprite._johtoSleepBaked and self.sprite.image then
+                self._johtoSleepBodyImage = self.sprite.image
+              end
+            end
             -- Voxel: return a single composite card (prop + body) so Battle Art
             -- draws it through the SAME drawEntity/billboard path as default
             -- sleepers — no custom matrices, no FP/TP shrink.
@@ -3446,7 +3515,15 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                 if _G._johtoLifeTagSleeperSprite then
                   pcall(_G._johtoLifeTagSleeperSprite, comp, self)
                 end
+                -- Mark so worldPresent does not also draw body (Pokemon duplicate).
+                self._johtoLifeVoxelCompositeDrawn = true
                 return comp, px, py, facing, 0, false, extra
+              end
+              -- Composite failed (common for HGSS humans before robust bake):
+              -- still return the baked lying sprite so the body is not blank.
+              if self.sprite and self.sprite._johtoSleepBaked then
+                self._johtoLifeVoxelCompositeDrawn = false
+                return self.sprite, px, py, facing, 0, false, extra
               end
             end
           elseif self and self._johtoLifeSavedVisible then
@@ -4002,16 +4079,22 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
         key = "baked#" .. tostring(npc) .. "#" .. tostring(bakedImg)
         if bodyMeshCache[key] then return bodyMeshCache[key] end
         local bw, bh = bakedImg:getDimensions()
-        if bw == 16 and bh == 16 then
+        -- Keep bake size (16–32). Do NOT downscale to 16 — that produced the
+        -- tiny gray bodies that clipped into the voxel ground.
+        local target = math.max(16, math.min(32, math.max(bw, bh)))
+        if bw == target and bh == target then
           drawImg = bakedImg
         else
           local okS, scaled = pcall(function()
-            local c = love.graphics.newCanvas(16, 16)
+            local c = love.graphics.newCanvas(target, target)
             local prev = love.graphics.getCanvas()
             love.graphics.setCanvas(c)
             love.graphics.clear(0, 0, 0, 0)
             love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.draw(bakedImg, 0, 0, 0, 16 / math.max(1, bw), 16 / math.max(1, bh))
+            local s = target / math.max(1, math.max(bw, bh))
+            local dx = (target - bw * s) / 2
+            local dy = (target - bh * s) / 2
+            love.graphics.draw(bakedImg, dx, dy, 0, s, s)
             love.graphics.setCanvas(prev)
             return c
           end)
@@ -4142,12 +4225,14 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       return Mat4.mul(m, Mat4.translate(-half, 0, 0))
     end
 
-    -- Flat on the ground (bed/bag) — fixed world orientation, not camera-sized
-    local function flatMatrix(px, py, y, yaw)
+    -- Flat on the ground (bed/bag) — fixed world orientation, not camera-sized.
+    -- half defaults to 8 (16px card). Pass mesh half-width for 32px bodies.
+    local function flatMatrix(px, py, y, yaw, half)
+      half = half or 8
       return Mat4.mul(
-        Mat4.translate(px + 8, y, py + 8),
+        Mat4.translate(px + half, y, py + half),
         Mat4.mul(Mat4.rotateY(yaw or 0), Mat4.rotateX(-math.pi / 2)),
-        Mat4.translate(-8, 0, 0)
+        Mat4.translate(-half, 0, 0)
       )
     end
 
@@ -4175,38 +4260,48 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       px = tonumber(px) or 0
       py = tonumber(py) or 0
 
+      -- If pose() already returned a composite card, BA drew body+prop together.
+      -- Only add world-space props/Zzz here; skip body to avoid Pokemon duplicates.
+      local compositeDone = npc._johtoLifeVoxelCompositeDrawn == true
       if style == 2 or style == 3 then
         local pbm = propBaseMesh(style)
-        if pbm and pbm.mesh then
+        if pbm and pbm.mesh and not compositeDone then
+          local ph = (pbm.w or 24) / 2
           pcall(Voxel3D.draw, pbm.mesh, pbm.image,
-                flatMatrix(px, py, gh + 0.03, yaw), 0, flatMatrix(px, py, gh + 0.03, yaw))
+                flatMatrix(px, py, gh + 0.05, yaw, ph), 0, flatMatrix(px, py, gh + 0.05, yaw, ph))
         end
-        local bm = bodyMeshFor(npc)
-        if bm and bm.mesh then
-          pcall(Voxel3D.draw, bm.mesh, bm.image,
-                flatMatrix(px, py, gh + 0.25, yaw), 0.1, flatMatrix(px, py, gh + 0.25, yaw))
+        if not compositeDone then
+          local bm = bodyMeshFor(npc)
+          if bm and bm.mesh then
+            local bh = (bm.w or 32) / 2
+            pcall(Voxel3D.draw, bm.mesh, bm.image,
+                  flatMatrix(px, py, gh + 1.2, yaw, bh), 0.1, flatMatrix(px, py, gh + 1.2, yaw, bh))
+          end
         end
         local pm = propMesh(style)
-        if pm and pm.mesh then
+        if pm and pm.mesh and not compositeDone then
+          local oh = (pm.w or 24) / 2
           pcall(Voxel3D.draw, pm.mesh, pm.image,
-                flatMatrix(px, py, gh + 0.45, yaw), 0.2, flatMatrix(px, py, gh + 0.45, yaw))
+                flatMatrix(px, py, gh + 2.0, yaw, oh), 0.2, flatMatrix(px, py, gh + 2.0, yaw, oh))
         end
       elseif style == 1 then
         local pm = propMesh(1)
-        if pm and pm.mesh then
-          -- Upright tent, same world-space card path as default NPCs
-          local half = (pm.w or 16) / 2
+        if pm and pm.mesh and not compositeDone then
+          local half = (pm.w or 20) / 2
           local model = uprightCardMatrix(px, py, gh + 0.05, half)
           pcall(Voxel3D.draw, pm.mesh, pm.image, model, 0.2, model)
         end
       else
-        -- style 0: default sleep — still draw body flat + Zzz (no prop)
-        local bm = bodyMeshFor(npc)
-        if bm and bm.mesh then
-          pcall(Voxel3D.draw, bm.mesh, bm.image,
-                flatMatrix(px, py, gh + 0.15, yaw), 0.1, flatMatrix(px, py, gh + 0.15, yaw))
+        if not compositeDone then
+          local bm = bodyMeshFor(npc)
+          if bm and bm.mesh then
+            local bh = (bm.w or 32) / 2
+            pcall(Voxel3D.draw, bm.mesh, bm.image,
+                  flatMatrix(px, py, gh + 1.0, yaw, bh), 0.1, flatMatrix(px, py, gh + 1.0, yaw, bh))
+          end
         end
       end
+      npc._johtoLifeVoxelCompositeDrawn = nil
 
       -- World-space animated Zzz (classic rise, fixed world size)
       local zm = zMesh()

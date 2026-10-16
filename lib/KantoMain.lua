@@ -552,19 +552,25 @@ return function(mod)
       local okI, img = pcall(love.graphics.newImage, path)
       if not (okI and img) then return end
       local iw, ih = img:getDimensions()
+      -- Keep HGSS overworld at native ~32px so fly/teleport swaps are not
+      -- mistaken for default/tiny art.
       local fw, fh = math.min(32, iw), math.min(32, ih)
-      local c = love.graphics.newCanvas(16, 16)
+      local out = math.max(fw, fh, 16)
+      local c = love.graphics.newCanvas(out, out)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
       love.graphics.clear(0, 0, 0, 0)
       love.graphics.setColor(1, 1, 1, 1)
       local q = love.graphics.newQuad(0, 0, fw, fh, iw, ih)
-      love.graphics.draw(img, q, 0, 0, 0, 16 / fw, 16 / fh)
+      local s = out / math.max(fw, fh, 1)
+      local dx = (out - fw * s) / 2
+      local dy = (out - fh * s) / 2
+      love.graphics.draw(img, q, dx, dy, 0, s, s)
       love.graphics.setCanvas(prev)
       tryDef({
         id = "SPRITE_KANTO_TRAVEL_HGSS_" .. species,
         image = c, frames = 1, walker = false, trueColor = true,
-        frameWidth = 16, frameHeight = 16, spriteType = "POKEMON_SPRITE", species = species,
+        frameWidth = out, frameHeight = out, spriteType = "POKEMON_SPRITE", species = species,
       })
     end)
     if pokeSpriteCache[species] and (not strict or pokeSpriteExact[species]) then
@@ -967,35 +973,37 @@ return function(mod)
       end
       return false
     end
-    -- 5-cell exclusion on every map (no small-interior exception).
+    -- Outdoor: 5-cell exclusion so sleepers never block route exits.
+    -- Indoor houses are often only ~8–12 tiles across — a 5-cell radius
+    -- covered every tile and made indoor sleep impossible. Use 1 cell inside.
     x, y = math.floor(x), math.floor(y)
-    for dx = -5, 5 do
-      for dy = -5, 5 do
+    local radius = 5
+    local mapId = map.id
+    if isIndoor(mapId, map) then radius = 1 end
+    for dx = -radius, radius do
+      for dy = -radius, radius do
         if isWarpAt(x + dx, y + dy) then return true end
       end
     end
     return false
   end
 
-  -- Sleep-only door exclusion: NPCs must never fall asleep within 5 cells of a
-  -- doorway/warp/door tile. Unlike nearWarp (which is also used for spawning and
-  -- only checks the exact cell in small interiors), this applies to EVERY map
-  -- size, and the per-frame NPC:update sleep path uses it too (it previously had
-  -- no door check at all). Result is cached per NPC cell so the 11x11 scan does
-  -- not run every frame.
-  local SLEEP_DOOR_RADIUS = 5
+  -- Sleep-only door exclusion. Indoor maps use radius 1 (door tile + neighbors)
+  -- so NPCs in the rest of a house can still fall asleep. Outdoor keeps 5 so
+  -- sleepers do not block player pathing through route warps.
   local function sleepBlockedByDoor(npc, map)
     if not npc or not map then return false end
     local cx, cy = npc.cellX, npc.cellY
     if type(cx) ~= "number" or type(cy) ~= "number" then return false end
     cx, cy = math.floor(cx), math.floor(cy)
     local mapId = map.id
+    local radius = isIndoor(mapId, map) and 1 or 5
     local c = npc._kantoSleepDoorCache
-    if c and c.map == mapId and c.x == cx and c.y == cy then return c.v end
+    if c and c.map == mapId and c.x == cx and c.y == cy and c.r == radius then return c.v end
     local hasDoorTile = type(map.isDoorTileCell) == "function"
     local found = false
-    for dx = -SLEEP_DOOR_RADIUS, SLEEP_DOOR_RADIUS do
-      for dy = -SLEEP_DOOR_RADIUS, SLEEP_DOOR_RADIUS do
+    for dx = -radius, radius do
+      for dy = -radius, radius do
         local x, y = cx + dx, cy + dy
         local okW, isWarp = pcall(function() return map:warpAtCell(x, y) end)
         if okW and isWarp then found = true; break end
@@ -1006,7 +1014,7 @@ return function(mod)
       end
       if found then break end
     end
-    npc._kantoSleepDoorCache = { map = mapId, x = cx, y = cy, v = found }
+    npc._kantoSleepDoorCache = { map = mapId, x = cx, y = cy, r = radius, v = found }
     return found
   end
 
@@ -3594,15 +3602,16 @@ local nm = storyDisplayName(talker)
       local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
       local fw = tonumber(sprite.frameWidth) or 16
       local fh = tonumber(sprite.frameHeight) or 16
-      -- Always bake to a consistent 16x16 canvas so HGSS 32px (and other oversized)
-      -- sprites do not become massive in voxel / 2D after rotation.
-      local useFw, useFh = 16, 16
+      -- Bake at source size (cap 16–32). Forcing pure 16x16 made HGSS sleepers
+      -- tiny in voxel; leaving raw 32+ made some human sprites massive.
       local srcFw, srcFh = fw, fh
       if isHgss then
         srcFw = tonumber(sprite.def.hgssFrameWidth or sprite.def.frameWidth) or 32
         srcFh = tonumber(sprite.def.hgssFrameHeight or sprite.def.frameHeight) or srcFw
         quad = nil
       end
+      local useFw = math.max(16, math.min(32, math.floor(srcFw)))
+      local useFh = math.max(16, math.min(32, math.floor(srcFh)))
       local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
@@ -3614,8 +3623,8 @@ local nm = storyDisplayName(talker)
       love.graphics.translate(useFw / 2, useFh / 2)
       love.graphics.rotate(angle)
       love.graphics.translate(-useFw / 2, -useFh / 2)
-      local scaleX = useFw / srcFw
-      local scaleY = useFh / srcFh
+      local scaleX = useFw / math.max(1, srcFw)
+      local scaleY = useFh / math.max(1, srcFh)
       if quad then
         love.graphics.draw(img, quad, 0, 0, 0, scaleX, scaleY)
       else
