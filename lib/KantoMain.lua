@@ -167,6 +167,14 @@ return function(mod)
        default = 30, min = 0, max = 100, step = 10 },
      { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
+    { key = "exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
+    { key = "exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
+    { key = "exp_moods", type = "toggle", label = "NPC MOODS", default = true },
+    { key = "exp_idle", type = "toggle", label = "IDLE BEHAVIORS", default = true },
+    { key = "exp_timeaware", type = "toggle", label = "TIME AWARENESS", default = true },
+    { key = "exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
+    { key = "exp_companions", type = "toggle", label = "COMPANIONS", default = true },
+    { key = "exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     { key = "debug_log", type = "toggle", label = "VIEW DEBUG LOG", default = false },
@@ -2436,6 +2444,62 @@ return function(mod)
           end,
         },
         {
+          label = "LIFELIKE GREETINGS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_greetings") ~= false,
+          right = opt("exp_greetings") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_greetings", v and true or false) end,
+        },
+        {
+          label = "NPC CHATTER",
+          stepper = true, kind = "toggle",
+          current = opt("exp_chatter") ~= false,
+          right = opt("exp_chatter") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_chatter", v and true or false) end,
+        },
+        {
+          label = "NPC MOODS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_moods") ~= false,
+          right = opt("exp_moods") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_moods", v and true or false) end,
+        },
+        {
+          label = "IDLE BEHAVIORS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_idle") ~= false,
+          right = opt("exp_idle") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_idle", v and true or false) end,
+        },
+        {
+          label = "TIME AWARENESS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_timeaware") ~= false,
+          right = opt("exp_timeaware") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_timeaware", v and true or false) end,
+        },
+        {
+          label = "PLAYER REACTIONS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_player") ~= false,
+          right = opt("exp_player") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_player", v and true or false) end,
+        },
+        {
+          label = "COMPANIONS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_companions") ~= false,
+          right = opt("exp_companions") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_companions", v and true or false) end,
+        },
+        {
+          label = "AMBIENT LIFE",
+          stepper = true, kind = "toggle",
+          current = opt("exp_ambience") ~= false,
+          right = opt("exp_ambience") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_ambience", v and true or false) end,
+        },
+        {
           label = "CANCEL",
           onSelect = function() end,
         },
@@ -2905,7 +2969,24 @@ local nm = storyDisplayName(talker)
   -- =====================================================================
   -- scheduleTick is the single owner of Kanto Life NPC routines/agenda.
   -- The older helper is not started so it cannot fight the self-driven API.
-  local kantoRoutines = nil
+  local kantoLifelike = nil
+  pcall(function()
+    local factory = loadBundled("lib/LifelikeBehaviors.lua")
+    if type(factory) == "function" then
+      kantoLifelike = factory({
+        opt = function(k)
+          local v = opt(k)
+          return v
+        end,
+        isNight = function()
+          local g = G and G() or game
+          return g and g.isNight == true
+        end,
+      })
+    end
+  end)
+
+local kantoRoutines = nil
   do
     local KantoRoutines, routineErr = loadBundled("lib/KantoRoutines.lua")
     if type(KantoRoutines) ~= "function" then mod.log:error("KantoRoutines load failed: %s", tostring(routineErr)) end
@@ -3523,6 +3604,12 @@ local nm = storyDisplayName(talker)
       local ok, err = pcall(function() kantoRoutines.update(world, dt or 0, false) end)
       if not ok then mod.log:error("Kanto Life routines update: %s", tostring(err)) end
     end
+ 
+    pcall(function()
+      if kantoLifelike and type(kantoLifelike.tick) == "function" then
+        kantoLifelike.tick(world, world.npcs or {}, world.player, dt)
+      end
+    end)
   end
 
   -- Bake ±90° sleep frame into sprite.image so pose is real pixels (voxel + 2D)
@@ -4164,6 +4251,12 @@ function putToSleep(npc)
     local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
     local G = love.graphics
     G.push("all")
+    -- Mood tint: pastel fill + saturated border; default white when unset.
+    local bc = npc._kantoLifeBubbleColor
+    local br, bg, bb
+    if type(bc) == "table" and tonumber(bc[1]) and tonumber(bc[2]) and tonumber(bc[3]) then
+      br, bg, bb = bc[1], bc[2], bc[3]
+    end
     scale = tonumber(scale) or 1
     if scale ~= 1 then G.scale(scale, scale) sx, sy = sx / scale, sy / scale end
     local font = G.getFont and G.getFont() or nil
@@ -4172,8 +4265,12 @@ function putToSleep(npc)
     -- Dynamic height: fit text with padding (fixes overflow)
     local w, h = math.max(18, tw + 10), math.max(14, th + 6)
     local x, y = math.floor(sx - w/2), math.floor(sy - h - 4)
-    G.setColor(1,1,1,1); G.rectangle("fill", x, y, w, h, 2, 2)
-    G.setColor(0.1,0.1,0.1,1); G.rectangle("line", x, y, w, h, 2, 2)
+    if br then G.setColor(br*0.35+0.65, bg*0.35+0.65, bb*0.35+0.65, 1)
+    else G.setColor(1,1,1,1) end
+    G.rectangle("fill", x, y, w, h, 2, 2)
+    if br then G.setColor(br, bg, bb, 1)
+    else G.setColor(0.1,0.1,0.1,1) end
+    G.rectangle("line", x, y, w, h, 2, 2)
     G.polygon("fill", x + w/2 - 2, y + h, x + w/2 + 2, y + h, x + w/2, y + h + 3)
     local th = font and font:getHeight() or 8
     G.print(text, x + (w - tw)/2, y + (h - th)/2)
@@ -4541,6 +4638,12 @@ function putToSleep(npc)
             if sx > 0 and sy > 0 and sx < cw and sy < ch then
               local s = scale * emotePad
               local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+              -- Mood tint: pastel fill + saturated border; default white when unset.
+              local bc2 = npc._kantoLifeBubbleColor
+              local br2, bg2, bb2
+              if type(bc2) == "table" and tonumber(bc2[1]) and tonumber(bc2[2]) and tonumber(bc2[3]) then
+                br2, bg2, bb2 = bc2[1], bc2[2], bc2[3]
+              end
               local font = G.getFont()
               local tw, th = 12, 10
               pcall(function()
@@ -4569,9 +4672,11 @@ function putToSleep(npc)
               local bh = math.max(12, th + 4)
               -- With Y flipped, negative by draws toward the top of the screen.
               local bx, by = -bw / 2, -42 - bh
-              G.setColor(1, 1, 1, 1)
+              if br2 then G.setColor(br2*0.35+0.65, bg2*0.35+0.65, bb2*0.35+0.65, 1)
+              else G.setColor(1, 1, 1, 1) end
               G.rectangle("fill", bx, by, bw, bh, 2, 2)
-              G.setColor(0.1, 0.1, 0.1, 1)
+              if br2 then G.setColor(br2, bg2, bb2, 1)
+              else G.setColor(0.1, 0.1, 0.1, 1) end
               G.rectangle("line", bx, by, bw, bh, 2, 2)
               -- Stem toward NPC (positive Y in flipped space = toward feet/anchor)
               G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
@@ -6719,9 +6824,16 @@ local function nightlifeTick(world, dt)
     -- Every component is proven by the working Zzz.
     local bubbleImageCache = {}  -- text -> {path, image, w, h}
 
-    local function getBubbleImage(text)
+    local function getBubbleImage(text, color)
       text = tostring(text or ":)")
-      local cached = bubbleImageCache[text]
+      -- Mood tint: include the color in the cache key so tints don't collide.
+      local cr, cg, cb
+      if type(color) == "table" and tonumber(color[1]) and tonumber(color[2]) and tonumber(color[3]) then
+        cr, cg, cb = color[1], color[2], color[3]
+      end
+      local key = text
+      if cr then key = text .. string.format("|%.2f,%.2f,%.2f", cr, cg, cb) end
+      local cached = bubbleImageCache[key]
       if cached then return cached end
       local G = love.graphics
       local font = nil
@@ -6745,11 +6857,13 @@ local function nightlifeTick(world, dt)
         G.push("all")
         G.setCanvas(canvas)
         G.clear(0, 0, 0, 0)
-        -- White rounded background
-        G.setColor(1, 1, 1, 1)
+        -- Rounded background (mood-tinted pastel, else white)
+        if cr then G.setColor(cr*0.35+0.65, cg*0.35+0.65, cb*0.35+0.65, 1)
+        else G.setColor(1, 1, 1, 1) end
         G.rectangle("fill", 0, 0, w, h, 3, 3)
-        -- Dark border
-        G.setColor(0.1, 0.1, 0.1, 1)
+        -- Border (mood color, else dark)
+        if cr then G.setColor(cr, cg, cb, 1)
+        else G.setColor(0.1, 0.1, 0.1, 1) end
         G.setLineWidth(1)
         G.rectangle("line", 0.5, 0.5, w - 1, h - 1, 3, 3)
         -- Tail triangle pointing down
@@ -6771,11 +6885,14 @@ local function nightlifeTick(world, dt)
       end)
       if not okImg or not img then return nil end
       -- Register via asset hook (proven: Zzz uses sleepImgCache + ensureAssetHook)
-      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_") .. ".png"
+      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_")
+      if cr then path = path .. string.format("_%02x%02x%02x",
+        math.floor(cr*255+0.5), math.floor(cg*255+0.5), math.floor(cb*255+0.5)) end
+      path = path .. ".png"
       sleepImgCache[path] = img
       ensureAssetHook()
       local entry = {path = path, image = img, w = w, h = h}
-      bubbleImageCache[text] = entry
+      bubbleImageCache[key] = entry
       return entry
     end
 
@@ -6841,7 +6958,7 @@ local function nightlifeTick(world, dt)
         end
 
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
-        local entry = getBubbleImage(text)
+        local entry = getBubbleImage(text, npc._kantoLifeBubbleColor)
         if not entry or not entry.image then return false end
         ensureAssetHook()
         local def = {

@@ -239,6 +239,7 @@ return function(ctx)
     npc._kantoLifeFRDepartUntil = now + 1.2
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
     -- Save the pixel-space render anchor. The Gen3 event-object renderer does
     -- not consume spriteYOffset, so apply the animation offset to py itself

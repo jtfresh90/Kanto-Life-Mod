@@ -1,7 +1,7 @@
 {
   "id": "kanto_life",
   "name": "Kanto Life",
-  "version": "1.4.256",
+  "version": "1.4.266",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -17,14 +17,7 @@
     "engine_internals"
   ],
   "dependencies": [],
-  "optional_dependencies": [
-    "HGSS_SPRITES",
-    "red_3d_player",
-    "player_model_loader",
-    "PORYGONAL_OVERWORLD_CHARACTERS",
-    "LEGENDARY_STADIUM_OVERWORLD_MODELS",
-    "TERRARIUM"
-  ],
+  "optional_dependencies": [],
   "conflicts": [],
   "description": "Unified Kanto Life for Gen1, Gen2, and Gen3 including FireRed/LeafGreen/Emerald: continuous ambient movement, collision-aware NPC routines, reliable moving-NPC interaction, generation-specific Fly/Teleport visuals, dialogue and interaction events, and voxel-safe sleep props with Zzz overlays.",
   "github": "jtfresh90/Kanto-Life-Mod",

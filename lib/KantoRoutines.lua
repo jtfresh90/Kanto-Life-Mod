@@ -171,6 +171,7 @@ return function(ctx)
     -- Show a cue bubble so the departure doesn't look like a pop.
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
@@ -229,6 +230,7 @@ return function(ctx)
     -- Show a cue bubble so the arrival doesn't look like a pop.
     local cue = method == "fly" and "vv" or method == "teleport" and "**" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 

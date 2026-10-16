@@ -173,6 +173,7 @@ return function(ctx)
     end
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.35
     if method == "teleport" and type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "from")

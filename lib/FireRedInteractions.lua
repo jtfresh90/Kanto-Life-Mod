@@ -11,6 +11,15 @@ return function(ctx)
     return ok and value or nil
   end
   local installed = false
+  local DialogueGen = nil
+  pcall(function()
+    local src = mod:read("lib/DialogueGen.lua")
+    if type(src) == "string" then
+      local compile = loadstring or load
+      local chunk = compile(src, "@DialogueGen")
+      if chunk then DialogueGen = chunk() end
+    end
+  end)
   local dialogueSerials = {}
   -- Forward declarations: holdActor/releaseActor/realNow are assigned further below
   -- but are called by dialogue/trade handlers defined above that point.
@@ -815,7 +824,17 @@ local function spriteGender(npc, def)
       return cryMessage(display, species)
     end
 
-    local line = humanDialogue(st, npc)
+    local line = nil
+    if DialogueGen and type(DialogueGen.generate) == "function" then
+      local okG, genLine, genHist = pcall(DialogueGen.generate, {
+        npcName = display, gen = 3, recentLines = st.recentLines,
+      })
+      if okG and type(genLine) == "string" and genLine ~= "" then
+        line = genLine
+        st.recentLines = genHist
+      end
+    end
+    if not line then line = humanDialogue(st, npc) end
     putState(key, st, all)
     return message(display .. ":\n" .. line, function() releaseActor(npc) end)
   end

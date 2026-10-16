@@ -689,6 +689,16 @@ return function(ctx)
       local c = cells[((idx * 37) % #cells) + 1]
       idx = idx + 1
       newObject(c[1], c[2], nil, humanSprite(i), false)
+      -- Pet companion for some humans
+      pcall(function()
+        if type(opt) == "function" and opt("firered_exp_companions") == false then return end
+        if math.random() >= 0.22 then return end
+        local gid, species = choosePokemonGfx(mapId, map, false)
+        if not gid then return end
+        local px, py = c[1] + math.random(-1,1), c[2] + math.random(-1,1)
+        local pet = newObject(px, py, nil, gid, true, species)
+        -- Link last two ambients if possible — best-effort via spawned table
+      end)
     end
 
     for i = 1, math.min(wantPoke, math.max(0, #cells - idx)) do

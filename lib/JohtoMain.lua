@@ -200,9 +200,22 @@ return function(mod)
         end
       end
       if not img then return nil end
-      local quad = sprite.frames and (sprite.frames[0] or sprite.frames[1])
-      -- For HGSS sheets, frame 0 may be a standing frame; prefer a single
-      -- top-left cell when we have no usable quad.
+      -- Prefer a single down/stand cell. HGSS human sheets are multi-frame;
+      -- drawing the full image or a wrong tall slice is what made some
+      -- ambient sleepers vanish or show a green vertical strip.
+      local frames = sprite.frames
+      local quad = nil
+      if type(frames) == "table" then
+        quad = frames[0] or frames[1] or frames.down or frames["down"]
+        if not quad then
+          for _, v in pairs(frames) do
+            if type(v) == "userdata" or (type(v) == "table" and v.type) then
+              quad = v
+              break
+            end
+          end
+        end
+      end
       local c = love.graphics.newCanvas(useFw, useFh)
       local prev = love.graphics.getCanvas()
       love.graphics.setCanvas(c)
@@ -216,19 +229,29 @@ return function(mod)
       love.graphics.rotate(angle)
       love.graphics.translate(-useFw / 2, -useFh / 2)
       local iw, ih = img:getDimensions()
-      local scaleX = useFw / math.max(1, srcFw)
-      local scaleY = useFh / math.max(1, srcFh)
+      -- Always sample exactly one cell; never scale the entire sheet.
+      local cellW = math.min(math.max(1, srcFw), iw)
+      local cellH = math.min(math.max(1, srcFh), ih)
+      -- If the sheet is wider than one cell, prefer the first column of row 0
+      -- (standard down-facing stand in most HGSS OW layouts).
       if quad then
-        love.graphics.draw(img, quad, 0, 0, 0, scaleX, scaleY)
+        local qx, qy, qw, qh = 0, 0, cellW, cellH
+        pcall(function()
+          qx, qy, qw, qh = quad:getViewport()
+        end)
+        -- Reject absurd quads (whole-sheet) that produce giant/strip art.
+        if qw > cellW * 1.5 or qh > cellH * 1.5 then
+          local okQ, q = pcall(love.graphics.newQuad, 0, 0, cellW, cellH, iw, ih)
+          if okQ and q then
+            love.graphics.draw(img, q, 0, 0, 0, useFw / cellW, useFh / cellH)
+          end
+        else
+          love.graphics.draw(img, quad, 0, 0, 0, useFw / math.max(1, qw), useFh / math.max(1, qh))
+        end
       else
-        -- Draw first cell of the sheet (standing down) scaled into the canvas.
-        local cellW = math.min(srcFw, iw)
-        local cellH = math.min(srcFh, ih)
         local okQ, q = pcall(love.graphics.newQuad, 0, 0, cellW, cellH, iw, ih)
         if okQ and q then
           love.graphics.draw(img, q, 0, 0, 0, useFw / cellW, useFh / cellH)
-        else
-          love.graphics.draw(img, 0, 0, 0, scaleX, scaleY)
         end
       end
       love.graphics.pop()
@@ -332,6 +355,14 @@ return function(mod)
       default = 30, min = 0, max = 100, step = 10 },
     { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
+    { key = "exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
+    { key = "exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
+    { key = "exp_moods", type = "toggle", label = "NPC MOODS", default = true },
+    { key = "exp_idle", type = "toggle", label = "IDLE BEHAVIORS", default = true },
+    { key = "exp_timeaware", type = "toggle", label = "TIME AWARENESS", default = true },
+    { key = "exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
+    { key = "exp_companions", type = "toggle", label = "COMPANIONS", default = true },
+    { key = "exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
     { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
       choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
   })
@@ -898,6 +929,42 @@ return function(mod)
           n.homeY = n.cellY or y
           n.timer = love.math.random(20, 90)
         end
+        -- Optional Pokemon companion for human ambients (~22% when companions ON).
+        if (not isPoke) and opt("exp_companions") ~= false and love.math.random() < 0.22 then
+          pcall(function()
+            local pool = fullDexSpecies()
+            if not pool or #pool == 0 then pool = POKE_LIST end
+            if not pool or #pool == 0 then return end
+            local mon = pool[love.math.random(1, #pool)]
+            local cx, cy = (n.cellX or x) + love.math.random(-1, 1), (n.cellY or y) + love.math.random(-1, 1)
+            spawnSerial = spawnSerial + 1
+            local cname = "JOHTO_POKE_" .. tostring(mapId) .. "_C" .. spawnSerial
+            local cid = mod.world:spawnNpc(mapId, {
+              name = cname, sprite = "SPRITE_" .. mon, x = cx, y = cy, text = "",
+              movement = MOVE_WANDER, radius = { x = 1, y = 1 },
+              johtoLifeAmbient = true, johtoLifePokemon = true,
+              johtoLifeMon = mon, johtoLifeDisplayName = mon,
+              johtoLifeCompanionOf = name,
+            })
+            if cid then
+              for _, pn in ipairs(ow.npcs or {}) do
+                if pn.id == cid or (pn.def and pn.def.name == cname) then
+                  pn.def = pn.def or {}
+                  pn.def.johtoLifeAmbient = true
+                  pn.def.johtoLifePokemon = true
+                  pn.def.johtoLifeMon = mon
+                  pn.def.johtoLifeCompanionOf = name
+                  pn.johtoLifeCompanionOf = name
+                  pn.kantoLifeCompanionOwner = n
+                  n.kantoLifePetCompanion = pn
+                  n._kantoLifeCompanion = pn
+                  pn._kantoLifeCompanion = n
+                  break
+                end
+              end
+            end
+          end)
+        end
         return n
       end
     end
@@ -956,6 +1023,13 @@ return function(mod)
   -- handle surface, which Gen1Recomp++ resolves to the live Gold/Silver/Crystal
   -- world. No Gen-1 OverworldController internals are patched here.
   local JohtoRoutines, johtoRoutineErr = loadBundled("lib/JohtoRoutines.lua")
+  local johtoLifelike = nil
+  pcall(function()
+    local factory = loadBundled("lib/LifelikeBehaviors.lua")
+    if type(factory) == "function" then
+      johtoLifelike = factory({ opt = function(k) return opt(k) end })
+    end
+  end)
   local johtoRoutines = nil
   if type(JohtoRoutines) == "function" then
     local ok, instance = pcall(JohtoRoutines, {
@@ -1131,6 +1205,22 @@ return function(mod)
             if n > 2 then n = 0 end
             setOpt("npc_agenda", n); refreshCurrentMap()
           end },
+        { label = "LIFELIKE GREETINGS", right = opt("exp_greetings") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_greetings", not (opt("exp_greetings") ~= false)) end },
+        { label = "NPC CHATTER", right = opt("exp_chatter") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_chatter", not (opt("exp_chatter") ~= false)) end },
+        { label = "NPC MOODS", right = opt("exp_moods") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_moods", not (opt("exp_moods") ~= false)) end },
+        { label = "IDLE BEHAVIORS", right = opt("exp_idle") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_idle", not (opt("exp_idle") ~= false)) end },
+        { label = "TIME AWARENESS", right = opt("exp_timeaware") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_timeaware", not (opt("exp_timeaware") ~= false)) end },
+        { label = "PLAYER REACTIONS", right = opt("exp_player") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_player", not (opt("exp_player") ~= false)) end },
+        { label = "COMPANIONS", right = opt("exp_companions") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_companions", not (opt("exp_companions") ~= false)); refreshCurrentMap() end },
+        { label = "AMBIENT LIFE", right = opt("exp_ambience") ~= false and "ON" or "OFF", stepper = true,
+          onSelect = function() setOpt("exp_ambience", not (opt("exp_ambience") ~= false)) end },
         { label = "CANCEL", onSelect = function() end },
       }
     end
@@ -1771,6 +1861,12 @@ return function(mod)
         end
       end
     end
+ 
+    pcall(function()
+      if johtoLifelike and type(johtoLifelike.tick) == "function" then
+        johtoLifelike.tick(world, world.npcs or {}, world.player, 0.016)
+      end
+    end)
   end
 
   if Overworld then
@@ -3107,6 +3203,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       if untilAt <= now then return end
       local text = tostring(self._kantoLifeCollisionBubbleText or ":)")
       local G = love.graphics
+      -- Mood tint: pastel fill + saturated border; default white when unset.
+      local bc = self._kantoLifeBubbleColor
+      local br, bg, bb
+      if type(bc) == "table" and tonumber(bc[1]) and tonumber(bc[2]) and tonumber(bc[3]) then
+        br, bg, bb = bc[1], bc[2], bc[3]
+      end
       -- Match engine Gen2 NPC:draw(ox, oy, scale):
       --   if scale==nil then draw(-(ox),-(oy),1)  -- cam → screen offset
       --   else translate(ox,oy); scale(s); draw in world px
@@ -3126,8 +3228,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
       local cy = py - 16 + (tonumber(self.spriteYOffset) or 0)
       local x = math.floor(cx - w / 2)
       local y = math.floor(cy - h - 4)
-      G.setColor(1,1,1,1); G.rectangle("fill",x,y,w,h,2,2)
-      G.setColor(0.1,0.1,0.1,1); G.rectangle("line",x,y,w,h,2,2)
+      if br then G.setColor(br*0.35+0.65, bg*0.35+0.65, bb*0.35+0.65, 1)
+      else G.setColor(1,1,1,1) end
+      G.rectangle("fill",x,y,w,h,2,2)
+      if br then G.setColor(br, bg, bb, 1)
+      else G.setColor(0.1,0.1,0.1,1) end
+      G.rectangle("line",x,y,w,h,2,2)
       G.polygon("fill",x+w/2-2,y+h,x+w/2+2,y+h,x+w/2,y+h+3)
       G.setColor(0.1,0.1,0.1,1)
       G.print(text, cx - tw/2, y + (h-th)/2)
@@ -3928,6 +4034,12 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
               local sx, sy, okP = projectNpc(npc, canvas)
               if okP and sx and sy and (cw <= 0 or (sx > -20 and sy > -20 and sx < cw + 20 and sy < ch + 20)) then
                 local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+                -- Mood tint: pastel fill + saturated border; default white when unset.
+                local bc5 = npc._kantoLifeBubbleColor
+                local br5, bg5, bb5
+                if type(bc5) == "table" and tonumber(bc5[1]) and tonumber(bc5[2]) and tonumber(bc5[3]) then
+                  br5, bg5, bb5 = bc5[1], bc5[2], bc5[3]
+                end
                 local font = Gfx.getFont()
                 local tw, th = 12, 10
                 pcall(function()
@@ -3939,9 +4051,11 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
                 local bw = math.max(16, tw + 8)
                 local bh = math.max(12, th + 4)
                 local bx, by = -bw / 2, -30 - bh
-                Gfx.setColor(1, 1, 1, 1)
+                if br5 then Gfx.setColor(br5*0.35+0.65, bg5*0.35+0.65, bb5*0.35+0.65, 1)
+                else Gfx.setColor(1, 1, 1, 1) end
                 Gfx.rectangle("fill", bx, by, bw, bh, 2, 2)
-                Gfx.setColor(0.1, 0.1, 0.1, 1)
+                if br5 then Gfx.setColor(br5, bg5, bb5, 1)
+                else Gfx.setColor(0.1, 0.1, 0.1, 1) end
                 Gfx.rectangle("line", bx, by, bw, bh, 2, 2)
                 Gfx.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
                 if font then Gfx.print(text, bx + (bw - tw) / 2, by + (bh - th) / 2) end
