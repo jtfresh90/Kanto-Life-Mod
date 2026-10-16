@@ -21,13 +21,19 @@ return function(ctx)
   local warpStartMap = nil
 
   local function opt(key, default)
-    if type(getOption) == "function" then
-      local ok, v = pcall(getOption, key, default)
-      if ok and v ~= nil then return v end
-    end
-    if mod.options and type(mod.options.get) == "function" then
-      local ok, v = pcall(mod.options.get, mod.options, key)
-      if ok and v ~= nil then return v end
+    -- Accept both firered_common_courtesy and the shared common_courtesy key.
+    local keys = { key }
+    if key == "firered_common_courtesy" then keys[#keys + 1] = "common_courtesy" end
+    if key == "common_courtesy" then keys[#keys + 1] = "firered_common_courtesy" end
+    for _, k in ipairs(keys) do
+      if type(getOption) == "function" then
+        local ok, v = pcall(getOption, k, default)
+        if ok and v ~= nil then return v end
+      end
+      if mod.options and type(mod.options.get) == "function" then
+        local ok, v = pcall(mod.options.get, mod.options, k)
+        if ok and v ~= nil then return v end
+      end
     end
     return default
   end
@@ -195,7 +201,8 @@ return function(ctx)
   end
 
   local function install()
-    if installed or not mod.hooks or not mod.hooks.wrap then return end
+    if installed then return true end
+    if not mod.hooks or not mod.hooks.wrap then return false end
     local ok = pcall(function()
       -- Intercept the actual source edge, before Input:step() promotes it to
       -- the field logic.  This covers keyboard and controller A equally.
@@ -339,6 +346,16 @@ return function(ctx)
       end)
     end)
     installed = ok
+    return ok
+  end
+
+  function api.ensureInstalled()
+    if installed then return true end
+    return install() and true or false
+  end
+
+  function api.isInstalled()
+    return installed == true
   end
 
   install()

@@ -313,6 +313,12 @@ return function(mod)
   end
 
   mod.events:on("game.ready", function()
+    -- Hooks may not be ready at mod entry; ensure door knocking is installed.
+    pcall(function()
+      if doorKnocking and type(doorKnocking.ensureInstalled) == "function" then
+        doorKnocking.ensureInstalled()
+      end
+    end)
     local ow = getFieldState()
     if ow then
       ambient:rebuild(true)

@@ -615,7 +615,7 @@ return function(ctx)
   end
 
   local pathCache = {}
-  local function stepToward(world, npc, tx, ty)
+  local function stepToward(world, npc, tx, ty, st)
     local h = handle(world, npc)
     if not h then return false end
     if npc.moving then return true end
@@ -671,7 +671,10 @@ return function(ctx)
         local okStep = pcall(h.stepNow, h, dir)
         if okStep then
           if c and c.path and #c.path > 0 then table.remove(c.path, 1) end
-          if type(h.isMoving) == "function" then local okM, moving = pcall(h.isMoving, h); if okM and moving then return true end end
+          if type(h.isMoving) == "function" then
+            local okM, moving = pcall(h.isMoving, h)
+            if okM and moving then return true end
+          end
           local ax, ay = handlePosition(h, npc)
           if ax ~= bx or ay ~= by then return true end
           -- A successful API call is not necessarily a successful movement:
@@ -980,7 +983,7 @@ return function(ctx)
 
   local function agendaStep(world, npc, tx, ty)
     if npc.moving then return true end
-    return stepToward(world, npc, tx, ty)
+    return stepToward(world, npc, tx, ty, st)
   end
 
   local function agendaUpdate(world, dt, force)
@@ -1124,7 +1127,7 @@ return function(ctx)
         local wt = st.wanderTarget
         if wt and npc.cellX == wt[1] and npc.cellY == wt[2] then st.wanderTarget = nil end
         if (st.wait or 0) <= 0 and st.wanderTarget and not npc.moving then
-          stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2])
+          stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2], st)
         end
         goto continue
       end
@@ -1158,7 +1161,7 @@ return function(ctx)
             st.repath = 0
           end
         elseif st.wanderTarget then
-          if not npc.moving then stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2]) end
+          if not npc.moving then stepToward(world, npc, st.wanderTarget[1], st.wanderTarget[2], st) end
         end
         goto continue
       end
@@ -1225,7 +1228,7 @@ return function(ctx)
         -- back to its anchor rather than deleting the population.
         st.phase = "wander"; st.wait = 2.0; st.wanderTarget = nil; st.target = nil
       else
-        local moved = stepToward(world, npc, tx, ty)
+        local moved = stepToward(world, npc, tx, ty, st)
         if moved then
           st.repath = 0
           st.blockedTime = 0
