@@ -96,8 +96,54 @@ return function(ctx)
     else return "route" end
   end
 
+  -- Pokemon ambient NPCs may only fly if Flying-type and only teleport if
+  -- Psychic-type; otherwise doors / routes only.
+  local function isPokeAmbientNpc(npc)
+    if not npc then return false end
+    local d = npc.def or {}
+    return npc.kantoLifePokeAmbient == true or d.kantoLifePokeAmbient == true
+  end
+  local function pokeAmbientSpecies(npc)
+    local d = npc.def or {}
+    local s = d.species or d.pokemon or npc.species or npc.kantoLifeSpecies
+    if type(s) == "string" and s ~= "" then
+      return tostring(s):upper():gsub(" ", "_"):gsub("'", "")
+    end
+    return nil
+  end
+  local function speciesHasTypeLocal(species, want)
+    if not species or not want then return false end
+    want = tostring(want):upper()
+    local gd = gameData and gameData() or nil
+    local data = gd and gd.pokemon
+    local pdef = data and (data[species] or data[tostring(species):lower()])
+    if type(pdef) ~= "table" then return false end
+    local function match(t)
+      return t and tostring(t):upper():find(want, 1, true)
+    end
+    if match(pdef.type1) or match(pdef.type2) or match(pdef.type) then return true end
+    if type(pdef.types) == "table" then
+      for _, t in pairs(pdef.types) do if match(t) then return true end end
+    end
+    return false
+  end
+  local function restrictPokeTravelKind(npc, kind)
+    if not isPokeAmbientNpc(npc) then return kind end
+    if kind ~= "fly" and kind ~= "teleport" then return kind end
+    local species = pokeAmbientSpecies(npc)
+    if kind == "fly" then
+      if species and speciesHasTypeLocal(species, "FLYING") then return "fly" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    if kind == "teleport" then
+      if species and speciesHasTypeLocal(species, "PSYCHIC") then return "teleport" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
   local function pickTravelKind(npc, world)
-    return noFlyTele(pickTravelKindRaw(npc, world))
+    return restrictPokeTravelKind(npc, noFlyTele(pickTravelKindRaw(npc, world)))
   end
 
   -- Forward declarations are required because startDepartEffect is defined
@@ -334,17 +380,10 @@ return function(ctx)
     return pool[math.random(#pool)]
   end
 
-  -- Layered sprite swap used when the engine's NATIVE fly/teleport script drives
-  -- the motion: the draw/pose wrappers in KantoMain substitute the Pokemon
-  -- sprite for the NPC's own for the duration. Expires by timer (see
-  -- updateTravelAnimation); never mutates npc.sprite.
+  -- Gen1: no sprite substitution for fly/teleport (keep the NPC's own sprite).
+  -- Motion state still drives spin/lift in KantoMain; only the mon swap is disabled.
   local function beginTravelSwap(npc, species, mode, kind, ttl)
-    if not species then return end
-    local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-    npc.kantoLifeTravelSwap = {
-      species = species, mode = mode, kind = kind,
-      ttl = ttl or 1.6, born = now,
-    }
+    if npc then npc.kantoLifeTravelSwap = nil end
   end
 
   local function playTravelSound(name)
@@ -358,17 +397,15 @@ return function(ctx)
   -- Native engine script when exposed (GBC-faithful motion); the NPC is shown
   -- as a random Psychic-type Pokemon from the very first frame either way.
   npcTeleportOut = function(npc)
-    local species = pickTravelSpecies("teleport")
     playTravelSound("Teleport_Exit2")
-    beginTravelSwap(npc, species, "out", "teleport", 2.5)
-    -- Always set custom state so pose/draw substitute the psychic mon even when
-    -- the native script owns the camera motion (script success used to skip this).
+    beginTravelSwap(npc, nil, "out", "teleport", 2.5)
+    -- Spin/lift on the NPC's own sprite (no psychic mon substitution in Gen1).
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,
       mode = "out",
       origFacing = npc.facing or "down",
-      psySpecies = species,
+      psySpecies = nil,
     }
     npc.frozen = true
     if type(npc.scriptTeleport) == "function" then
@@ -377,17 +414,16 @@ return function(ctx)
     return true
   end
 
-  -- NPC Teleport IN animation (arrival): same Psychic-Pokemon swap, descending.
+  -- NPC Teleport IN animation (arrival): own-sprite spin/descend.
   npcTeleportIn = function(npc)
-    local species = pickTravelSpecies("teleport")
     playTravelSound("Teleport_Exit2")
-    beginTravelSwap(npc, species, "in", "teleport", 2.5)
+    beginTravelSwap(npc, nil, "in", "teleport", 2.5)
     npc.kantoLifeTeleport = {
       frame = 0,
       total = 90,
       mode = "in",
       origFacing = npc.facing or "down",
-      psySpecies = species,
+      psySpecies = nil,
     }
     npc.frozen = true
     if type(npc.scriptTeleport) == "function" then
@@ -396,20 +432,20 @@ return function(ctx)
     return true
   end
 
-  -- NPC Fly OUT animation: shown as a random Pokemon that can learn FLY.
+  -- NPC Fly OUT animation: lift/drift on the NPC's own sprite.
   npcFlyOut = function(npc)
-    local species = pickTravelSpecies("fly")
     playTravelSound("Fly")
-    beginTravelSwap(npc, species, "out", "fly", 2.5)
+    beginTravelSwap(npc, nil, "out", "fly", 2.5)
     npc.kantoLifeFly = {
       frame = 0,
       total = 90,
       mode = "out",
-      species = species,
+      species = nil,
       startPx = npc.px,
       startPy = npc.py,
     }
-    npc.kantoLifeFlyHidden = true
+    -- Keep the human/own sprite visible while rising (was hidden for mon swap).
+    npc.kantoLifeFlyHidden = nil
     npc.frozen = true
     if type(npc.scriptFly) == "function" then
       pcall(npc.scriptFly, npc, "from")
@@ -417,21 +453,19 @@ return function(ctx)
     return true
   end
 
-  -- NPC Fly IN animation (arrival): Fly-capable Pokemon descends and lands.
+  -- NPC Fly IN animation (arrival): own sprite descends and lands.
   npcFlyIn = function(npc)
-    local species = pickTravelSpecies("fly")
-    if not species then return false end
     playTravelSound("Fly")
-    beginTravelSwap(npc, species, "in", "fly", 2.2)
+    beginTravelSwap(npc, nil, "in", "fly", 2.2)
     npc.kantoLifeFly = {
-      species = species,
+      species = nil,
       frame = 0,
       total = 90,
       mode = "in",
       startPx = npc.px or (npc.cellX or 0) * 16,
       startPy = npc.py or (npc.cellY or 0) * 16,
     }
-    npc.kantoLifeFlyHidden = true
+    npc.kantoLifeFlyHidden = nil
     npc.frozen = true
     return true
   end

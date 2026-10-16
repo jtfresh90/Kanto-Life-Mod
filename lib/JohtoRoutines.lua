@@ -73,6 +73,52 @@ return function(ctx)
   -- pickTravelKind above its definition point.
   local hash
 
+  -- Pokemon ambient NPCs may only fly if Flying-type and only teleport if
+  -- Psychic-type; otherwise they use doors / routes / caves.
+  local function isPokeAmbientNpc(npc)
+    if not npc then return false end
+    local d = npc.def or {}
+    return npc.kantoLifePokeAmbient == true or d.kantoLifePokeAmbient == true
+  end
+  local function pokeAmbientSpecies(npc)
+    local d = npc.def or {}
+    local s = d.species or d.pokemon or npc.species or npc.kantoLifeSpecies
+    if type(s) == "string" and s ~= "" then
+      return tostring(s):upper():gsub(" ", "_"):gsub("'", "")
+    end
+    return nil
+  end
+  local function speciesHasType(species, want)
+    if not species or not want then return false end
+    want = tostring(want):upper()
+    local g = type(ctx.game) == "function" and ctx.game() or nil
+    local data = g and g.data and g.data.pokemon
+    local pdef = data and (data[species] or data[species:lower()])
+    if type(pdef) ~= "table" then return false end
+    local function match(t)
+      return t and tostring(t):upper():find(want, 1, true)
+    end
+    if match(pdef.type1) or match(pdef.type2) or match(pdef.type) then return true end
+    if type(pdef.types) == "table" then
+      for _, t in pairs(pdef.types) do if match(t) then return true end end
+    end
+    return false
+  end
+  local function restrictPokeTravelKind(npc, kind)
+    if not isPokeAmbientNpc(npc) then return kind end
+    if kind ~= "fly" and kind ~= "teleport" then return kind end
+    local species = pokeAmbientSpecies(npc)
+    if kind == "fly" then
+      if species and speciesHasType(species, "FLYING") then return "fly" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    if kind == "teleport" then
+      if species and speciesHasType(species, "PSYCHIC") then return "teleport" end
+      return (math.random(2) == 1) and "door" or "route"
+    end
+    return kind
+  end
+
   local function pickTravelKindRaw(npc, world)
     if not travelMethodsEnabled() then
       return (hash(npc) < 50) and "route" or "door"
@@ -96,56 +142,38 @@ return function(ctx)
   end
 
   local function pickTravelKind(npc, world)
-    return noFlyTele(pickTravelKindRaw(npc, world))
+    return restrictPokeTravelKind(npc, noFlyTele(pickTravelKindRaw(npc, world)))
   end
 
   -- Visual departure effect markers. Fail-open: if nothing reads them, the
   -- NPC still despawns.
+  -- Gen2: no sprite substitution — animate the NPC's own sprite (spin/lift).
   local function startDepartEffect(npc, method)
-    method = noFlyTele(method)
+    method = restrictPokeTravelKind(npc, noFlyTele(method))
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
     npc._johtoLifeDepartMethod = method
-    npc._johtoLifeDepartUntil = now + 1.2
-    -- Animation state for 2D draw + voxel pose. Species drives temporary
-    -- sprite substitution (random flying mon / psychic mon).
+    -- Hold despawn until the full travel anim finishes (~72 frames @ 60fps).
+    npc._johtoLifeDepartUntil = now + 1.35
     if method == "fly" or method == "teleport" then
-      local species
-      if method == "fly" then
-        local flyers = {
-          "PIDGEY","PIDGEOTTO","PIDGEOT","SPEAROW","FEAROW","FARFETCHD","DODUO","DODRIO",
-          "CHARIZARD","AERODACTYL","DRAGONITE","BUTTERFREE","ZUBAT","GOLBAT","CROBAT",
-          "VENOMOTH","SCYTHER","GYARADOS","HOOTHOOT","NOCTOWL","NATU","XATU","SKARMORY",
-          "MURKROW","GLIGAR","MANTINE","TOGETIC","ARTICUNO","ZAPDOS","MOLTRES","LUGIA","HO_OH",
-        }
-        species = flyers[math.random(#flyers)]
-      else
-        -- Full Gen1+Gen2 Psychic-type pool for teleport.
-        local psychics = {
-          "ABRA","KADABRA","ALAKAZAM",
-          "SLOWPOKE","SLOWBRO","SLOWKING",
-          "DROWZEE","HYPNO",
-          "EXEGGCUTE","EXEGGUTOR",
-          "STARYU","STARMIE",
-          "MR_MIME","JYNX","SMOOCHUM",
-          "ESPEON","UNOWN","WOBBUFFET","WYNAUT",
-          "NATU","XATU","GIRAFARIG",
-          "MEWTWO","MEW","CELEBI",
-        }
-        species = psychics[math.random(#psychics)]
-      end
+      local startFacing = npc.facing or npc.direction or "down"
       npc._johtoLifeTravelAnim = {
-        kind = method, frame = 0, total = 72,
-        species = species,
+        kind = method, frame = 0, total = 90,  -- longer so spin is readable
+        -- species intentionally omitted: Gen2 keeps the NPC's own sprite.
         basePx = tonumber(npc.px) or ((tonumber(npc.cellX) or 0) * 16),
         basePy = tonumber(npc.py) or ((tonumber(npc.cellY) or 0) * 16),
-        facing = npc.facing or "down",
+        facing = startFacing,
+        spinFacing = startFacing,
       }
-      npc._johtoLifeDepartSpecies = species
+      if method == "teleport" then
+        npc.facing = startFacing
+        npc.direction = startFacing
+      end
+      npc._johtoLifeDepartSpecies = nil
       npc._johtoLifeDepartFrame = 0
     end
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
-    npc._kantoLifeCollisionBubbleUntil = now + 1.2
+    npc._kantoLifeCollisionBubbleUntil = now + 1.35
     if method == "teleport" and type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "from")
     end
@@ -1083,9 +1111,21 @@ return function(ctx)
       local travelAnim = npc._johtoLifeTravelAnim
       if travelAnim then
         travelAnim.frame = (tonumber(travelAnim.frame) or 0) + math.max(1, math.floor((tonumber(dt) or 1/60) * 60 + 0.5))
+        -- Drive facing every tick so spin is visible even if pose/draw lags.
+        if travelAnim.kind == "teleport" then
+          local spin = ({"down", "left", "up", "right"})[(math.floor((travelAnim.frame or 0) / 2) % 4) + 1]
+          travelAnim.spinFacing = spin
+          npc.facing = spin
+          npc.direction = spin
+          if npc.def then npc.def.facing = spin end
+          pcall(function()
+            if type(npc.face) == "function" then npc:face(spin) end
+          end)
+        end
         if travelAnim.frame >= (travelAnim.total or 72) then
           npc._johtoLifeTravelAnim = nil
           npc.facing = travelAnim.facing or npc.facing
+          npc.direction = npc.facing
         end
       end
 
@@ -1121,7 +1161,7 @@ return function(ctx)
           st.travelKind = kind
           if kind == "fly" or kind == "teleport" or kind == "surf" then
             st.phase = "special_depart"
-            st.wait = 1.2
+            st.wait = 1.6
             startDepartEffect(npc, kind)
           else
             st.phase = "outbound"

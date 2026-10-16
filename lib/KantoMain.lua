@@ -660,6 +660,10 @@ return function(mod)
   -- Species whose cached sprite is that species' OWN art (not a borrowed
   -- ambient-Pokemon sprite). Lets callers ask for an exact match (strict).
   local pokeSpriteExact = {}
+  _G._kantoLifeClearSoftCaches = function()
+    for k in pairs(pokeSpriteCache) do pokeSpriteCache[k] = nil end
+    for k in pairs(pokeSpriteExact) do pokeSpriteExact[k] = nil end
+  end
   local function getPokeSpriteObject(species, strict)
     if not species then return nil end
     species = tostring(species):upper():gsub(" ", "_"):gsub("'", "")
@@ -5023,44 +5027,25 @@ function putToSleep(npc)
     if NPCMod and type(NPCMod.draw) == "function" then
       local baseNpcDraw = NPCMod.draw
       NPCMod.draw = function(self, camX, camY)
-        -- Teleport: draw random psychic mon with spin + rise (2D path).
+        -- Teleport: spin + rise on the NPC's own sprite (no mon substitution in Gen1).
         local tp = self.kantoLifeTeleport
         if tp and tp.frame ~= nil then
-          local mon = nil
-          pcall(function() mon = getPokeSpriteObject(tp.psySpecies) end)
-          if not mon then
-            -- Random among the fallbacks that actually resolve (not
-            -- first-success): a systematic resolution failure must not
-            -- collapse every teleport onto a single species.
-            local fbOk = {}
-            for _, fb in ipairs({"ABRA","KADABRA","ALAKAZAM","DROWZEE","HYPNO","MR_MIME","JYNX","SLOWBRO","STARMIE","MEW","MEWTWO"}) do
-              local okF, m = pcall(getPokeSpriteObject, fb)
-              if okF and m then fbOk[#fbOk + 1] = m end
-            end
-            if #fbOk > 0 then mon = fbOk[math.random(#fbOk)] end
-          end
           local eff = travelEffFrame(tp)
           local rise = 0
           if eff > 16 then rise = math.min(120, (eff - 16) * 4) end
           local spin = ({"down","left","up","right"})[(math.floor((tonumber(tp.frame) or 0) / 2) % 4) + 1]
-          local px = tonumber(self.px) or ((tonumber(self.cellX) or 0) * 16)
-          local py = (tonumber(self.py) or ((tonumber(self.cellY) or 0) * 16)) - rise
-          if mon and type(mon.draw) == "function" then
-            pcall(function() mon:draw(px, py, camX or 0, camY or 0, spin, 0, false, nil, nil, nil) end)
-          else
-            local origPy, origFacing, origSprite = self.py, self.facing, self.sprite
-            if type(self.py) == "number" then self.py = self.py - rise end
-            self.facing = spin
-            pcall(baseNpcDraw, self, camX, camY)
-            self.py, self.facing, self.sprite = origPy, origFacing, origSprite
-          end
+          local origPy, origFacing = self.py, self.facing
+          if type(self.py) == "number" then self.py = self.py - rise end
+          self.facing = spin
+          pcall(baseNpcDraw, self, camX, camY)
+          self.py, self.facing = origPy, origFacing
           return
         end
-        -- Fly: replace the trainer with a Fly-capable Pokémon in 2D.
-        if self.kantoLifeFlyHidden and self.kantoLifeFly then
+        -- Fly: lift/drift on the NPC's own sprite (no mon substitution in Gen1).
+        if self.kantoLifeFly then
           local fl = self.kantoLifeFly
           local bird = nil
-          pcall(function() bird = getPokeSpriteObject(fl.species) end)
+          -- bird intentionally left nil — own sprite only.
           local total = tonumber(fl.total) or 90
           local progress = math.max(0, math.min(1, (tonumber(fl.frame) or 0) / total))
           -- "in" plays the same arc in reverse: it descends and lands.
@@ -7826,48 +7811,20 @@ local function nightlifeTick(world, dt)
         if self then
           local tp = self.kantoLifeTeleport
           if tp and tp.frame ~= nil then
-            -- Teleport: spin + rise (or descend, for arrivals), showing the
-            -- selected Psychic-type Pokemon. Falls back to the NPC's normal
-            -- sprite only if that species has no art.
+            -- Teleport: spin + rise on the NPC's own sprite (no mon swap in Gen1).
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
-            local monSprite = nil
-            pcall(function() monSprite = getPokeSpriteObject(tp.psySpecies) end)
-            if not monSprite then
-              -- Random among resolving fallbacks (see 2D path): never collapse
-              -- onto one species when art is missing.
-              local fbOk = {}
-              for _, fb in ipairs({"ABRA", "KADABRA", "ALAKAZAM", "MEW", "MEWTWO", "HYPNO"}) do
-                local okF, m = pcall(getPokeSpriteObject, fb)
-                if okF and m then fbOk[#fbOk + 1] = m end
-              end
-              if #fbOk > 0 then monSprite = fbOk[math.random(#fbOk)] end
-            end
             local spinOrder = {"down", "left", "up", "right"}
             local spinFacing = spinOrder[(math.floor((tonumber(tp.frame) or 0) / 2) % 4) + 1]
-            -- GBC: spin in place first, then rise (mirror engine spinRise)
             local eff = travelEffFrame(tp)
             local rise = 0
             if eff > 20 then rise = (eff - 20) * 5 end
             if rise > 100 then rise = 100 end
-            return monSprite or sprite, px, py - rise, spinFacing, 0, false, false
+            return sprite, px, py - rise, spinFacing, 0, false, false
           end
           local fl = self.kantoLifeFly
           if fl and fl.frame ~= nil then
-            -- Use the selected Fly-capable Pokémon, not the engine's generic
-            -- bird icon. Arrivals play the arc in reverse (descend and land).
+            -- Fly: lift/drift on the NPC's own sprite (no mon swap in Gen1).
             local sprite, px, py, facing, phase, flip = basePose(self, ...)
-            local bird = nil
-            pcall(function() bird = getPokeSpriteObject(fl.species) end)
-            if not bird then
-              -- Random among resolving fallbacks (see teleport): never collapse
-              -- onto one species when art is missing.
-              local fbOk = {}
-              for _, fb in ipairs({"PIDGEOT", "FEAROW", "DODRIO", "AERODACTYL", "CHARIZARD"}) do
-                local okF, b = pcall(getPokeSpriteObject, fb)
-                if okF and b then fbOk[#fbOk + 1] = b end
-              end
-              if #fbOk > 0 then bird = fbOk[math.random(#fbOk)] end
-            end
             local total = fl.total or 90
             local progress = fl.frame / total
             if progress > 1 then progress = 1 end
@@ -7876,20 +7833,9 @@ local function nightlifeTick(world, dt)
             local lift = arc * 120
             local dx = arc * 80
             local flapPhase = math.floor(fl.frame / 3) % 2
-            return bird or sprite, px + dx, py - lift, facing, flapPhase, false, false
+            return sprite, px + dx, py - lift, facing, flapPhase, false, false
           end
-          -- Native engine fly/teleport drives the motion (basePose already
-          -- carries it); only substitute the Pokémon sprite, from frame 0.
-          local sw = activeTravelSwap(self)
-          if sw then
-            local mon = nil
-            pcall(function() mon = getPokeSpriteObject(sw.species) end)
-            if mon then
-              local r = { basePose(self, ...) }
-              r[1] = mon
-              return (table.unpack or unpack)(r, 1, math.max(#r, 7))
-            end
-          end
+          -- Travel swap intentionally disabled in Gen1 (own sprite only).
         end
         if self and self.nightlifeSleeping then
           if isViridianSleepyOldMan(self) then
