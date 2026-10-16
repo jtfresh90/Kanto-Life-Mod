@@ -95,16 +95,6 @@ return function(ctx)
     npc.kantoLifeSleepAngle = nil
     npc.kantoLifeSleepSide = nil
     if npc.def then npc.def.kantoLifeSleeping = nil end
-    -- EXPERIMENTAL: wake-up stretch — NPCs yawn/stretch when they wake up.
-    pcall(function()
-      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-      local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
-      local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-      if bubbleUntil <= now then
-        npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
-        npc._kantoLifeCollisionBubbleUntil = now + 2.0
-      end
-    end)
     sleeping[npc] = nil
   end
 
@@ -604,8 +594,6 @@ return function(ctx)
   function api:wakeAll()
     for i = #sleepList, 1, -1 do clearOne(sleepList[i]); sleepList[i] = nil end
   end
-  -- EXPERIMENTAL: lets other modules (e.g. ambient chatter) skip sleepers.
-  function api.isSleeping(npc) return npc ~= nil and sleeping[npc] ~= nil end
   function api:update()
     installDrawWrapper()
     installVoxelSleepProps()

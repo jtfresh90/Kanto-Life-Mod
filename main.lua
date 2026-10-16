@@ -41,16 +41,6 @@ return function(mod)
     end
   end)
 
-  -- Install hygiene: clear the mod's persisted data (mod.save bucket +
-  -- mod.cache files) on fresh install, update, or reinstall-after-removal,
-  -- before any generation code reads it. The engine already clears the
-  -- mod's files on update/remove; this covers the data the engine leaves.
-  -- Fail-open: hygiene must never break mod load.
-  pcall(function()
-    local hygiene = loadLocal("lib/InstallHygiene.lua")
-    hygiene(mod)
-  end)
-
   local gen
   local okGV, GV = pcall(require, "src.core.GameVersion")
   if okGV and GV and type(GV.generation) == "function" then

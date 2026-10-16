@@ -9,181 +9,6 @@ return function(mod)
     if not ok then return nil, value end
     return value
   end
-  -- Cross-map traveler pool: when an NPC exits through a door/warp to a
-  -- DIFFERENT map, they are recorded here instead of being replaced on the
-  -- same map. When the player enters the destination map, the traveler
-  -- spawns at the entrance connecting from their origin map.
-  -- Combinatorial dialogue generator: unique lines via template+slot
-  -- expansion with per-NPC history (see lib/DialogueGen.lua).
-  local DialogueGen = loadBundled("lib/DialogueGen.lua")
-  -- travelers[destMapId] = { {sprite, name, gender, agenda, fromMap, timestamp}, ... }
-  local travelers = {}
-  local TRAVELER_EXPIRY = 600  -- seconds; discard if player never visits
-
-  local function pruneTravelers()
-    local now = os.time()
-    for destMap, list in pairs(travelers) do
-      local kept = {}
-      for _, t in ipairs(list) do
-        if now - (t.timestamp or 0) < TRAVELER_EXPIRY then
-          kept[#kept + 1] = t
-        end
-      end
-      if #kept > 0 then travelers[destMap] = kept
-      else travelers[destMap] = nil end
-    end
-  end
-
-  -- Called by KantoRoutines when an NPC reaches a door/exit destination.
-  -- If the door leads to a different map, record the NPC as a traveler
-  -- (to spawn when the player enters that map) and remove them here.
-  -- Returns true if handled (no same-map replacement), false otherwise.
-  local function onRoutineExit(npc, world, old)
-    -- old = {x, y, kind, destMap, destX, destY, "warp", warpDef}
-    local destMap = old and old[4]
-    destMap = destMap and tostring(destMap) or ""
-    local currentMap = world and world.map and tostring(world.map.id or "") or ""
-    if destMap == "" or destMap == currentMap then
-      return false  -- same map or unknown; let normal replacement handle it
-    end
-    -- Cross-map exit: record traveler
-    local d = npc and npc.def or {}
-    travelers[destMap] = travelers[destMap] or {}
-    table.insert(travelers[destMap], {
-      sprite = d.sprite,
-      name = d.kantoLifeDisplayName or d.name,
-      gender = d.kantoLifeGender,
-      agenda = npc and npc._kantoLifeAgenda,
-      fromMap = currentMap,
-      timestamp = os.time(),
-    })
-    pruneTravelers()
-    -- EXPERIMENTAL: farewell waves — nearby NPCs wave goodbye to the
-    -- departing traveler.
-    pcall(function()
-      if not npc then return end
-      local nx, ny = tonumber(npc.cellX), tonumber(npc.cellY)
-      if not nx or not ny then return end
-      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-      local farewells = { "Bye!", "See ya!", "Safe travels!", "Take care!", "Bye-bye!" }
-      local waved = 0
-      for _, other in ipairs(world.npcs or {}) do
-        if other ~= npc and waved < 3 then  -- max 3 wavers
-          local d2 = other.def or {}
-          if d2.kantoLifeAmbient and not other.nightlifeSleeping and not other.moving then
-            local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
-            if ox and oy then
-              local dist = math.abs(ox - nx) + math.abs(oy - ny)
-              if dist <= 3 and dist > 0 then
-                local bubbleUntil = tonumber(other._kantoLifeCollisionBubbleUntil) or 0
-                if bubbleUntil <= now then
-                  other._kantoLifeCollisionBubbleText = farewells[math.random(1, #farewells)]
-                  other._kantoLifeCollisionBubbleUntil = now + 2.0
-                  waved = waved + 1
-                end
-              end
-            end
-          end
-        end
-      end
-    end)
-    -- Remove the NPC from the current map (they went through the door)
-    if npc and npc.id and world and type(world.removeNpc) == "function" then
-      pcall(world.removeNpc, world, npc.id)
-    end
-    return true
-  end
-
-  -- Spawn pending travelers when the player enters their destination map.
-  -- Each traveler appears at the entrance (door/warp) that connects from
-  -- their origin map, creating the paired exit/entry effect.
-  local function spawnTravelers(mapId, map)
-    local pending = travelers[tostring(mapId or "")]
-    if not pending or #pending == 0 then return end
-    pruneTravelers()
-    pending = travelers[tostring(mapId or "")]
-    if not pending or #pending == 0 then return end
-
-    local ow = mod.world and mod.world:overworld()
-    if not ow or not map then return end
-
-    -- Build a lookup of entrances: which warp on THIS map leads to each
-    -- connected map. The traveler came from `fromMap`, so they appear at
-    -- the door that connects this map to fromMap.
-    local entrances = {}  -- fromMapId -> {x, y}
-    for _, w in ipairs((map.def and map.def.warps) or {}) do
-      if w.x ~= nil and w.y ~= nil then
-        local dest = w.destMap or w.map
-        if dest then
-          dest = tostring(dest)
-          if entrances[dest] == nil then
-            entrances[dest] = { tonumber(w.x), tonumber(w.y) }
-          end
-        end
-      end
-    end
-
-    local spawned = 0
-    local remaining = {}
-    for _, t in ipairs(pending) do
-      local entrance = entrances[t.fromMap]
-      if entrance then
-        -- Spawn adjacent to the entrance (not on top of it)
-        local x, y = entrance[1], entrance[2] + 1
-        local name = "KANTO_TRAVELER_" .. tostring(mapId) .. "_" .. tostring(spawned)
-        -- Use a simple counter for unique names
-        local ok, id = pcall(function()
-          return mod.world:spawnNpc(tostring(mapId), {
-            name = name,
-            sprite = t.sprite,
-            x = x, y = y,
-            text = "",
-            movement = "WALK",
-            range = "ANY_DIR",
-            radius = { x = 8, y = 8 },
-            kantoLifeAmbient = true,
-            kantoLifeDisplayName = t.name,
-            kantoLifeGender = t.gender,
-          })
-        end)
-        if ok and id then
-          spawned = spawned + 1
-          -- Tag the NPC with the traveler's agenda if available
-          -- EXPERIMENTAL: arrival greeting — travelers announce themselves
-          -- with a brief text bubble when they appear at the entrance.
-          pcall(function()
-            for _, n in ipairs(ow.npcs or {}) do
-              if n.id == id then
-                n._kantoLifeAgenda = t.agenda
-                local greetings = {
-                  "Phew, made it!",
-                  "Here I am!",
-                  "What a walk!",
-                  "Finally here!",
-                  "Hello there!",
-                }
-                local g = greetings[math.random(1, #greetings)]
-                local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-                n._kantoLifeCollisionBubbleText = g
-                n._kantoLifeCollisionBubbleUntil = now + 2.5
-                break
-              end
-            end
-          end)
-        else
-          remaining[#remaining + 1] = t
-        end
-      else
-        -- No entrance found from this origin; keep for later (maybe player
-        -- entered via a different route, or the map data is incomplete)
-        remaining[#remaining + 1] = t
-      end
-    end
-
-    if #remaining > 0 then travelers[tostring(mapId)] = remaining
-    else travelers[tostring(mapId)] = nil end
-  end
-
   -- Prefer mod.game (loader facade on 0.1.8x+). Fall back to mod.world.game
   -- for older engines where only WorldAPI carried the live reference.
   local function resolveGame()
@@ -339,12 +164,9 @@ return function(mod)
     { key = "common_courtesy", type = "toggle", label = "DOOR KNOCKING", default = true },
     { key = "npc_routines", type = "toggle", label = "NPC ROUTINES", default = true },
     { key = "npc_travel_pct", type = "number", label = "NPC TRAVEL %",
-      default = 30, min = 0, max = 100, step = 10 },
-    { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
+       default = 30, min = 0, max = 100, step = 10 },
+     { key = "npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
-    { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
-      choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
-    -- EXPERIMENTAL: Lifelike feature toggles
     { key = "exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
     { key = "exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
     { key = "exp_moods", type = "toggle", label = "NPC MOODS", default = true },
@@ -353,6 +175,8 @@ return function(mod)
     { key = "exp_player", type = "toggle", label = "PLAYER REACTIONS", default = true },
     { key = "exp_companions", type = "toggle", label = "COMPANIONS", default = true },
     { key = "exp_ambience", type = "toggle", label = "AMBIENT LIFE", default = true },
+    { key = "npc_agenda", type = "choice", label = "NPC AGENDA",
+      choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } }, default = 0 },
     { key = "debug_log", type = "toggle", label = "VIEW DEBUG LOG", default = false },
   })
 
@@ -2108,8 +1932,6 @@ return function(mod)
     -- Fail-open: a spawn/sync error must never freeze the overworld or wipe
     -- vanilla NPCs (reported with Dramatic Shape + Kanto in Motion + Nuzlocke).
     pcall(function() syncAmbientToTarget(mapId, enteredMap) end)
-    -- Spawn cross-map travelers who exited to this map from another map
-    pcall(spawnTravelers, mapId, enteredMap)
   end)
 
   mod.events:on("mod.options_changed", function(payload)
@@ -2622,6 +2444,62 @@ return function(mod)
           end,
         },
         {
+          label = "LIFELIKE GREETINGS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_greetings") ~= false,
+          right = opt("exp_greetings") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_greetings", v and true or false) end,
+        },
+        {
+          label = "NPC CHATTER",
+          stepper = true, kind = "toggle",
+          current = opt("exp_chatter") ~= false,
+          right = opt("exp_chatter") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_chatter", v and true or false) end,
+        },
+        {
+          label = "NPC MOODS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_moods") ~= false,
+          right = opt("exp_moods") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_moods", v and true or false) end,
+        },
+        {
+          label = "IDLE BEHAVIORS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_idle") ~= false,
+          right = opt("exp_idle") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_idle", v and true or false) end,
+        },
+        {
+          label = "TIME AWARENESS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_timeaware") ~= false,
+          right = opt("exp_timeaware") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_timeaware", v and true or false) end,
+        },
+        {
+          label = "PLAYER REACTIONS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_player") ~= false,
+          right = opt("exp_player") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_player", v and true or false) end,
+        },
+        {
+          label = "COMPANIONS",
+          stepper = true, kind = "toggle",
+          current = opt("exp_companions") ~= false,
+          right = opt("exp_companions") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_companions", v and true or false) end,
+        },
+        {
+          label = "AMBIENT LIFE",
+          stepper = true, kind = "toggle",
+          current = opt("exp_ambience") ~= false,
+          right = opt("exp_ambience") ~= false and "ON" or "OFF",
+          apply = function(v) setOpt("exp_ambience", v and true or false) end,
+        },
+        {
           label = "CANCEL",
           onSelect = function() end,
         },
@@ -3007,7 +2885,7 @@ local nm = storyDisplayName(talker)
       return true
     end
     if d.item or d.pokemon then return true end
-    -- Never sleep: boat boarders (S.S. Anne, etc.), story NPCs (1.4.26)
+    -- Never sleep: boat boarders (S.S. Anne, etc.), story NPCs
     if sprite:find("SAILOR", 1, true) or name:find("SAILOR", 1, true) then return true end
     if sprite:find("BOAT", 1, true) or name:find("BOAT", 1, true) then return true end
     if text:find("S.S.", 1, true) or text:find("SS ANNE", 1, true) then return true end
@@ -3091,7 +2969,24 @@ local nm = storyDisplayName(talker)
   -- =====================================================================
   -- scheduleTick is the single owner of Kanto Life NPC routines/agenda.
   -- The older helper is not started so it cannot fight the self-driven API.
-  local kantoRoutines = nil
+  local kantoLifelike = nil
+  pcall(function()
+    local factory = loadBundled("lib/LifelikeBehaviors.lua")
+    if type(factory) == "function" then
+      kantoLifelike = factory({
+        opt = function(k)
+          local v = opt(k)
+          return v
+        end,
+        isNight = function()
+          local g = G and G() or game
+          return g and g.isNight == true
+        end,
+      })
+    end
+  end)
+
+local kantoRoutines = nil
   do
     local KantoRoutines, routineErr = loadBundled("lib/KantoRoutines.lua")
     if type(KantoRoutines) ~= "function" then mod.log:error("KantoRoutines load failed: %s", tostring(routineErr)) end
@@ -3103,8 +2998,7 @@ local nm = storyDisplayName(talker)
         isTown = isTown,
         isRoute = isRoute,
         resolveDestMap = resolveDestMap,
-        onRoutineExit = onRoutineExit,
-        getOption = function(k) return opt(k) end,
+         getOption = function(k) return opt(k) end,
         -- True when this exact species has its own overworld/front art, so the
         -- fly/teleport picker never selects a species that would silently fall
         -- back to the NPC's trainer sprite.
@@ -3695,50 +3589,6 @@ local nm = storyDisplayName(talker)
 
   local function scheduleTick(world, dt)
     if not world or not world.map or not world.player or not world.npcs then return end
-    -- EXPERIMENTAL: double-take — when the player enters a new map, nearby
-    -- NPCs are surprised to see you. If it's a map you've visited before,
-    -- they say "Welcome back!" instead.
-    pcall(function()
-      local mapId = world.map and tostring(world.map.id or "") or ""
-      local lastMap = world._kantoLifeLastMapId
-      if lastMap and lastMap ~= mapId then
-        -- Map changed! Check if we've visited this map before.
-        world._kantoLifeVisitedMaps = world._kantoLifeVisitedMaps or {}
-        local isRevisit = world._kantoLifeVisitedMaps[mapId]
-        world._kantoLifeVisitedMaps[mapId] = true
-        -- Nearby NPCs react.
-        local player = world.player
-        local px, py = player and tonumber(player.cellX), player and tonumber(player.cellY)
-        if px and py then
-          local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-          local reacted = 0
-          for _, n in ipairs(world.npcs or {}) do
-            if reacted >= 3 then break end
-            local d = n.def or {}
-            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
-              local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-              if nx and ny then
-                local dist = math.abs(nx - px) + math.abs(ny - py)
-                if dist <= 4 and dist > 0 then
-                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                  if bubbleUntil <= now then
-                    if isRevisit then
-                      local welcomes = { "Welcome back!", "You're back!", "Hey again!", "WB!" }
-                      n._kantoLifeCollisionBubbleText = welcomes[math.random(1, #welcomes)]
-                    else
-                      n._kantoLifeCollisionBubbleText = "!"
-                    end
-                    n._kantoLifeCollisionBubbleUntil = now + 1.5
-                    reacted = reacted + 1
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-      world._kantoLifeLastMapId = mapId
-    end)
     -- KantoRoutines is the sole owner of Kanto Life spawned-NPC travel and
     -- agenda. Default FireRed map NPCs are intentionally never handed to a
     -- routine scheduler here.
@@ -3754,577 +3604,13 @@ local nm = storyDisplayName(talker)
       local ok, err = pcall(function() kantoRoutines.update(world, dt or 0, false) end)
       if not ok then mod.log:error("Kanto Life routines update: %s", tostring(err)) end
     end
-    -- EXPERIMENTAL: proximity greetings — ambient NPCs acknowledge the player
-    -- with a brief bubble when walked past (not sleeping, cooldown per NPC).
-    -- EXPERIMENTAL: idle behaviors — idle NPCs occasionally look around or
-    -- show a thought bubble, so they feel alive when not moving.
+ 
     pcall(function()
-      local player = world.player
-      if not player then return end
-      local px, py = tonumber(player.cellX), tonumber(player.cellY)
-      if not px or not py then return end
-      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-      -- EXPERIMENTAL: time-of-day awareness — greetings shift with the clock.
-      local hour = tonumber(os.date("%H")) or 12
-      local timeOfDay
-      if hour >= 5 and hour < 12 then timeOfDay = "morning"
-      elseif hour >= 12 and hour < 18 then timeOfDay = "afternoon"
-      elseif hour >= 18 and hour < 22 then timeOfDay = "evening"
-      else timeOfDay = "night" end
-      -- EXPERIMENTAL: time transition comments — when the time-of-day changes,
-      -- nearby NPCs comment on it.
-      local lastTimeOfDay = world._kantoLifeLastTimeOfDay
-      if lastTimeOfDay and lastTimeOfDay ~= timeOfDay then
-        local transitionComments = {
-          morning = { "Morning already?", "Rise and shine!", "A new day!" },
-          afternoon = { "Afternoon already!", "Time flies!", "It's midday!" },
-          evening = { "Getting dark...", "Evening already?", "Sun's setting!" },
-          night = { "It's night...", "So late...", "Time for bed soon." },
-        }
-        local comments = transitionComments[timeOfDay] or {}
-        if #comments > 0 and player then
-          local px2, py2 = tonumber(player.cellX), tonumber(player.cellY)
-          if px2 and py2 then
-            local commented = 0
-            for _, n in ipairs(world.npcs or {}) do
-              if commented >= 2 then break end
-              local d = n.def or {}
-              if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
-                local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-                if nx and ny then
-                  local dist = math.abs(nx - px2) + math.abs(ny - py2)
-                  if dist <= 5 and dist > 0 then
-                    local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                    if bubbleUntil <= now then
-                      n._kantoLifeCollisionBubbleText = comments[math.random(1, #comments)]
-                      n._kantoLifeCollisionBubbleUntil = now + 2.0
-                      commented = commented + 1
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
+      if kantoLifelike and type(kantoLifelike.tick) == "function" then
+        kantoLifelike.tick(world, world.npcs or {}, world.player, dt)
       end
-      world._kantoLifeLastTimeOfDay = timeOfDay
-      local greetingsByTime = {
-        morning = { "Morning!", "Good morning!", "Hey!", "Hi there!", "Rise and shine!" },
-        afternoon = { "Afternoon!", "Hey there!", "Hi!", "Yo!", "How's it going?" },
-        evening = { "Evening!", "Hey!", "Hi there!", "Good evening!", "Yo!" },
-        night = { "Oh, hi.", "Evening...", "*yawn* Hey.", "Hey...", "Still up?" },
-      }
-      local greetings = greetingsByTime[timeOfDay] or greetingsByTime.afternoon
-      -- EXPERIMENTAL: NPC moods — each NPC has a mood (happy, neutral, grumpy,
-      -- sleepy, excited) that colors their greetings. Reshuffled every 30-60 min.
-      local moodGreetings = {
-        happy = { "Hey!", "Hi there!", "Great day!", "Hello!", "Howdy!" },
-        neutral = { "Hey.", "Hi.", "Hello.", "Yo." },
-        grumpy = { "...", "Hmph.", "What?", "Yeah, hi." },
-        sleepy = { "*yawn* Hey.", "Oh, hi...", "Mmm...", "Hey..." },
-        excited = { "Hey hey!", "Wow, hi!", "Hello!!", "Hiya!" },
-      }
-      local moodList = { "happy", "neutral", "neutral", "grumpy", "sleepy", "excited" }
-      local function getNpcMood(npc)
-        local moodSetAt = tonumber(npc._kantoLifeMoodSetAt) or 0
-        if now - moodSetAt > 1800 + math.random() * 1800 then  -- 30-60 min
-          npc._kantoLifeMood = moodList[math.random(1, #moodList)]
-          npc._kantoLifeMoodSetAt = now
-        end
-        return npc._kantoLifeMood or "neutral"
-      end
-      local idleThoughtsByTime = {
-        morning = { "...", "Hmm.", "*stretch*", "What a day!", "La la..." },
-        afternoon = { "...", "Hmm.", "La la...", "Nice weather.", "*stretch*" },
-        evening = { "...", "Hmm.", "La la...", "What a day.", "*sigh*" },
-        night = { "...", "*yawn*", "Hmm.", "*yawn*", "So sleepy..." },
-      }
-      local idleThoughts = idleThoughtsByTime[timeOfDay] or idleThoughtsByTime.afternoon
-      local dirs = { "up", "down", "left", "right" }
-      -- EXPERIMENTAL: track player movement — stillness (for face-the-player)
-      -- and running (for startled reactions).
-      local playerStill = false
-      local playerRunning = false
-      local playerIdleLong = false  -- EXPERIMENTAL: player still for 30+s
-      local lastPX = tonumber(world._kantoLifePlayerLastX)
-      local lastPY = tonumber(world._kantoLifePlayerLastY)
-      if lastPX == px and lastPY == py then
-        playerStill = true
-        -- Track how long player has been still
-        local stillSince = tonumber(world._kantoLifePlayerStillSince) or now
-        if now - stillSince > 30 then playerIdleLong = true end
-      else
-        world._kantoLifePlayerStillSince = now
-        if lastPX and lastPY then
-          local moved = math.abs(px - lastPX) + math.abs(py - lastPY)
-          if moved >= 2 then playerRunning = true end
-        end
-        world._kantoLifePlayerLastX = px
-        world._kantoLifePlayerLastY = py
-      end
-      for _, n in ipairs(world.npcs or {}) do
-        local d = n.def or {}
-        if d.kantoLifeAmbient and not n.nightlifeSleeping then
-          -- EXPERIMENTAL: face the player — idle NPCs turn to look at you
-          -- when you stand still nearby.
-          if playerStill and not n.moving then
-            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
-            if nx0 and ny0 then
-              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
-              if pdist <= 2 and pdist > 0 then
-                local dx, dy = px - nx0, py - ny0
-                local face
-                if math.abs(dx) >= math.abs(dy) then
-                  face = dx > 0 and "right" or "left"
-                else
-                  face = dy > 0 and "down" or "up"
-                end
-                if face and n.facing ~= face then n.facing = face end
-              end
-            end
-          end
-          -- EXPERIMENTAL: idle curiosity — if you've stood still for 30+s,
-          -- nearby NPCs notice and show "?" (5-min cooldown per NPC).
-          if playerIdleLong and not n.moving then
-            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
-            if nx0 and ny0 then
-              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
-              if pdist <= 4 and pdist > 0 then
-                local lastCurious = tonumber(n._kantoLifeLastCurious) or 0
-                if now - lastCurious > 300 then  -- 5-min cooldown
-                  n._kantoLifeLastCurious = now
-                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                  if bubbleUntil <= now then
-                    n._kantoLifeCollisionBubbleText = "?"
-                    n._kantoLifeCollisionBubbleUntil = now + 1.5
-                  end
-                end
-              end
-            end
-          end
-          -- EXPERIMENTAL: NPCs adore Pokémon — humans near Pokémon NPCs show
-          -- hearts and look at them (2-min cooldown per NPC).
-          if not n.moving and not isPokemonLike(n) then
-            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
-            if nx0 and ny0 then
-              local lastAdore = tonumber(n._kantoLifeLastAdore) or 0
-              if now - lastAdore > 120 then
-                for _, other in ipairs(world.npcs or {}) do
-                  if other ~= n and isPokemonLike(other) and not other.moving then
-                    local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
-                    if ox and oy then
-                      local odist = math.abs(ox - nx0) + math.abs(oy - ny0)
-                      if odist <= 3 and odist > 0 then
-                        n._kantoLifeLastAdore = now
-                        -- Face the Pokémon
-                        local dx, dy = ox - nx0, oy - ny0
-                        if math.abs(dx) >= math.abs(dy) then
-                          n.facing = dx > 0 and "right" or "left"
-                        else
-                          n.facing = dy > 0 and "down" or "up"
-                        end
-                        -- Show adoration
-                        local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                        if bubbleUntil <= now then
-                          local adores = { "♥", "Cute!", "Aww!", "So cute!", "♥♥" }
-                          n._kantoLifeCollisionBubbleText = adores[math.random(1, #adores)]
-                          n._kantoLifeCollisionBubbleUntil = now + 1.5
-                        end
-                        break
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-          -- EXPERIMENTAL: companion bond — NPCs stay near their companion,
-          -- facing them when idle nearby.
-          local companion = n._kantoLifeCompanion
-          local companionUntil = tonumber(n._kantoLifeCompanionUntil) or 0
-          if companion and now < companionUntil and not n.moving then
-            local cx, cy = tonumber(companion.cellX), tonumber(companion.cellY)
-            local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-            if cx and cy and nx and ny then
-              local cdist = math.abs(cx - nx) + math.abs(cy - ny)
-              if cdist <= 4 and cdist > 1 then
-                -- Face companion (stay engaged)
-                local dx, dy = cx - nx, cy - ny
-                if math.abs(dx) >= math.abs(dy) then
-                  n.facing = dx > 0 and "right" or "left"
-                else
-                  n.facing = dy > 0 and "down" or "up"
-                end
-              end
-            end
-          end
-          -- EXPERIMENTAL: startled reaction — NPCs notice when you sprint past.
-          if playerRunning and not n.moving then
-            local nx0, ny0 = tonumber(n.cellX), tonumber(n.cellY)
-            if nx0 and ny0 then
-              local pdist = math.abs(nx0 - px) + math.abs(ny0 - py)
-              if pdist <= 2 and pdist > 0 then
-                local lastStartle = tonumber(n._kantoLifeLastStartle) or 0
-                if now - lastStartle > 15 then  -- 15s cooldown
-                  n._kantoLifeLastStartle = now
-                  local bubbleUntil2 = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                  if bubbleUntil2 <= now then
-                    n._kantoLifeCollisionBubbleText = "!"
-                    n._kantoLifeCollisionBubbleUntil = now + 1.0
-                  end
-                  -- Turn to face the runner
-                  local dx, dy = px - nx0, py - ny0
-                  local face
-                  if math.abs(dx) >= math.abs(dy) then
-                    face = dx > 0 and "right" or "left"
-                  else
-                    face = dy > 0 and "down" or "up"
-                  end
-                  if face then n.facing = face end
-                end
-              end
-            end
-          end
-          -- Skip if already showing a bubble (traveler greeting, collision, etc.)
-          local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-          if bubbleUntil <= now then
-            local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-            if nx and ny then
-              local dist = math.abs(nx - px) + math.abs(ny - py)
-              if dist <= 3 and dist > 0 then
-                local lastGreet = tonumber(n._kantoLifeLastGreet) or 0
-                if now - lastGreet > 30 then  -- 30s cooldown per NPC
-                  n._kantoLifeLastGreet = now
-                  -- EXPERIMENTAL: mood colors the greeting
-                  local mood = getNpcMood(n)
-                  local moodPool = moodGreetings[mood]
-                  if moodPool and math.random() < 0.6 then
-                    n._kantoLifeCollisionBubbleText = moodPool[math.random(1, #moodPool)]
-                  else
-                    n._kantoLifeCollisionBubbleText = greetings[math.random(1, #greetings)]
-                  end
-                  n._kantoLifeCollisionBubbleUntil = now + 2.0
-                end
-              end
-            end
-          end
-          -- Idle behavior: only when standing still (not moving, no routine step)
-          if not n.moving then
-            local lastIdle = tonumber(n._kantoLifeLastIdle) or 0
-            if now - lastIdle > 25 + math.random() * 20 then  -- 25-45s
-              n._kantoLifeLastIdle = now
-              local roll = math.random()
-              if roll < 0.6 then
-                -- Look around: face a random direction
-                n.facing = dirs[math.random(1, 4)]
-              elseif roll < 0.7 and (timeOfDay == "morning" or timeOfDay == "afternoon") then
-                -- EXPERIMENTAL: happy humming — daytime NPCs sing a little
-                if bubbleUntil <= now then
-                  local hums = { "♪", "♫", "La la~ ♪" }
-                  n._kantoLifeCollisionBubbleText = hums[math.random(1, #hums)]
-                  n._kantoLifeCollisionBubbleUntil = now + 1.5
-                end
-              else
-                -- Thought bubble (only if no other bubble active)
-                -- EXPERIMENTAL: contagious yawning — if a nearby NPC yawned
-                -- recently, this NPC is more likely to yawn too.
-                if bubbleUntil <= now then
-                  local thought = idleThoughts[math.random(1, #idleThoughts)]
-                  local recentYawn = world._kantoLifeRecentYawn
-                  if recentYawn and now - (tonumber(recentYawn.at) or 0) < 5 then
-                    local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-                    if nx and ny then
-                      local ydx = math.abs(nx - (tonumber(recentYawn.x) or 999))
-                      local ydy = math.abs(ny - (tonumber(recentYawn.y) or 999))
-                      if ydx + ydy <= 4 and ydx + ydy > 0 and math.random() < 0.5 then
-                        thought = "*yawn*"
-                      end
-                    end
-                  end
-                  n._kantoLifeCollisionBubbleText = thought
-                  n._kantoLifeCollisionBubbleUntil = now + 1.5
-                  -- Record yawns for contagion
-                  if thought == "*yawn*" then
-                    local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-                    if nx and ny then
-                      world._kantoLifeRecentYawn = { x = nx, y = ny, at = now }
-                    end
-                  end
-                  -- EXPERIMENTAL: random sneezes — 2% chance, nearby NPCs say
-                  -- "Bless you!" (5-min cooldown per NPC).
-                  if thought ~= "*yawn*" and math.random() < 0.02 then
-                    local lastSneeze = tonumber(n._kantoLifeLastSneeze) or 0
-                    if now - lastSneeze > 300 then
-                      n._kantoLifeLastSneeze = now
-                      n._kantoLifeCollisionBubbleText = "Achoo!"
-                      n._kantoLifeCollisionBubbleUntil = now + 1.5
-                      -- Nearby NPCs bless you
-                      local sx, sy = tonumber(n.cellX), tonumber(n.cellY)
-                      if sx and sy then
-                        for _, other in ipairs(world.npcs or {}) do
-                          if other ~= n then
-                            local d2 = other.def or {}
-                            if d2.kantoLifeAmbient and not other.nightlifeSleeping and not other.moving then
-                              local ox, oy = tonumber(other.cellX), tonumber(other.cellY)
-                              if ox and oy then
-                                local odist = math.abs(ox - sx) + math.abs(oy - sy)
-                                if odist <= 3 and odist > 0 and math.random() < 0.7 then
-                                  local obubble = tonumber(other._kantoLifeCollisionBubbleUntil) or 0
-                                  if obubble <= now then
-                                    other._kantoLifeCollisionBubbleText = "Bless you!"
-                                    other._kantoLifeCollisionBubbleUntil = now + 1.5
-                                  end
-                                end
-                              end
-                            end
-                          end
-                        end
-                      end
-                    end
-                  end
-                end
-              end
-            end
-          end
-        end
-      end
-      -- EXPERIMENTAL: NPC-to-NPC chatter — nearby idle NPCs exchange brief
-      -- bubbles. One initiates, the other responds after a short delay.
-      -- EXPERIMENTAL: group conversations — clusters of 3+ NPCs face the
-      -- center, like they're having a group chat.
-      pcall(function()
-        local now2 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-        -- Group detection (every 30s)
-        local lastGroupScan = tonumber(world._kantoLifeLastGroupScan) or 0
-        if now2 - lastGroupScan > 30 then
-          world._kantoLifeLastGroupScan = now2
-          local idleNpcs = {}
-          for _, n in ipairs(world.npcs or {}) do
-            local d = n.def or {}
-            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving then
-              local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-              if nx and ny then idleNpcs[#idleNpcs + 1] = n end
-            end
-          end
-          -- Find clusters: for each NPC, count neighbors within 2 tiles
-          local grouped = {}
-          for i = 1, #idleNpcs do
-            if not grouped[idleNpcs[i]] then
-              local a = idleNpcs[i]
-              local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
-              local cluster = { a }
-              for j = 1, #idleNpcs do
-                if i ~= j and not grouped[idleNpcs[j]] then
-                  local b = idleNpcs[j]
-                  local bx, by = tonumber(b.cellX), tonumber(b.cellY)
-                  if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
-                    cluster[#cluster + 1] = b
-                  end
-                end
-              end
-              if #cluster >= 3 then
-                -- Found a group! Make them face the center.
-                local cx, cy = 0, 0
-                for _, m in ipairs(cluster) do
-                  cx = cx + tonumber(m.cellX)
-                  cy = cy + tonumber(m.cellY)
-                  grouped[m] = true
-                end
-                cx, cy = cx / #cluster, cy / #cluster
-                for _, m in ipairs(cluster) do
-                  local mx, my = tonumber(m.cellX), tonumber(m.cellY)
-                  local dx, dy = cx - mx, cy - my
-                  if math.abs(dx) >= math.abs(dy) then
-                    m.facing = dx > 0 and "right" or (dx < 0 and "left" or m.facing)
-                  else
-                    m.facing = dy > 0 and "down" or (dy < 0 and "up" or m.facing)
-                  end
-                end
-              end
-            end
-          end
-        end
-        -- First, deliver any pending chatter lines that are due. A
-        -- conversation is a short chain of bubbles; if one link can't be
-        -- delivered (bubble busy, NPC moved/sleeping/talked-to), the rest of
-        -- that conversation is cancelled so nobody talks to the air.
-        for _, n in ipairs(world.npcs or {}) do
-          local replies = n._kantoLifeChatReplies
-          if replies and #replies > 0 then
-            local kept = {}
-            for _, r in ipairs(replies) do
-              if tonumber(r.at) and now2 >= tonumber(r.at) then
-                local deadConvos = world._kantoLifeChatDead
-                local dead = deadConvos and deadConvos[r.convo]
-                local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                local talkedTo = world.talkNpc == n
-                  and (now2 - (tonumber(world._kantoLifeTalkNpcAt) or 0)) < 30
-                if not dead and bubbleUntil <= now2 and not n.nightlifeSleeping
-                   and not n.moving and not talkedTo then
-                  n._kantoLifeCollisionBubbleText = r.text
-                  n._kantoLifeCollisionBubbleUntil = now2 + 2.0
-                elseif not dead then
-                  world._kantoLifeChatDead = deadConvos or {}
-                  world._kantoLifeChatDead[r.convo] = true
-                  local nDead = 0
-                  for _ in pairs(world._kantoLifeChatDead) do nDead = nDead + 1 end
-                  if nDead > 40 then world._kantoLifeChatDead = {} end
-                end
-              else
-                kept[#kept + 1] = r
-              end
-            end
-            n._kantoLifeChatReplies = kept
-          end
-        end
-        -- Look for a new chatter pair (throttled: check every ~10s).
-        -- When two idle NPCs meet, they exchange a short 2-4 bubble
-        -- conversation: greeting -> reply -> [follow-up] -> [farewell].
-        local lastChatScan = tonumber(world._kantoLifeLastChatScan) or 0
-        if now2 - lastChatScan > 10 then
-          world._kantoLifeLastChatScan = now2
-          local hour = tonumber(os.date("%H")) or 12
-          local chatOpeners = { "Hey!", "Hi there!", "Psst!", "Yo!", "Hiya!", "Hey you!" }
-          if hour >= 5 and hour < 12 then
-            chatOpeners[#chatOpeners + 1] = "Morning!"
-            chatOpeners[#chatOpeners + 1] = "Good morning!"
-          elseif hour >= 18 or hour < 5 then
-            chatOpeners[#chatOpeners + 1] = "Evening!"
-          end
-          local chatReplies = { "Oh, hi!", "Hey!", "Hiya!", "What's up?", "Oh! Hi!", "Hey there!" }
-          local chatFollowUps = {
-            -- weather
-            "Nice day, huh?", "Lovely weather!", "Hope it holds up.", "So windy today!",
-            -- time of day
-            "Busy day?", "Almost lunchtime!", "Getting late...", "Long day, huh?",
-            -- Pokémon they've seen
-            "Seen any rare ones?", "My team's doing great!", "Caught a new one!",
-            -- local flavor / rumors
-            "SAFFRON's packed!", "Heard about MT. MOON?", "Quiet around here.",
-            "Heard the rumor?", "Busy lately, huh?",
-          }
-          local chatFarewells = { "See ya!", "Bye!", "Take care!", "Later!", "Well, bye!" }
-          local function pick(t) return t[math.random(1, #t)] end
-          local function chatBusy(n)
-            local pr = n._kantoLifeChatReplies
-            if pr and #pr > 0 then return true end
-            return (tonumber(n._kantoLifeChatUntil) or 0) > now2
-          end
-          local function playerTalkingTo(n)
-            return world.talkNpc == n
-              and (now2 - (tonumber(world._kantoLifeTalkNpcAt) or 0)) < 30
-          end
-          local candidates = {}
-          for _, n in ipairs(world.npcs or {}) do
-            local d = n.def or {}
-            if d.kantoLifeAmbient and not n.nightlifeSleeping and not n.moving
-               and not n._kantoRoutineTraveling and not playerTalkingTo(n) then
-              local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-              if bubbleUntil <= now2 and not chatBusy(n) then
-                local nx, ny = tonumber(n.cellX), tonumber(n.cellY)
-                if nx and ny then candidates[#candidates + 1] = n end
-              end
-            end
-          end
-          -- Find two NPCs within 2 tiles of each other
-          for i = 1, #candidates do
-            local a = candidates[i]
-            local ax, ay = tonumber(a.cellX), tonumber(a.cellY)
-            for j = i + 1, #candidates do
-              local b = candidates[j]
-              local bx, by = tonumber(b.cellX), tonumber(b.cellY)
-              if math.abs(ax - bx) + math.abs(ay - by) <= 2 then
-                -- Per-pair cooldown (3 min) so the same two don't chatter constantly
-                local aPairs = a._kantoLifeChatPartners or {}
-                local pairLast = math.max(aPairs[b] or 0,
-                  (b._kantoLifeChatPartners or {})[a] or 0)
-                if now2 - pairLast > 180 then
-                  a._kantoLifeLastChat = now2
-                  b._kantoLifeLastChat = now2
-                  aPairs[b] = now2
-                  a._kantoLifeChatPartners = aPairs
-                  local bPairs = b._kantoLifeChatPartners or {}
-                  bPairs[a] = now2
-                  b._kantoLifeChatPartners = bPairs
-                  do
-                    local nPairs = 0
-                    for _ in pairs(aPairs) do nPairs = nPairs + 1 end
-                    if nPairs > 24 then a._kantoLifeChatPartners = { [b] = now2 } end
-                  end
-                  -- Build the conversation: opener -> reply -> [follow-up] -> [farewell]
-                  world._kantoLifeChatConvoSeq = (tonumber(world._kantoLifeChatConvoSeq) or 0) + 1
-                  local convo = world._kantoLifeChatConvoSeq
-                  local stepAt = now2 + 2.3
-                  a._kantoLifeCollisionBubbleText = pick(chatOpeners)
-                  a._kantoLifeCollisionBubbleUntil = now2 + 2.0
-                  b._kantoLifeChatReplies = { { text = pick(chatReplies), at = stepAt, convo = convo } }
-                  if math.random() < 0.65 then
-                    stepAt = stepAt + 2.3
-                    a._kantoLifeChatReplies = { { text = pick(chatFollowUps), at = stepAt, convo = convo } }
-                    if math.random() < 0.7 then
-                      stepAt = stepAt + 2.3
-                      b._kantoLifeChatReplies[#b._kantoLifeChatReplies + 1] =
-                        { text = pick(chatFarewells), at = stepAt, convo = convo }
-                    end
-                  end
-                  a._kantoLifeChatUntil = stepAt + 1
-                  b._kantoLifeChatUntil = stepAt + 1
-                  -- EXPERIMENTAL: face each other while chatting
-                  local dx, dy = bx - ax, by - ay
-                  if math.abs(dx) >= math.abs(dy) then
-                    a.facing = dx > 0 and "right" or "left"
-                    b.facing = dx > 0 and "left" or "right"
-                  else
-                    a.facing = dy > 0 and "down" or "up"
-                    b.facing = dy > 0 and "up" or "down"
-                  end
-                  -- EXPERIMENTAL: walking companions — NPCs who chat become
-                  -- companions. They'll seek each other out and stay close.
-                  a._kantoLifeCompanion = b
-                  b._kantoLifeCompanion = a
-                  a._kantoLifeCompanionUntil = now2 + 300  -- 5-min bond
-                  b._kantoLifeCompanionUntil = now2 + 300
-                  break
-                end
-              end
-            end
-            if a._kantoLifeLastChat == now2 then break end
-          end
-        end
-      end)
-      -- EXPERIMENTAL: ambient Pokémon cries — wild/ambient Pokémon NPCs
-      -- occasionally vocalize. Long cooldown so it's atmospheric, not spammy.
-      pcall(function()
-        local now3 = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-        for _, n in ipairs(world.npcs or {}) do
-          if isPokemonLike(n) and not n.nightlifeSleeping and not n.moving then
-            -- Skip followers (they belong to other mods)
-            if not isPokemonFollower(n) then
-              local lastCry = tonumber(n._kantoLifeLastCry) or 0
-              if now3 - lastCry > 60 + math.random() * 60 then  -- 60-120s
-                n._kantoLifeLastCry = now3
-                local species = speciesLabelFromNpc(n)
-                if species and playSpeciesCry then
-                  playSpeciesCry(species)
-                  -- Small bubble with the species name, like the games do
-                  local bubbleUntil = tonumber(n._kantoLifeCollisionBubbleUntil) or 0
-                  if bubbleUntil <= now3 then
-                    n._kantoLifeCollisionBubbleText = species .. "!"
-                    n._kantoLifeCollisionBubbleUntil = now3 + 1.5
-                  end
-                end
-              end
-            end
-          end
-        end
-      end)
     end)
   end
-
-  -- Forward declaration: bakeSleepSprite can trigger a rebake on sleep-style
-  -- change, which calls restoreSleepSprite (defined below). Without this the
-  -- reference inside bakeSleepSprite would resolve to a nil global.
-  local restoreSleepSprite
 
   -- Bake ±90° sleep frame into sprite.image so pose is real pixels (voxel + 2D)
   local function bakeSleepSprite(npc)
@@ -4467,7 +3753,7 @@ local nm = storyDisplayName(talker)
     return true
   end
 
-  restoreSleepSprite = function(npc)
+  local function restoreSleepSprite(npc)
     if not npc or not npc.sprite or not npc.sprite._kantoSleepBaked then return end
     local sprite = npc.sprite
     if sprite._kantoOrigImage ~= nil then sprite.image = sprite._kantoOrigImage end
@@ -4477,7 +3763,6 @@ local nm = storyDisplayName(talker)
     sprite._kantoOrigImage, sprite._kantoOrigFrames = nil, nil
     sprite._kantoOrigFrameCount, sprite._kantoOrigDef = nil, nil
     sprite._kantoSleepBaked = nil
-    sprite._kantoSleepBakedStyle = nil
   end
 
   -- Exact vanilla Yellow sleeper: Viridian City's southwest sleeping Old Man.
@@ -4582,16 +3867,6 @@ function putToSleep(npc)
       npc._kantoOrigSprite = nil
     end
     npc.timer = love.math.random(30, 120)
-    -- EXPERIMENTAL: wake-up stretch — NPCs yawn/stretch when they wake up.
-    pcall(function()
-      local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-      local wakeBubbles = { "*yawn*", "*stretch*", "Mornin'..." }
-      local bubbleUntil = tonumber(npc._kantoLifeCollisionBubbleUntil) or 0
-      if bubbleUntil <= now then
-        npc._kantoLifeCollisionBubbleText = wakeBubbles[math.random(1, #wakeBubbles)]
-        npc._kantoLifeCollisionBubbleUntil = now + 2.0
-      end
-    end)
   end
 
   local function facingCell(world)
@@ -4976,6 +4251,12 @@ function putToSleep(npc)
     local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
     local G = love.graphics
     G.push("all")
+    -- Mood tint: pastel fill + saturated border; default white when unset.
+    local bc = npc._kantoLifeBubbleColor
+    local br, bg, bb
+    if type(bc) == "table" and tonumber(bc[1]) and tonumber(bc[2]) and tonumber(bc[3]) then
+      br, bg, bb = bc[1], bc[2], bc[3]
+    end
     scale = tonumber(scale) or 1
     if scale ~= 1 then G.scale(scale, scale) sx, sy = sx / scale, sy / scale end
     local font = G.getFont and G.getFont() or nil
@@ -4984,8 +4265,12 @@ function putToSleep(npc)
     -- Dynamic height: fit text with padding (fixes overflow)
     local w, h = math.max(18, tw + 10), math.max(14, th + 6)
     local x, y = math.floor(sx - w/2), math.floor(sy - h - 4)
-    G.setColor(1,1,1,1); G.rectangle("fill", x, y, w, h, 2, 2)
-    G.setColor(0.1,0.1,0.1,1); G.rectangle("line", x, y, w, h, 2, 2)
+    if br then G.setColor(br*0.35+0.65, bg*0.35+0.65, bb*0.35+0.65, 1)
+    else G.setColor(1,1,1,1) end
+    G.rectangle("fill", x, y, w, h, 2, 2)
+    if br then G.setColor(br, bg, bb, 1)
+    else G.setColor(0.1,0.1,0.1,1) end
+    G.rectangle("line", x, y, w, h, 2, 2)
     G.polygon("fill", x + w/2 - 2, y + h, x + w/2 + 2, y + h, x + w/2, y + h + 3)
     local th = font and font:getHeight() or 8
     G.print(text, x + (w - tw)/2, y + (h - th)/2)
@@ -5353,6 +4638,12 @@ function putToSleep(npc)
             if sx > 0 and sy > 0 and sx < cw and sy < ch then
               local s = scale * emotePad
               local text = tostring(npc._kantoLifeCollisionBubbleText or ":)")
+              -- Mood tint: pastel fill + saturated border; default white when unset.
+              local bc2 = npc._kantoLifeBubbleColor
+              local br2, bg2, bb2
+              if type(bc2) == "table" and tonumber(bc2[1]) and tonumber(bc2[2]) and tonumber(bc2[3]) then
+                br2, bg2, bb2 = bc2[1], bc2[2], bc2[3]
+              end
               local font = G.getFont()
               local tw, th = 12, 10
               pcall(function()
@@ -5381,9 +4672,11 @@ function putToSleep(npc)
               local bh = math.max(12, th + 4)
               -- With Y flipped, negative by draws toward the top of the screen.
               local bx, by = -bw / 2, -42 - bh
-              G.setColor(1, 1, 1, 1)
+              if br2 then G.setColor(br2*0.35+0.65, bg2*0.35+0.65, bb2*0.35+0.65, 1)
+              else G.setColor(1, 1, 1, 1) end
               G.rectangle("fill", bx, by, bw, bh, 2, 2)
-              G.setColor(0.1, 0.1, 0.1, 1)
+              if br2 then G.setColor(br2, bg2, bb2, 1)
+              else G.setColor(0.1, 0.1, 0.1, 1) end
               G.rectangle("line", bx, by, bw, bh, 2, 2)
               -- Stem toward NPC (positive Y in flipped space = toward feet/anchor)
               G.polygon("fill", bx + bw/2 - 2, by + bh, bx + bw/2 + 2, by + bh, bx + bw/2, by + bh + 3)
@@ -6413,52 +5706,8 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
 
     local name = tostring(d.name or "")
     local route = name:match("^KANTO_ROUTE") or name:match("^JOHTO_")
-    -- Unique dialogue: combinatorial generator with per-NPC history.
-    -- Falls back to the static pool if the generator is unavailable.
-    -- The pool fallback keeps main's per-NPC recent-line history (skip
-    -- last 5 lines per pool) in a separate field so it never clobbers
-    -- DialogueGen's own history.
-    local text
-    if DialogueGen and type(DialogueGen.generate) == "function" then
-      local genOk, genLine, genHistory = pcall(DialogueGen.generate, {
-        npcName = display,
-        gender = d.kantoLifeGender,
-        agenda = npc._kantoLifeAgenda,
-        gen = 1,
-        dex = POKE_SPECIES,
-        isPoke = false,
-        recentLines = st.recentLines,
-      })
-      if genOk and type(genLine) == "string" and genLine ~= "" then
-        text = genLine
-        st.recentLines = genHistory
-      end
-    end
-    if not text then
-      -- Per-NPC dialogue history: skip last 5 lines per NPC per pool;
-      -- resets when all used.
-      local pool = route and routeLines or lines
-      local rh = st.recentPoolLines
-      if type(rh) ~= "table" then rh = {}; st.recentPoolLines = rh end
-      local rk = route and "route" or "town"
-      local hst = rh[rk]
-      if type(hst) ~= "table" then hst = {}; rh[rk] = hst end
-      local avail = {}
-      for i = 1, #pool do
-        local used = false
-        for _, v in ipairs(hst) do if v == i then used = true; break end end
-        if not used then avail[#avail + 1] = i end
-      end
-      if #avail == 0 then
-        hst = {}; rh[rk] = hst
-        for i = 1, #pool do avail[i] = i end
-      end
-      local pi = avail[love.math.random(1, #avail)]
-      hst[#hst + 1] = pi
-      while #hst > 5 do table.remove(hst, 1) end
-      putTalkState(key, st, all)
-      text = pool[pi]
-    end
+    local pool = route and routeLines or lines; --[[ Per-NPC dialogue history: skip last 5 lines per NPC per pool; resets when all used. ]] local rh = st.recentLines; if type(rh) ~= "table" then rh = {}; st.recentLines = rh end; local rk = route and "route" or "town"; local hst = rh[rk]; if type(hst) ~= "table" then hst = {}; rh[rk] = hst end; local avail = {}; for i = 1, #pool do local used = false; for _, v in ipairs(hst) do if v == i then used = true; break end end; if not used then avail[#avail + 1] = i end end; if #avail == 0 then hst = {}; rh[rk] = hst; for i = 1, #pool do avail[i] = i end end; local pi = avail[love.math.random(1, #avail)]; hst[#hst + 1] = pi; while #hst > 5 do table.remove(hst, 1) end; putTalkState(key, st, all); local text = pool[pi]
+      
     local ref = eventRefLine(st, false)
     if ref and st.count > 5 and love.math.random() < 0.5 then
       text = ref
@@ -6690,10 +5939,7 @@ local function nightlifeTick(world, dt)
       Overworld.talkTo = function(self, npc)
         if npc then
           rememberTalker(npc)
-          if self then
-            self.talkNpc = npc
-            self._kantoLifeTalkNpcAt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-          end
+          if self then self.talkNpc = npc end
         end
         if courtesyTalk(self, npc) then return end
         return base(self, npc)
@@ -6718,10 +5964,7 @@ local function nightlifeTick(world, dt)
     Overworld.talkTo = function(world, npc)
       if npc then
         rememberTalker(npc)
-        if world then
-          world.talkNpc = npc
-          world._kantoLifeTalkNpcAt = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.time()
-        end
+        if world then world.talkNpc = npc end
       end
       if courtesyTalk(world, npc) then return true end
       if type(baseTalk) == "function" then return baseTalk(world, npc) end
@@ -7509,6 +6752,7 @@ local function nightlifeTick(world, dt)
             if not okD then fileLog("VOXEL overlay draw FAILED: " .. tostring(errD)) end
           end
         end
+        -- End disabled prop drawing ]]
 
         -- One Z, upright and camera-facing like the native voxel billboard.
         local host = ctx.host or {}
@@ -7580,9 +6824,16 @@ local function nightlifeTick(world, dt)
     -- Every component is proven by the working Zzz.
     local bubbleImageCache = {}  -- text -> {path, image, w, h}
 
-    local function getBubbleImage(text)
+    local function getBubbleImage(text, color)
       text = tostring(text or ":)")
-      local cached = bubbleImageCache[text]
+      -- Mood tint: include the color in the cache key so tints don't collide.
+      local cr, cg, cb
+      if type(color) == "table" and tonumber(color[1]) and tonumber(color[2]) and tonumber(color[3]) then
+        cr, cg, cb = color[1], color[2], color[3]
+      end
+      local key = text
+      if cr then key = text .. string.format("|%.2f,%.2f,%.2f", cr, cg, cb) end
+      local cached = bubbleImageCache[key]
       if cached then return cached end
       local G = love.graphics
       local font = nil
@@ -7606,11 +6857,13 @@ local function nightlifeTick(world, dt)
         G.push("all")
         G.setCanvas(canvas)
         G.clear(0, 0, 0, 0)
-        -- White rounded background
-        G.setColor(1, 1, 1, 1)
+        -- Rounded background (mood-tinted pastel, else white)
+        if cr then G.setColor(cr*0.35+0.65, cg*0.35+0.65, cb*0.35+0.65, 1)
+        else G.setColor(1, 1, 1, 1) end
         G.rectangle("fill", 0, 0, w, h, 3, 3)
-        -- Dark border
-        G.setColor(0.1, 0.1, 0.1, 1)
+        -- Border (mood color, else dark)
+        if cr then G.setColor(cr, cg, cb, 1)
+        else G.setColor(0.1, 0.1, 0.1, 1) end
         G.setLineWidth(1)
         G.rectangle("line", 0.5, 0.5, w - 1, h - 1, 3, 3)
         -- Tail triangle pointing down
@@ -7632,11 +6885,14 @@ local function nightlifeTick(world, dt)
       end)
       if not okImg or not img then return nil end
       -- Register via asset hook (proven: Zzz uses sleepImgCache + ensureAssetHook)
-      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_") .. ".png"
+      local path = "kanto_life_bubble_" .. text:gsub("[^%w]", "_")
+      if cr then path = path .. string.format("_%02x%02x%02x",
+        math.floor(cr*255+0.5), math.floor(cg*255+0.5), math.floor(cb*255+0.5)) end
+      path = path .. ".png"
       sleepImgCache[path] = img
       ensureAssetHook()
       local entry = {path = path, image = img, w = w, h = h}
-      bubbleImageCache[text] = entry
+      bubbleImageCache[key] = entry
       return entry
     end
 
@@ -7702,7 +6958,7 @@ local function nightlifeTick(world, dt)
         end
 
         -- Zzz pipeline: Image (not Canvas) + SpriteBillboards.mesh (not hand-rolled)
-        local entry = getBubbleImage(text)
+        local entry = getBubbleImage(text, npc._kantoLifeBubbleColor)
         if not entry or not entry.image then return false end
         ensureAssetHook()
         local def = {

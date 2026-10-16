@@ -133,7 +133,7 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
-    -- 25% each: fly, teleport, door, route (per user request, matches main 1.4.24+)
+    -- 25% each: fly, teleport, door, route (per user request)
     local roll = math.random(100)
     if roll <= 25 then return "fly"
     elseif roll <= 50 then return "teleport"
@@ -173,6 +173,7 @@ return function(ctx)
     end
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.35
     if method == "teleport" and type(npc.scriptTeleport) == "function" then
       pcall(npc.scriptTeleport, npc, "from")
@@ -541,12 +542,6 @@ return function(ctx)
   local function pathTo(world, npc, tx, ty)
     local map = world and world.map
     if not map or type(map.isWalkableCell) ~= "function" then return nil end
-    -- Defensive: callers occasionally pass a destination table instead of
-    -- coordinates. Coerce (same guard as KantoRoutines; fixes live crash
-    -- "attempt to concatenate local 'tx' (a table value)").
-    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
-    tx, ty = tonumber(tx), tonumber(ty)
-    if tx == nil or ty == nil then return nil end
     local sx, sy = npc.cellX or 0, npc.cellY or 0
     if sx == tx and sy == ty then return {} end
     -- Map.width/height are block dimensions in both Gen 1 and Gold.
@@ -622,11 +617,6 @@ return function(ctx)
 
   local pathCache = {}
   local function stepToward(world, npc, tx, ty, st)
-    -- Defensive: coerce table targets to coordinates (same guard as
-    -- KantoRoutines).
-    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
-    tx, ty = tonumber(tx), tonumber(ty)
-    if tx == nil or ty == nil then return false end
     local h = handle(world, npc)
     if not h then return false end
     if npc.moving then return true end

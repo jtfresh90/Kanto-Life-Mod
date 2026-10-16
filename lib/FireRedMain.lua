@@ -38,7 +38,6 @@ return function(mod)
     { key = "firered_npc_travel_methods", type = "toggle", label = "TRAVEL METHODS", default = true },
     { key = "firered_npc_fly_teleport", type = "toggle", label = "FLY / TELEPORT", default = true },
     { key = "firered_npc_agenda", type = "choice", label = "NPC AGENDA", default = 0, choices = { { "OFF", 0 }, { "DAY", 1 }, { "FULL", 2 } } },
-    -- EXPERIMENTAL: Lifelike feature toggles
     { key = "firered_exp_greetings", type = "toggle", label = "LIFELIKE GREETINGS", default = true },
     { key = "firered_exp_chatter", type = "toggle", label = "NPC CHATTER", default = true },
     { key = "firered_exp_moods", type = "toggle", label = "NPC MOODS", default = true },
@@ -267,9 +266,19 @@ return function(mod)
             local sy = (tonumber(npc.py) or npc.cellY * 16) - camY - h - 4
             local left = sx - w / 2
             local top = sy
+            -- Mood tint: pastel fill + saturated border; default white when unset.
+            local bc6 = npc._kantoLifeBubbleColor
+            local br6, bg6, bb6
+            if type(bc6) == "table" and tonumber(bc6[1]) and tonumber(bc6[2]) and tonumber(bc6[3]) then
+              br6, bg6, bb6 = bc6[1], bc6[2], bc6[3]
+            end
             love.graphics.push("all")
-            love.graphics.setColor(1,1,1,1); love.graphics.rectangle("fill",left,top,w,h,2,2)
-            love.graphics.setColor(0.1,0.1,0.1,1); love.graphics.rectangle("line",left,top,w,h,2,2)
+            if br6 then love.graphics.setColor(br6*0.35+0.65, bg6*0.35+0.65, bb6*0.35+0.65, 1)
+            else love.graphics.setColor(1,1,1,1) end
+            love.graphics.rectangle("fill",left,top,w,h,2,2)
+            if br6 then love.graphics.setColor(br6, bg6, bb6, 1)
+            else love.graphics.setColor(0.1,0.1,0.1,1) end
+            love.graphics.rectangle("line",left,top,w,h,2,2)
             love.graphics.polygon("fill",sx-2,top+h,sx+2,top+h,sx,top+h+3)
             love.graphics.setColor(0.1,0.1,0.1,1)
             love.graphics.print(text, sx - tw / 2, top + (h - th) / 2)
@@ -316,6 +325,24 @@ return function(mod)
     end
   end)
 
+  
+  local fireredLifelike = nil
+  pcall(function()
+    local factory = loadLocal("lib/LifelikeBehaviors.lua")
+    if type(factory) == "function" then
+      fireredLifelike = factory({
+        opt = function(k)
+          -- Map shared exp_* to firered_exp_* 
+          if type(k) == "string" and k:find("^exp_") then
+            local v = opt("firered_" .. k)
+            if v ~= nil then return v end
+          end
+          return opt(k)
+        end,
+      })
+    end
+  end)
+
   local okDoorFactory, doorKnocking = pcall(FireRedDoorKnocking, { mod = mod, getOption = opt, getWorld = getWorld, getFieldState = getFieldState })
   if not okDoorFactory or type(doorKnocking) ~= "table" then
     error("Kanto Life: FireRed door-knocking controller failed: " .. tostring(doorKnocking), 0)
@@ -350,6 +377,27 @@ return function(mod)
         local ow = getFieldState()
         if ow then routines:update(ow, dt or 0.016) end
         sleep:update()
+        pcall(function()
+          if fireredLifelike and fireredLifelike.tick then
+            local list = {}
+            local Objects = package.loaded["src.core.game3.objects"]
+            if not Objects then
+              local okO, O = pcall(require, "src.core.game3.objects")
+              if okO then Objects = O end
+            end
+            if Objects and Objects._byId then
+              for _, eo in pairs(Objects._byId) do
+                if type(eo) == "table" then list[#list + 1] = eo end
+              end
+            end
+            local Player = package.loaded["src.core.game3.player"]
+            if not Player then
+              local okP, P = pcall(require, "src.core.game3.player")
+              if okP then Player = P end
+            end
+            fireredLifelike.tick(ow, list, Player, dt or 0.016)
+          end
+        end)
       end
       return result
     end)
@@ -362,12 +410,6 @@ return function(mod)
       routines:update(ow, 1)
       sleep:rebuild(true)
       sleep:update()
-      -- Spawn cross-map travelers whose destination is this map (paired
-      -- exit/entry: NPCs that left through a door to here appear at the
-      -- entrance connecting from their origin map).
-      if type(ambient.spawnTravelers) == "function" then
-        pcall(function() ambient:spawnTravelers() end)
-      end
     end
   end)
 
@@ -438,6 +480,14 @@ return function(mod)
           { key="firered_npc_travel_methods", label="TRAVEL METHODS", kind="bool", default=true },
           { key="firered_npc_fly_teleport", label="FLY / TELEPORT", kind="bool", default=true },
           { key="firered_npc_agenda", label="NPC AGENDA", kind="agenda", default=0, min=0, max=2, names=agendaNames },
+          { key="firered_exp_greetings", label="LIFELIKE GREETINGS", kind="bool", default=true },
+          { key="firered_exp_chatter", label="NPC CHATTER", kind="bool", default=true },
+          { key="firered_exp_moods", label="NPC MOODS", kind="bool", default=true },
+          { key="firered_exp_idle", label="IDLE BEHAVIORS", kind="bool", default=true },
+          { key="firered_exp_timeaware", label="TIME AWARENESS", kind="bool", default=true },
+          { key="firered_exp_player", label="PLAYER REACTIONS", kind="bool", default=true },
+          { key="firered_exp_companions", label="COMPANIONS", kind="bool", default=true },
+          { key="firered_exp_ambience", label="AMBIENT LIFE", kind="bool", default=true },
         }
       end
 

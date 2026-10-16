@@ -105,7 +105,7 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
-    -- 25% each: fly, teleport, door, route (per user request, matches main 1.4.24+)
+    -- 25% each: fly, teleport, door, route (per user request)
     local roll = math.random(100)
     if roll <= 25 then return "fly"
     elseif roll <= 50 then return "teleport"
@@ -239,6 +239,7 @@ return function(ctx)
     npc._kantoLifeFRDepartUntil = now + 1.2
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
     -- Save the pixel-space render anchor. The Gen3 event-object renderer does
     -- not consume spriteYOffset, so apply the animation offset to py itself
@@ -783,11 +784,6 @@ return function(ctx)
   local function pathFirst(world, npc, tx, ty)
     local map = world and world.map
     if not map then return nil end
-    -- Defensive: coerce table targets to coordinates (same guard as
-    -- KantoRoutines/JohtoRoutines).
-    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
-    tx, ty = tonumber(tx), tonumber(ty)
-    if tx == nil or ty == nil then return nil end
     local sx, sy = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
     if sx == tx and sy == ty then return nil end
     if type(map.isWalkableCell) ~= "function" then

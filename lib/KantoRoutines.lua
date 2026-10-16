@@ -88,7 +88,7 @@ return function(ctx)
       elseif roll <= 95 then return "fly"
       else return "teleport" end
     end
-    -- 25% each: fly, teleport, door, route (per user request, matches main 1.4.24+)
+    -- 25% each: fly, teleport, door, route (per user request)
     local roll = math.random(100)
     if roll <= 25 then return "fly"
     elseif roll <= 50 then return "teleport"
@@ -157,14 +157,6 @@ return function(ctx)
   -- Visual departure effect markers. The main controller's draw wrappers can
   -- use these for fancier effects; the routines themselves just need the
   -- timing. Fail-open: if nothing reads them, the NPC still despawns.
-  -- Forward declarations: startDepartEffect/startArriveEffect/teleportUnstick
-  -- (above) trigger the travel-animation functions defined further down.
-  -- Without these, Lua would resolve the names as nil globals: the pcall
-  -- animation triggers would silently never fire, and teleportUnstick's
-  -- direct startArriveEffect call would raise "attempt to call a nil value".
-  local npcTeleportOut, npcTeleportIn, npcFlyOut, npcFlyIn
-  local startArriveEffect
-
   local function startDepartEffect(npc, method)
     method = noFlyTele(method)
     local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
@@ -179,6 +171,7 @@ return function(ctx)
     -- Show a cue bubble so the departure doesn't look like a pop.
     local cue = method == "fly" and "^^" or method == "teleport" and "**" or method == "surf" and "~~" or "!"
     npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
@@ -236,6 +229,8 @@ return function(ctx)
     end
     -- Show a cue bubble so the arrival doesn't look like a pop.
     local cue = method == "fly" and "vv" or method == "teleport" and "**" or "!"
+    npc._kantoLifeCollisionBubbleText = cue
+    npc._kantoLifeBubbleColor = nil -- departure cues stay default white
     npc._kantoLifeCollisionBubbleUntil = now + 1.2
   end
 
@@ -926,11 +921,6 @@ return function(ctx)
   local function pathTo(world, npc, tx, ty)
     local map = world and world.map
     if not map or type(map.isWalkableCell) ~= "function" then return nil end
-    -- Defensive: callers occasionally pass a destination table instead of
-    -- coordinates (e.g. st.target set directly from destinationFor). Coerce.
-    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
-    tx, ty = tonumber(tx), tonumber(ty)
-    if tx == nil or ty == nil then return nil end
     local sx, sy = npc.cellX or 0, npc.cellY or 0
     if sx == tx and sy == ty then return {} end
     -- Map.width/height are block dimensions in both Gen 1 and Gold.
@@ -1020,10 +1010,6 @@ return function(ctx)
   end
 
   local function stepToward(world, npc, tx, ty)
-    -- Defensive: coerce table targets to coordinates.
-    if type(tx) == "table" then tx, ty = tx[1], tx[2] end
-    tx, ty = tonumber(tx), tonumber(ty)
-    if tx == nil or ty == nil then return false end
     local h = handle(world, npc)
     if not h then return false end
     if npc.moving then return true end

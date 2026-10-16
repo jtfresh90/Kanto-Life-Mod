@@ -11,6 +11,15 @@ return function(ctx)
     return ok and value or nil
   end
   local installed = false
+  local DialogueGen = nil
+  pcall(function()
+    local src = mod:read("lib/DialogueGen.lua")
+    if type(src) == "string" then
+      local compile = loadstring or load
+      local chunk = compile(src, "@DialogueGen")
+      if chunk then DialogueGen = chunk() end
+    end
+  end)
   local dialogueSerials = {}
   -- Forward declarations: holdActor/releaseActor/realNow are assigned further below
   -- but are called by dialogue/trade handlers defined above that point.
@@ -491,7 +500,7 @@ return function(ctx)
     "Liam","Logan","Lucas","Luke","Marcus","Mark","Mason","Matt","Michael","Nate","Nathan","Nick","Nico","Noah","Owen","Parker","Patrick",
     "Paul","Peter","Ryan","Sam","Scott","Sean","Shane","Shawn","Simon","Spencer","Steven","Theo","Tim","Toby","Travis","Trevor","Tyler","Victor","Wade","Will",
     "William","Wyatt","Xander","Zach"
-  }
+      }
   local FEMALE_FIRST_NAMES = {
     "Abby","Alice","Amber","Amy","Anna","April","Ari","Aria","Ashley","Avery","Bailey","Bianca","Brenda","Brianna","Brooke","Callie","Cara","Carla",
     "Casey","Cathy","Chloe","Claire","Clara","Courtney","Crystal","Daisy","Daphne","Dawn","Diana","Ella","Ellie","Emily","Emma",
@@ -499,7 +508,7 @@ return function(ctx)
     "Jamie","Jasmine","Jenna","Jenny","Jill","Joan","Joy","Julia","Kara","Karen","Kate","Katie","Kayla","Kelly","Kim","Kira","Laura","Lauren","Leah",
     "Lily","Lucy","Maddie","Mara","Maria","Maya","Megan","Mia","Mila","Molly","Morgan","Nell","Nina","Nora","Paige","Payton","Peyton","Quinn","Rachael","Rae","Riley","Robin","Rosa","Rose","Ruby","Sadie","Samantha",
     "Sara","Sarah","Serena","Sierra","Sofia","Sophie","Stella","Summer","Tara","Taylor","Tiffany","Tina","Valerie","Vanessa","Violet","Wendy","Yara","Zoe"
-  }
+      }
 
   local function stableHash(s, modv)
     local h = 2166136261
@@ -507,7 +516,11 @@ return function(ctx)
     return h % modv
   end
 
-  local function spriteGender(npc, def)
+
+  
+  
+
+local function spriteGender(npc, def)
     -- Infer gender from sprite name. Returns "male", "female", or nil if unknown.
     local gid = tonumber(npc and npc.graphicsId or def.graphicsId or def.graphics)
     if not gid then return nil end
@@ -811,7 +824,17 @@ return function(ctx)
       return cryMessage(display, species)
     end
 
-    local line = humanDialogue(st, npc)
+    local line = nil
+    if DialogueGen and type(DialogueGen.generate) == "function" then
+      local okG, genLine, genHist = pcall(DialogueGen.generate, {
+        npcName = display, gen = 3, recentLines = st.recentLines,
+      })
+      if okG and type(genLine) == "string" and genLine ~= "" then
+        line = genLine
+        st.recentLines = genHist
+      end
+    end
+    if not line then line = humanDialogue(st, npc) end
     putState(key, st, all)
     return message(display .. ":\n" .. line, function() releaseActor(npc) end)
   end

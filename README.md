@@ -1,38 +1,22 @@
-# Kanto Life — Experimental Fork
-
-> **This is the experimental fork** (`experimental/lifelike-features`) of [Kanto Life](https://github.com/jtfresh90/Kanto-Life-Mod).
-> For the stable release, use the [main mod](https://github.com/jtfresh90/Kanto-Life-Mod).
-
-## 🧪 Fork vs Main: Feature Differences
-
-This fork contains **all main-mod features plus 23+ experimental lifelike NPC behaviors**. All main bug fixes are ported here.
-
-### Exclusive to this fork (experimental)
-- **Proximity greetings** (3 tiles, 30s cooldown, all 3 gens)
-- **Mood-colored** proximity greeting bubbles
-- **Group conversations** between NPCs
-- **Contagious yawning**
-- **Idle-player curiosity** `?` bubbles
-- **Welcome-back greetings**
-- **Sneezes** with bless-you responses
-- **Time-of-day transition comments**
-- **Pokémon adoration** (Gen 1/2)
-- **NPC walking-companion bonds**
-- **NPC-to-NPC chatter** with real dialogue exchanges
-- **Traveler arrival greetings**
-
-### Synced with main (all bug fixes ported)
-- **Sleep:** 1.0.0-based (no accessories), HGSS support, grayscale lying-down — same as main 1.4.36
-- **Travel:** 25% fly / 25% teleport / 25% door / 25% route — same as main
-- **Wild mod compatibility:** pcall protections for Wilds of Kanto, Revival, Untamed — same as main
-- **Sleep exclusions:** Story NPCs, boat boarders, Nurse Joy, shop clerks never sleep — same as main
-- **Celadon Living District:** Compatible via NPC flag isolation
-
-> **Warning:** Experimental features may be unstable.
+# Kanto Life
 
 **Kanto Life** adds a living, moving population to the overworlds of **Gen 1, Gen 2, and Gen 3** while keeping the original games and their maps at the center of the experience.
 
 It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emerald/Gen 3**. Features are adapted to each generation's native NPC, map, graphics, and world systems.
+
+---
+
+## 🎛️ Everything Is Optional
+
+Every feature below can be turned **off**. Kanto Life is built as a menu of independent toggles, not an all-or-nothing package:
+
+- **Population** — extra humans, indoor NPCs, and Pokémon NPCs each have their own on/off switch and count.
+- **Routines & travel** — wandering, door/route travel, agendas, and travel animations can each be disabled.
+- **Sleep** — the entire sleep system (or just ZZZs, accessories, or daytime sleepers) can be turned off.
+- **Lifelike behaviors** — greetings, moods, chatter, meetups, and companions are separate `exp_*` options; disable one or all of them and the mod keeps working.
+- **Interactions** — door knocking, 5th-interaction events, and collision bubbles are each optional.
+
+If you only want a busier overworld with zero extra behavior, turn everything off except the population counts. If you want the full living-world experience, turn it all on. The mod never forces a feature on you.
 
 ---
 
@@ -70,16 +54,16 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - **Generation-specific implementations** so Gen 1, Gen 2, and Gen 3 do not have to share incompatible engine behavior.
 - **Save-aware settings** so configurable values can persist between sessions.
 - **Live option changes** for population, travel, sleep, agenda, and related settings where supported.
+- **Lifelike NPC behaviors** (optional `exp_*` toggles): greetings, moods with mood-colored speech bubbles, NPC meetups, walking companions, NPC-to-NPC chatter, idle behaviors, yawns, sneezes, and time-of-day comments — every one of them can be switched off independently.
 
 ---
 
 ## 🎮 Generation Support
 
-### Gen 1 — Kanto / Yellow (v1.4.192)
+### Gen 1 — Kanto / Yellow (v1.4.266)
 
-**Sleep:** Grayscale, lying-down sprites with Zzz. HGSS sprite support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random/Natural).
+**Sleep:** Grayscale, lying-down sprites with Zzz. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random/Natural).
 **Travel:** 25% fly / 25% teleport / 25% door / 25% route, with animated departures (teleport spin/rise, fly rise).
-**Wild mods:** Compatible with Wilds of Kanto, Wilds of Kanto Revival, Untamed Tohjo via pcall protections.
 
 - Extra human NPCs for towns and routes.
 - Adjustable indoor NPC population.
@@ -103,7 +87,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - Teleport/fly departure animations with native engine effects.
 - 5th-interaction events: item, trade, or battle.
 
-### Gen 2 — Gold / Johto (v1.4.192)
+### Gen 2 — Gold / Johto (v1.4.266)
 
 **Sleep:** Grayscale, lying-down sprites with Zzz. 2D and voxel support. Bed/tent/sleeping bag accessories via SLEEP STYLE (Default/Tent/Sleeping Bag/Bed/Random/Natural).
 **Travel:** 25% fly / 25% teleport / 25% door / 25% route, with native teleport animation and fly rise.
@@ -131,7 +115,7 @@ It is one unified mod for **Yellow/Gen 1, Gold/Gen 2, and FireRed/LeafGreen/Emer
 - 5th-interaction events: item, trade, or battle.
 - Migration of older Johto Life option data into the unified Kanto Life settings bucket.
 
-### Gen 3 — FireRed / LeafGreen / Emerald (v1.4.192)
+### Gen 3 — FireRed / LeafGreen / Emerald (v1.4.266)
 
 - Native Game3 EventObject-based ambient NPCs.
 - Extra human NPCs with real game graphics rather than fabricated placeholder actors.
@@ -272,6 +256,28 @@ FireRed adds the most advanced interaction layer in Kanto Life.
 
 ---
 
+## 💛 Lifelike NPC Behaviors
+
+An optional layer that makes NPCs feel like people going about their day. **Every behavior below is a separate toggle** — turn on the ones you like, turn off the rest. Disabling them changes nothing else about the mod.
+
+- **Greetings** (`exp_greetings`) — NPCs greet you when you arrive on a map, walk up to them, or return after being away. What they say depends on their mood.
+- **Moods** (`exp_moods`) — NPCs cycle through happy, neutral, grumpy, sleepy, and excited moods, which change their greeting and chatter wording.
+- **Mood-colored speech bubbles** — emotion bubbles are tinted by the NPC's mood: warm yellow for happy, orange for excited, red for grumpy, soft blue for sleepy. Regular conversation stays white.
+- **NPC meetups** (`exp_chatter`) — two NPCs can walk up to each other and hold a 5–10 second back-and-forth conversation, then go their separate ways.
+- **Walking companions** (`exp_companions`) — bonded NPCs fall in step and walk beside each other, stride for stride, instead of wandering alone.
+- **NPC-to-NPC chatter** (`exp_chatter`) — nearby NPCs exchange short two-line chats ("Beautiful day, isn't it?" / "Sure is!").
+- **Idle behaviors** (`exp_idle`) — NPCs look around and hum to themselves as they go about their routines.
+- **Contagious yawning** (`exp_ambience`) — when one NPC yawns, nearby NPCs can catch it.
+- **Sneezes** (`exp_ambience`) — NPCs sneeze, and a nearby NPC may reply "Bless you!".
+- **Curiosity** (`exp_ambience`) — NPCs pop a `?` bubble when something catches their eye, and can get startled if you sprint past.
+- **Pokémon adoration** (`exp_ambience`) — NPCs melt at cute Pokémon with a mood-colored "Aww!".
+- **Time-of-day comments** (`exp_timeaware`) — NPCs remark on the morning, afternoon, evening, or night.
+- **Player-aware reactions** (`exp_player`) — NPCs notice and react to what you're doing nearby.
+
+None of these interfere with travel: an NPC that starts teleporting, flying, or surfing is left alone until its departure finishes.
+
+---
+
 ## 🧩 Compatibility
 
 Kanto Life is packaged as a unified content mod for:
@@ -282,15 +288,6 @@ Kanto Life is packaged as a unified content mod for:
   - FireRed
   - LeafGreen
   - Emerald
-
-The mod also declares optional compatibility with:
-
-- **HGSS_SPRITES**
-- **red_3d_player**
-- **player_model_loader**
-- **PORYGONAL_OVERWORLD_CHARACTERS**
-- **LEGENDARY_STADIUM_OVERWORLD_MODELS**
-- **TERRARIUM**
 
 Kanto Life's routine code is scoped to its own ambient actors and is designed not to take over the core behavior of unrelated NPCs or visual mods.
 
@@ -346,4 +343,4 @@ Kanto Life is built for the **gen1recomp** ecosystem and uses each supported gen
 
 Optional sprite, voxel, and overworld mods remain optional; Kanto Life adapts its behavior when their supported interfaces are present.
 
-**Current unified build:** `1.4.192`
+**Current unified build:** `1.4.266`
