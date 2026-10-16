@@ -432,7 +432,7 @@ return function(ctx)
     return nil
   end
 
-  local function slowStep(h, npc, dir)
+  local function slowStep(h, npc, dir, st)
     if not h or not npc then return false end
     local bx, by = tonumber(npc.cellX) or 0, tonumber(npc.cellY) or 0
     local ok = false
@@ -443,21 +443,24 @@ return function(ctx)
       ok = pcall(h.scriptMove, h, dir, 1)
     end
     if not ok then return false end
+    local moved = false
     if type(h.isMoving) == "function" then
       local okMoving, moving = pcall(h.isMoving, h)
-      if okMoving and moving then return true end
+      if okMoving and moving then moved = true end
     end
-    local px, py = tonumber(npc.cellX) or bx, tonumber(npc.cellY) or by
-    if px ~= bx or py ~= by then return true end
-    if type(h.position) == "function" then
+    if not moved then
+      local px, py = tonumber(npc.cellX) or bx, tonumber(npc.cellY) or by
+      if px ~= bx or py ~= by then moved = true end
+    end
+    if not moved and type(h.position) == "function" then
       local okPos, pos = pcall(h.position, h)
       if okPos and type(pos) == "table" then
         local x = tonumber(pos.x or pos.cellX or pos[1])
         local y = tonumber(pos.y or pos.cellY or pos[2])
-        if x and y and (x ~= bx or y ~= by) then return true end
+        if x and y and (x ~= bx or y ~= by) then moved = true end
       end
     end
-    return false
+    return moved
   end
 
   local function occupied(world, x, y, selfNpc)
@@ -868,7 +871,7 @@ return function(ctx)
       local d = DIRS[((start + i - 1) % #DIRS) + 1]
       local ok, can = pcall(h.canStep, h, d[3])
       if ok and can then
-        slowStep(h, npc, d[3])
+        slowStep(h, npc, d[3], st)
         st.wanderCooldown = 0.35
         return true
       end
@@ -1039,7 +1042,6 @@ return function(ctx)
       end
     end
     st.wanderCooldown = math.max(0, (st.wanderCooldown or 0) - dt)
-
     if not st.routine then
       return
     end
@@ -1059,7 +1061,7 @@ return function(ctx)
         local dir = pathFirst(world, npc, st.arrivalX, st.arrivalY)
         if dir and not occupiedByAmbient(world, (npc.cellX or 0) + ({up={0,-1},down={0,1},left={-1,0},right={1,0}})[dir][1], (npc.cellY or 0) + ({up={0,-1},down={0,1},left={-1,0},right={1,0}})[dir][2], npc) then
           local ok, can = pcall(h.canStep, h, dir)
-          if ok and can then slowStep(h, npc, dir) end
+          if ok and can then slowStep(h, npc, dir, st) end
         else
           st.arrival = false
         end
@@ -1083,7 +1085,7 @@ return function(ctx)
         if dir then
           local ok, can = pcall(h.canStep, h, dir)
           if ok and can then
-            slowStep(h, npc, dir)
+            slowStep(h, npc, dir, st)
             moved = true
           end
         end
@@ -1261,7 +1263,7 @@ return function(ctx)
           if not occupiedByAmbient(world, ax, ay, npc) and hAvoid then
             okCan, can = pcall(hAvoid.canStep, hAvoid, alt)
           end
-          if okCan and can and slowStep(hAvoid, npc, alt) then
+          if okCan and can and slowStep(hAvoid, npc, alt, st) then
             npc.facing = alt
             st.targetX, st.targetY = nil, nil
             st.exitX, st.exitY = nil, nil
@@ -1296,7 +1298,7 @@ return function(ctx)
       end
     end
     local ok, can = pcall(h.canStep, h, dir)
-    if free and ok and can and slowStep(h, npc, dir) then
+    if free and ok and can and slowStep(h, npc, dir, st) then
       st.blockedTime = 0
       st.blockedCount = 0
     else
