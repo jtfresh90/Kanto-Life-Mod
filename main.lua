@@ -82,11 +82,19 @@ return function(mod)
   elseif gen == 3 then rel = "lib/FireRedMain.lua"
   else error("Kanto Life: unsupported game generation " .. tostring(gen), 0) end
 
-  print("KANTO DEBUG dispatch", gen, rel)
+  -- Fail-open install: a generation installer error must not leave the game
+  -- with a half-wrapped Overworld / missing NPCs. Log and continue so the
+  -- base game stays playable.
   local installer = loadLocal(rel)
-  print("KANTO DEBUG loaded installer", rel)
-  print("KANTO DEBUG installing", rel)
   local okRun, err = pcall(installer, mod)
-  print("KANTO DEBUG installed", rel, okRun, err)
-  if not okRun then error(err, 0) end
+  if not okRun then
+    pcall(function()
+      if mod.log and type(mod.log.error) == "function" then
+        mod.log:error("Kanto Life installer failed for gen %s (%s): %s",
+          tostring(gen), tostring(rel), tostring(err))
+      end
+    end)
+    -- Do not re-raise: freezing/blanking the overworld is worse than a
+    -- disabled immersion layer. User can report the log line.
+  end
 end
