@@ -816,7 +816,7 @@ local function spriteGender(npc, def)
       return message(display .. " is fast asleep!", function() releaseActor(npc) end)
     end
 
-    if st.count % 5 == 0 then
+    if st.count % 2 == 0 then
       return fifthEvent(game, npc, st, key, all, isPoke, display, species)
     end
 

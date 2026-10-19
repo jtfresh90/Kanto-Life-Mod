@@ -2010,7 +2010,7 @@ return function(mod)
       end
     end
 
-    -- Progressive dialogue + 5th-interaction events (same as Kanto Life 0.8.26)
+    -- Progressive dialogue + 2nd-interaction events (same as Kanto Life 0.8.26)
     local GIFT_ITEMS = {
       "POTION", "SUPER_POTION", "HYPER_POTION", "FULL_HEAL", "REVIVE",
       "POKE_BALL", "GREAT_BALL", "ULTRA_BALL", "REPEL", "SUPER_REPEL",
@@ -2813,7 +2813,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
       if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
         return runFifthEvent(world, npc, st, key, all, false, display, nil, "trade")
       end
-      if st.count == 5 and not st.event then
+      if st.count == 2 and not st.event then
         return runFifthEvent(world, npc, st, key, all, isPoke, display, species, nil)
       end
 

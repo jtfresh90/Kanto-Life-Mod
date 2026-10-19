@@ -14,7 +14,7 @@ Every feature below can be turned **off**. Kanto Life is built as a menu of inde
 - **Routines & travel** — wandering, door/route travel, agendas, and travel animations can each be disabled.
 - **Sleep** — the entire sleep system (or just ZZZs, accessories, or daytime sleepers) can be turned off.
 - **Lifelike behaviors** — greetings, moods, chatter, meetups, and companions are separate `exp_*` options; disable one or all of them and the mod keeps working.
-- **Interactions** — door knocking, 5th-interaction events, and collision bubbles are each optional.
+- **Interactions** — door knocking, 2nd-interaction events, and collision bubbles are each optional.
 
 If you only want a busier overworld with zero extra behavior, turn everything off except the population counts. If you want the full living-world experience, turn it all on. The mod never forces a feature on you.
 
@@ -85,7 +85,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
 - Teleport/fly departure animations with native engine effects.
-- 5th-interaction events: item, trade, or battle.
+- 2nd-interaction events: item, trade, or battle.
 
 ### Gen 2 — Gold / Johto (v1.4.266)
 
@@ -112,7 +112,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
 - Teleport/fly departure animations.
-- 5th-interaction events: item, trade, or battle.
+- 2nd-interaction events: item, trade, or battle.
 - Migration of older Johto Life option data into the unified Kanto Life settings bucket.
 
 ### Gen 3 — FireRed / LeafGreen / Emerald (v1.4.266)
@@ -136,8 +136,8 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - Dialogue can reference Pokémon, locations, routes, activities, and previous interactions.
 - Pokémon NPCs use their **species name and native cry** rather than invented human dialogue.
 - Repeated interaction tracking for ambient NPCs.
-- Every fifth interaction can produce an **item, trade, or battle** for human NPCs.
-- Pokémon NPCs use an **item or wild-battle** event on their fifth interaction.
+- Every second interaction can produce an **item, trade, or battle** for human NPCs.
+- Pokémon NPCs use an **item or wild-battle** event on their second interaction.
 - Human NPC battles use a non-team-themed civilian trainer presentation when the required trainer data is available.
 - Pokémon NPC battles use a **wild-style encounter** rather than a trainer battle.
 - A Pokémon NPC that is **caught or defeated** leaves the overworld and is replaced with another Pokémon NPC.
@@ -240,13 +240,13 @@ FireRed adds the most advanced interaction layer in Kanto Life.
 - Dialogue is selected from a large deterministic sequence to reduce repetition.
 - Lines can draw from subjects such as Pokémon, routes, towns, activities, travel, and local surroundings.
 - Previous special events can be referenced later.
-- On the fifth interaction, a human NPC can trigger an **item, trade, or battle** event.
+- On the second interaction, a human NPC can trigger an **item, trade, or battle** event.
 
 ### Pokémon NPCs
 
 - Pokémon NPCs display their species identity.
 - They respond with the Pokémon's **native cry and cry audio** rather than human dialogue.
-- On their fifth interaction, they can provide an item or trigger a wild-style battle.
+- On their second interaction, they can provide an item or trigger a wild-style battle.
 - Catching or defeating the encountered Pokémon removes that overworld Pokémon NPC and replenishes the population.
 
 ### Battle cooldown
