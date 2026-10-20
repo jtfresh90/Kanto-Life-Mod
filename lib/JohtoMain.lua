@@ -2712,6 +2712,20 @@ local function pickRandomSpecies(preferRare)
       })
     end
 
+-- 2nd-interaction events repeat: after an NPC runs an event, it can run
+-- another one once 15 minutes of real-world time have passed.
+local EVENT_REPEAT_SECONDS = 900
+local function eventNow()
+  local ok, t = pcall(function() return os.time() end)
+  if ok and type(t) == "number" then return t end
+  return 0
+end
+local function eventRepeatReady(st)
+  local last = tonumber(st and st.lastEventAt)
+  if not last then return true end
+  return (eventNow() - last) >= EVENT_REPEAT_SECONDS
+end
+
 local function runFifthEvent(world, npc, st, key, all, isPoke, display, species, forceKind)
       local g = G()
       local rnd = (love and love.math and love.math.random) or math.random
@@ -2734,6 +2748,8 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
         kind = pool[rnd(1, #pool)]
       end
       st.lastKind = kind
+      st.lastEventAt = eventNow()
+      putTalkState(key, st, all)
 
       if kind == "item" then
         local itemId = pickGiftItem(g)
@@ -2813,7 +2829,7 @@ local function runFifthEvent(world, npc, st, key, all, isPoke, display, species,
       if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
         return runFifthEvent(world, npc, st, key, all, false, display, nil, "trade")
       end
-      if st.count == 2 and not st.event then
+      if st.count >= 2 and eventRepeatReady(st) then
         return runFifthEvent(world, npc, st, key, all, isPoke, display, species, nil)
       end
 

@@ -327,12 +327,12 @@ return function(ctx)
   end
 
   local function fifthEvent(game, npc, st, key, all, isPoke, display, species)
-    -- Cooldowns: item/trade share a 1-hour cooldown (the "reward" cooldown).
-    -- Battle has its own 1-hour cooldown. For Pokémon NPCs, we alternate
+    -- Cooldowns: item/trade share a 15-minute cooldown (the "reward" cooldown).
+    -- Battle has its own 15-minute cooldown. For Pokémon NPCs, we alternate
     -- item/battle; if the scheduled kind is on cooldown, we try the other.
     local now = realNow()
-    local itemReady = (tonumber(st.lastItemAt) == nil) or (now - tonumber(st.lastItemAt) >= 3600)
-    local battleReady = (tonumber(st.lastBattleAt) == nil) or (now - tonumber(st.lastBattleAt) >= 3600)
+    local itemReady = (tonumber(st.lastItemAt) == nil) or (now - tonumber(st.lastItemAt) >= 900)
+    local battleReady = (tonumber(st.lastBattleAt) == nil) or (now - tonumber(st.lastBattleAt) >= 900)
     -- For trainers, trade shares the item cooldown.
     local rewardReady = itemReady -- trade uses item cooldown
 
@@ -359,7 +359,7 @@ return function(ctx)
       end
     else
       -- Trainers: pick from item/trade/battle, avoiding the last kind.
-      -- Item and trade share the 1-hour reward cooldown.
+      -- Item and trade share the 15-minute reward cooldown.
       local pool = {}
       for _, k in ipairs(kindPool) do
         local ready = (k == "battle" and battleReady) or ((k == "item" or k == "trade") and rewardReady)

@@ -49,7 +49,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - **FireRed Pokémon NPC interactions:** Pokémon communicate through their species cry and can trigger an item or wild-battle event.
 - **FireRed wild-style Pokémon battles** for Pokémon NPC encounters.
 - **FireRed Pokémon NPC replacement** after the Pokémon is caught or defeated.
-- **FireRed battle cooldown** of one real-time hour for battle events.
+- **FireRed event cooldowns** of 15 real-time minutes for item/trade and battle events.
 - **Post-event dialogue references** for previous trades, items, and battles.
 - **Generation-specific implementations** so Gen 1, Gen 2, and Gen 3 do not have to share incompatible engine behavior.
 - **Save-aware settings** so configurable values can persist between sessions.
@@ -85,7 +85,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
 - Teleport/fly departure animations with native engine effects.
-- 2nd-interaction events: item, trade, or battle.
+- 2nd-interaction events: item, trade, or battle — repeating every 15 real minutes per NPC.
 
 ### Gen 2 — Gold / Johto (v1.4.266)
 
@@ -112,7 +112,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - NPC Travel percentage.
 - NPC Agenda: `OFF`, `DAY`, or `FULL`.
 - Teleport/fly departure animations.
-- 2nd-interaction events: item, trade, or battle.
+- 2nd-interaction events: item, trade, or battle — repeating every 15 real minutes per NPC.
 - Migration of older Johto Life option data into the unified Kanto Life settings bucket.
 
 ### Gen 3 — FireRed / LeafGreen / Emerald (v1.4.266)
@@ -141,7 +141,7 @@ If you only want a busier overworld with zero extra behavior, turn everything of
 - Human NPC battles use a non-team-themed civilian trainer presentation when the required trainer data is available.
 - Pokémon NPC battles use a **wild-style encounter** rather than a trainer battle.
 - A Pokémon NPC that is **caught or defeated** leaves the overworld and is replaced with another Pokémon NPC.
-- Battle events use a **one-hour real-time cooldown**.
+- Item/trade and battle events use **15-minute real-time cooldowns**.
 - Later conversations can reference a previous **trade, item, or battle**.
 - Sleeping NPCs with adjustable rate, daytime sleeping, ZZZs, and sleep styles.
 - FireRed's native Game3 object and world systems remain responsible for graphics, collision, movement, and map behavior.
@@ -251,7 +251,7 @@ FireRed adds the most advanced interaction layer in Kanto Life.
 
 ### Battle cooldown
 
-- Battle events use a **one-hour real-time cooldown**.
+- Battle events use a **15-minute real-time cooldown**.
 - The cooldown prevents repeated battle triggers from firing back-to-back.
 
 ---
