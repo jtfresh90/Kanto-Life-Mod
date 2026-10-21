@@ -2,7 +2,7 @@
   "id": "kanto_life",
   "name": "Kanto Life",
   "version": "1.4.268",
-  "api": 2,
+  "api": 3,
   "entry": "main.lua",
   "profile": "content",
   "category": "GAMEPLAY",

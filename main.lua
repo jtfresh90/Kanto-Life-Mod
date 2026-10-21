@@ -87,4 +87,23 @@ return function(mod)
     -- Do not re-raise: freezing/blanking the overworld is worse than a
     -- disabled immersion layer. User can report the log line.
   end
+
+  -- API 3 layer (branch api3-features): additive portable-API features
+  -- (emote bubbles, NPC handles, queueScript events, companion, battle
+  -- journal, Gen 3 screen). The module itself checks for the API 3
+  -- facades (mod:supports) and stays inert on api < 3. Same fail-open
+  -- rule as the generation installers: a failure here must never take
+  -- the base mod down with it.
+  local okApi3, errApi3 = pcall(function()
+    local api3 = loadLocal("lib/Api3Features.lua")
+    api3(mod, gen)
+  end)
+  if not okApi3 then
+    pcall(function()
+      if mod.log and type(mod.log.error) == "function" then
+        mod.log:error("Kanto Life API3 layer failed for gen %s: %s",
+          tostring(gen), tostring(errApi3))
+      end
+    end)
+  end
 end

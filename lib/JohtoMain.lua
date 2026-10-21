@@ -1639,7 +1639,12 @@ return function(mod)
       local id = p and (p.mapId or p.id)
       if id then spawnAmbient(id); tryEject(liveWorld(), id) end
     end
-    mod.events:on("map.ready", onMapIn)
+    -- API 3 note: the unified events catalog has no "map.ready" call site;
+    -- subscribing raises there and would abort this installer (everything
+    -- after this block, incl. the johtoSleepTick assignment, would never
+    -- run). map.entered / map.reloaded below drive the same handler, so
+    -- guard just this one subscription and keep the other two bare.
+    pcall(function() mod.events:on("map.ready", onMapIn) end)
     mod.events:on("map.reloaded", onMapIn)
     mod.events:on("map.entered", onMapIn)
     mod.events:on("mod.options_changed", function(p)
@@ -4701,17 +4706,25 @@ local function drawSleepTentOverlay(self, ox, oy, scale) return end
 
   pcall(installJohtoVoxelSleepCR)
   pcall(function()
+    local function retryVoxelSleepCR()
+      if not _G._johtoLifeVoxelSleepCRInstalled then
+        pcall(installJohtoVoxelSleepCR)
+      end
+    end
+    local subscribed = false
     if mod.events and type(mod.events.on) == "function" then
-      mod.events:on("update", function()
-        if not _G._johtoLifeVoxelSleepCRInstalled then
-          pcall(installJohtoVoxelSleepCR)
-        end
-      end)
-    elseif mod.on and type(mod.on) == "function" then
-      mod.on("update", function()
-        if not _G._johtoLifeVoxelSleepCRInstalled then
-          pcall(installJohtoVoxelSleepCR)
-        end
+      subscribed = pcall(function() mod.events:on("update", retryVoxelSleepCR) end)
+    end
+    if not subscribed and mod.on and type(mod.on) == "function" then
+      subscribed = pcall(function() mod.on("update", retryVoxelSleepCR) end)
+    end
+    if not subscribed and mod.hooks and type(mod.hooks.wrap) == "function" then
+      -- API 3 has no "update" event; core.update is the per-frame hook.
+      pcall(function()
+        mod.hooks:wrap("core.update", function(next, ...)
+          retryVoxelSleepCR()
+          return next(...)
+        end)
       end)
     end
   end)
