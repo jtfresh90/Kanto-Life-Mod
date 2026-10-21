@@ -327,6 +327,102 @@ do
   eq(st.lastItemAt, T, "run human: forced trade stamps reward gate")
 end
 
+-- ===== P7 gossip network =====
+local mod4 = newMod({ talk = true, shiny = true })
+local A4 = installer(mod4, 1)
+eq(A4.features.gossip, true, "gossip feature reported")
+eq(A4.features.market, true, "market feature reported")
+eq(A4.features.lost, true, "lost feature reported")
+eq(A4.features.fame, true, "fame feature reported")
+eq(A4._addNews("The museum reopened."), true, "news added")
+eq(A4._addNews("The museum reopened."), false, "duplicate news refused")
+local unreadText = A4._unreadNews()
+eq(unreadText, "The museum reopened.", "unread news is the added item")
+-- battle moments become news
+mod4._handlers["battle.started"]({ kind = "trainer", species = "ONIX", level = 14 })
+mod4._handlers["battle.ended"]({ result = "won" })
+local foundBattleNews = false
+for _, n in ipairs(A4.journal.news) do if n:find("People are talking") then foundBattleNews = true end end
+check(foundBattleNews, "battle result became gossip news")
+-- companion delivers the oldest unread news instead of a greeting
+mod4._handlers["map.entered"]({ mapId = "PALLET_TOWN" })
+local talkWrap4 = mod4._wraps["world.talk"]
+talkWrap4(function(g, t) return "vanilla" end, {}, { id = A4.companion.id })
+local gossipScript = mod4._calls.scripts[#mod4._calls.scripts]
+check(rowsContain(gossipScript, "show_text"), "companion gossip talk shows text")
+check(tostring(gossipScript[1][2]):find("Did you hear") ~= nil, "companion delivered news as gossip")
+eq(A4.journal.newsSeen, 1, "delivered news marked seen")
+-- news store caps at 8
+for i = 1, 10 do A4._addNews("Filler news " .. i) end
+eq(#A4.journal.news, 8, "news capped at 8 entries")
+
+-- ===== P8 market days =====
+local mod5 = newMod({ talk = true, shiny = false })
+local A5 = installer(mod5, 1)
+mod5._handlers["map.entered"]({ mapId = "PALLET_TOWN" }) -- companion + entry count 1
+eq(A5._marketAttempt("VIRIDIAN_CITY"), true, "market gathering spawns")
+eq(A5._marketState.mapId, "VIRIDIAN_CITY", "market map recorded")
+check(#A5._marketState.ids >= 1, "market travellers spawned")
+local marketNews = false
+for _, n in ipairs(A5.journal.news) do if n:find("Market day") then marketNews = true end end
+check(marketNews, "market day became gossip news")
+-- talking to a traveller shares unread news first
+local claimed5 = A5._handleRuntimeTalk({ def = { name = "KANTO_API3_MARKET" } })
+eq(claimed5, true, "market talk claimed")
+local travellerScript = mod5._calls.scripts[#mod5._calls.scripts]
+check(tostring(travellerScript[1][2]):find("Did you hear") ~= nil, "traveller shared the news")
+-- leaving the map disperses the gathering
+A5._socialMapExited("VIRIDIAN_CITY")
+eq(A5._marketState.mapId, nil, "market dispersed on map exit")
+-- toggling the feature off also clears it
+A5._marketAttempt("VIRIDIAN_CITY")
+A5._featureOff("market")
+eq(A5._marketState.mapId, nil, "feature toggle off clears market")
+
+-- ===== P9 lost Pokemon reunions =====
+local mod6 = newMod({ talk = true, shiny = true })
+local A6 = installer(mod6, 3)
+eq(A6._lostAttempt("LITTLEROOT_TOWN"), true, "lost pokemon spawns")
+eq(A6.lostState.stage, "waiting", "lost quest waiting")
+check(type(A6.lostState.species) == "string", "lost species chosen")
+eq(A6._lostAttempt("LITTLEROOT_TOWN"), false, "second lost spawn refused while quest active")
+local claimed6 = A6._handleRuntimeTalk({ def = { name = "KANTO_API3_LOST" } })
+eq(claimed6, true, "lost talk claimed")
+eq(A6.lostState.stage, "following", "lost pokemon follows after talk")
+local cryScript = mod6._calls.scripts[#mod6._calls.scripts]
+check(rowsContain(cryScript, "play_cry", A6.lostState.species), "lost talk plays the pokemon's cry")
+-- next map: the pokemon respawns there and its trainer appears
+A6._socialMapEntered("OLDALE_TOWN")
+eq(A6.lostState.stage, "reunion", "trainer stage reached on next map")
+check(A6.lostState.trainerId ~= nil, "trainer spawned for the reunion")
+local claimed6b = A6._handleRuntimeTalk({ def = { name = "KANTO_API3_TRAINER" } })
+eq(claimed6b, true, "reunion talk claimed")
+eq(A6.lostState.stage, "none", "quest complete after reunion")
+eq(A6.journal.reunions, 1, "reunion journalled")
+local reunionScript = mod6._calls.scripts[#mod6._calls.scripts]
+check(rowsContain(reunionScript, "give_item"), "reunion gives a thank-you item")
+
+-- ===== P10 shiny fame =====
+local mod7 = newMod({ talk = false, shiny = true })
+local A7 = installer(mod7, 2)
+mod7._handlers["map.entered"]({ mapId = "NEW_BARK_TOWN" })
+A7.startWild("ABRA", 5, true)
+local shinyWrap7 = mod7._wraps["shiny.roll"]
+local forced7 = shinyWrap7(function(ctx) return false end, { species = "ABRA" })
+eq(forced7, true, "gen2 shiny forced for fame test")
+eq(A7.journal.shinySeen, 1, "shiny sighting journalled")
+eq(A7.journal.famePending, true, "shiny fame pending a hunter")
+local shinyNews = false
+for _, n in ipairs(A7.journal.news) do if n:find("shiny") then shinyNews = true end end
+check(shinyNews, "shiny sighting became gossip news")
+-- the hunter appears on the next map and can be talked to (Gen 2 route)
+A7._socialMapEntered("AZALEA_TOWN")
+check(A7._hunterState.id ~= nil, "shiny hunter spawned on next map")
+eq(A7.journal.famePending, false, "fame pending consumed by hunter spawn")
+mod7._handlers["world.interacted"]({ kind = "npc", mapId = "AZALEA_TOWN", target = { def = { name = "KANTO_API3_HUNTER" } } })
+eq(A7.journal.hunterMet, 1, "hunter talk recorded via interacted route")
+eq(A7._hunterState.id, nil, "hunter leaves after the talk")
+
 -- ===== api < 3 inert =====
 local modOld = newMod({})
 modOld.supports = nil

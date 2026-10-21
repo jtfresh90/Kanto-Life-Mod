@@ -14,6 +14,16 @@
 --       trainer.party observer, shiny.roll (Gen 2/3) for Api3 wild events
 --   P6  KANTO_LIFE_API3 screen via content.screens + mod.ui (Gen 3 bridge),
 --       opened from a ui.start_menu.items row
+--   P7  Gossip network: notable battle moments become "news" entries the
+--       companion and market-goers share when talked to
+--   P8  Market days: on a rotating entry cadence, runtime NPCs gather on
+--       the map (spawnNpc + handles + emotes), then disperse on exit
+--   P9  Lost Pokemon reunions: a lone spawned Pokemon NPC follows the
+--       player (follower machinery) to its trainer on the next map;
+--       reunion scene + thank-you gift via queueScript
+--   P10 Shiny fame: shiny sightings make the companion react with an
+--       emote, become gossip, and draw a "shiny hunter" NPC in the
+--       next town
 --
 -- Design rules (same as the rest of the mod):
 --   * Fail-open everywhere: every engine call is pcall-wrapped; a failure
@@ -82,6 +92,10 @@ return function(mod, gen)
   if cfg.events == nil then cfg.events = true end        -- P3
   if cfg.battle == nil then cfg.battle = true end        -- P5
   if cfg.shiny == nil then cfg.shiny = true end          -- P5 shiny rolls for Api3 wild events
+  if cfg.gossip == nil then cfg.gossip = true end        -- P7
+  if cfg.market == nil then cfg.market = true end        -- P8
+  if cfg.lost == nil then cfg.lost = true end            -- P9
+  if cfg.fame == nil then cfg.fame = true end            -- P10
   Api3.cfg = cfg
   local function persistCfg() saveSet("api3cfg", cfg) end
   persistCfg()
@@ -92,6 +106,33 @@ return function(mod, gen)
   journal.trainerPartiesSeen = journal.trainerPartiesSeen or 0
   Api3.journal = journal
   local function persistJournal() saveSet("api3journal", journal) end
+
+  -- P7 -- gossip news store. Kept as an array of plain strings plus a
+  -- delivered-count in the journal bucket (save-safe shapes only: the
+  -- engine's per-playthrough buckets are not asked to serialise nested
+  -- record tables). Newest last; capped at 8, oldest dropped first and
+  -- the delivered count adjusted so unread items stay unread.
+  local function addNews(text)
+    if not cfg.gossip then return false end
+    if type(text) ~= "string" or text == "" then return false end
+    journal.news = type(journal.news) == "table" and journal.news or {}
+    for _, n in ipairs(journal.news) do if n == text then return false end end
+    journal.news[#journal.news + 1] = text
+    journal.newsSeen = tonumber(journal.newsSeen) or 0
+    while #journal.news > 8 do
+      table.remove(journal.news, 1)
+      journal.newsSeen = math.max(0, journal.newsSeen - 1)
+    end
+    persistJournal()
+    return true
+  end
+  Api3._addNews = addNews
+  local function unreadNews()
+    if type(journal.news) ~= "table" then return nil end
+    local idx = (tonumber(journal.newsSeen) or 0) + 1
+    return journal.news[idx], idx
+  end
+  Api3._unreadNews = unreadNews
 
   local function nowSeconds()
     local ok, t = pcall(os.time)
@@ -511,6 +552,8 @@ return function(mod, gen)
     "One more step, one more story.",
   }
 
+  local gossipDeliver -- forward declaration; assigned in P7 below
+
   local function partyMaxLevel()
     if not (mod.world and type(mod.world.party) == "function") then return nil end
     local ok, party = pcall(function() return mod.world:party() end)
@@ -541,6 +584,7 @@ return function(mod, gen)
         return kind
       end
     end
+    if gossipDeliver and gossipDeliver() then return "gossip" end
     local line = GREETINGS[(talks - 1) % #GREETINGS + 1]
     local ok, err = runScript({ { "show_text", "Companion: " .. line } })
     if not ok then logWarn("Kanto Life API3 greeting failed: %s", tostring(err)) end
@@ -579,6 +623,15 @@ return function(mod, gen)
       lines[#lines + 1] = "LAST EVENT: " .. tostring(journal.lastCompanionEvent):upper()
     end
     lines[#lines + 1] = "BATTLES SEEN: " .. tostring(journal.battlesSeen or 0)
+    local news = type(journal.news) == "table" and journal.news or {}
+    local unread = #news - (tonumber(journal.newsSeen) or 0)
+    if unread > 0 then lines[#lines + 1] = "NEWS: " .. tostring(unread) .. " UNREAD" end
+    if (journal.reunions or 0) > 0 then
+      lines[#lines + 1] = "REUNIONS: " .. tostring(journal.reunions)
+    end
+    if (journal.shinySeen or 0) > 0 then
+      lines[#lines + 1] = "SHINY SEEN: " .. tostring(journal.shinySeen)
+    end
     return lines
   end
   Api3._journalLines = journalLines
@@ -597,6 +650,7 @@ return function(mod, gen)
           cfg[key] = v and true or false
           persistCfg()
           if key == "companion" and not cfg.companion then despawnCompanion() end
+          if not v and Api3._featureOff then Api3._featureOff(key) end
         end,
       }
     end
@@ -605,6 +659,10 @@ return function(mod, gen)
     items[#items + 1] = toggleItem("COMPANION EVENTS", "events")
     items[#items + 1] = toggleItem("BATTLE JOURNAL", "battle")
     items[#items + 1] = toggleItem("SHINY EVENTS", "shiny")
+    items[#items + 1] = toggleItem("GOSSIP", "gossip")
+    items[#items + 1] = toggleItem("MARKET DAYS", "market")
+    items[#items + 1] = toggleItem("LOST POKEMON", "lost")
+    items[#items + 1] = toggleItem("SHINY FAME", "fame")
     if mod.ui and mod.ui.ListMenu and type(mod.ui.ListMenu.new) == "function" then
       local ok, menu = pcall(function() return mod.ui.ListMenu.new(g, "KANTO LIFE API3", items, {}) end)
       if ok and menu then return menu end
@@ -617,6 +675,382 @@ return function(mod, gen)
     }
   end
   Api3._buildScreen = buildScreen
+
+  -- ------------------------------------------------------------------
+  -- P7-P10 -- social layer: gossip, market days, lost Pokemon, shiny fame
+  -- ------------------------------------------------------------------
+  -- All four run on the same portable machinery as P1-P6: spawnNpc /
+  -- removeNpc, the P2 handle layer for movement, queueScript for
+  -- scenes, emote rows for reactions, and the journal bucket for
+  -- persistence. Every spawn is fail-open: if every candidate sprite
+  -- is refused, the feature quietly skips this map.
+  --
+  -- Prototype cadences (labelled test rates, like the 1-in-16 shiny):
+  -- a lost Pokemon may appear on every 3rd map entry, a market
+  -- gathering on every 5th (never on the same entry as a lost spawn).
+
+  -- Runtime NPC registry: id -> { role=, name=, mapId= }. The
+  -- companion is tracked separately (P4) and never appears here.
+  local runtimeNpcs = {}
+  Api3._runtimeNpcs = runtimeNpcs
+  local RUNTIME_NAMES = {
+    KANTO_API3_MARKET = "market",
+    KANTO_API3_LOST = "lost",
+    KANTO_API3_HUNTER = "hunter",
+    KANTO_API3_TRAINER = "trainer",
+  }
+
+  local function spawnRuntimeNpc(mapId, name, sprites, dx, dy)
+    if not (mod.world and type(mod.world.spawnNpc) == "function") then
+      return nil, "spawnNpc unavailable"
+    end
+    local px, py = playerCell()
+    if not px then return nil, "player cell unknown" end
+    local lastErr
+    for _, sprite in ipairs(sprites) do
+      local ok, id, err = pcall(function()
+        return mod.world:spawnNpc(mapId, {
+          name = name, sprite = sprite,
+          x = px + (dx or 0), y = py + (dy or 0), text = name,
+          movement = "STAY", range = "ANY_DIR",
+          kantoApi3Runtime = true,
+        })
+      end)
+      if ok and id then
+        runtimeNpcs[id] = { role = RUNTIME_NAMES[name], name = name, mapId = mapId }
+        return id, sprite
+      end
+      if not ok then err = id end
+      lastErr = err
+    end
+    return nil, lastErr or "all sprites refused"
+  end
+
+  local function despawnRuntime(id)
+    if id == nil then return end
+    runtimeNpcs[id] = nil
+    if mod.world and type(mod.world.removeNpc) == "function" then
+      pcall(function() mod.world:removeNpc(id) end)
+    end
+  end
+
+  local function runtimeRoleOf(target)
+    if type(target) ~= "table" then return nil end
+    if target.id ~= nil and runtimeNpcs[target.id] then
+      return runtimeNpcs[target.id].role, runtimeNpcs[target.id]
+    end
+    local nm = (type(target.def) == "table" and target.def.name) or target.name
+    if nm and RUNTIME_NAMES[nm] then return RUNTIME_NAMES[nm], nil end
+    return nil
+  end
+  Api3._runtimeRoleOf = runtimeRoleOf
+
+  -- Generic follower step (the lost Pokemon): same discipline as the
+  -- companion -- canStep-guarded steps toward the player, placeAt
+  -- catch-up when left far behind.
+  local function followNpc(mapId, id, px, py)
+    local handle = npcHandle(mapId, id)
+    if not handle then return end
+    local movingOk, moving = pcall(function() return handle:isMoving() end)
+    if movingOk and moving then return end
+    local cx, cy = handlePosition(handle)
+    if not cx then return end
+    local dx, dy = px - cx, py - cy
+    if math.max(math.abs(dx), math.abs(dy)) > 8 then
+      placeHandle(handle, px + 1, py, "left")
+      return
+    end
+    if math.abs(dx) + math.abs(dy) <= 1 then return end
+    local candidates = {}
+    if math.abs(dx) >= math.abs(dy) then
+      candidates[1] = dx > 0 and "right" or "left"
+      candidates[2] = dy > 0 and "down" or (dy < 0 and "up" or nil)
+    else
+      candidates[1] = dy > 0 and "down" or "up"
+      candidates[2] = dx > 0 and "right" or (dx < 0 and "left" or nil)
+    end
+    for _, dir in ipairs(candidates) do
+      if dir and stepHandle(handle, dir) then return end
+    end
+  end
+
+  -- P7: the companion shares the oldest unread news instead of a
+  -- greeting. Returns true when a news line was delivered.
+  gossipDeliver = function()
+    if not cfg.gossip then return false end
+    local text, idx = unreadNews()
+    if not text then return false end
+    journal.newsSeen = idx
+    persistJournal()
+    local ok, err = runScript({ { "show_text", "Companion: Did you hear? " .. text } })
+    if not ok then logWarn("Kanto Life API3 gossip failed: %s", tostring(err)) end
+    return true
+  end
+
+  -- P8 -- market days
+  local marketState = { mapId = nil, ids = {} }
+  Api3._marketState = marketState
+  local MARKET_LINES = {
+    "Fresh goods from three towns over!",
+    "Market day is the best day, isn't it?",
+    "I walked all morning to get here.",
+    "Everyone saves up for market day.",
+  }
+  local function clearMarket()
+    for _, id in ipairs(marketState.ids) do despawnRuntime(id) end
+    marketState.ids = {}
+    marketState.mapId = nil
+  end
+  local function marketSpawnAttempt(mapId)
+    if not cfg.market then return false end
+    if marketState.mapId == mapId and #marketState.ids > 0 then return true end
+    clearMarket()
+    local sprites = HUMAN_SPRITES[gen] or HUMAN_SPRITES[1]
+    local offsets = { { 2, 0 }, { -2, 0 }, { 0, 2 } }
+    local spawned = 0
+    for _, off in ipairs(offsets) do
+      local id = spawnRuntimeNpc(mapId, "KANTO_API3_MARKET", sprites, off[1], off[2])
+      if id then
+        marketState.ids[#marketState.ids + 1] = id
+        spawned = spawned + 1
+      end
+    end
+    if spawned == 0 then return false end
+    marketState.mapId = mapId
+    journal.marketDays = (journal.marketDays or 0) + 1
+    persistJournal()
+    queueEmote({ npcId = marketState.ids[1] }, "happy")
+    addNews("Market day in " .. tostring(mapId) .. "! Travellers have gathered.")
+    logInfo("Kanto Life API3 market day on %s (%d travellers)", tostring(mapId), spawned)
+    return true
+  end
+  Api3._marketAttempt = marketSpawnAttempt
+
+  -- P9 -- lost Pokemon reunions. Quest state persists in its own
+  -- bucket (plain strings/numbers only): stage none -> waiting (lone
+  -- Pokemon on a map) -> following (player talked to it) -> reunion
+  -- (its trainer waits on the next map) -> none (scene played).
+  local lostState = saveGet("api3lost")
+  if type(lostState) ~= "table" then lostState = { stage = "none" } end
+  Api3.lostState = lostState
+  local function persistLost() saveSet("api3lost", lostState) end
+  local LOST_SPECIES = { "PIDGEY", "MEOWTH", "PSYDUCK", "POLIWAG", "JIGGLYPUFF", "ODDISH", "EKANS", "SANDSHREW" }
+  -- Overworld sprite candidates per gen: generic Pokemon-shaped object
+  -- sprites, best-effort (the species label in dialogue is the lost
+  -- Pokemon's identity; if every candidate is refused the feature
+  -- skips the map silently).
+  local POKE_SPRITES = {
+    [1] = { "SPRITE_FAIRY", "SPRITE_BIRD", "SPRITE_MONSTER", "SPRITE_PIKACHU" },
+    [2] = { "SPRITE_FAIRY", "SPRITE_BIRD", "SPRITE_MONSTER", "SPRITE_PIKACHU" },
+    [3] = { "OBJ_EVENT_GFX_PIKACHU", "OBJ_EVENT_GFX_MARILL", "OBJ_EVENT_GFX_SKITTY", "OBJ_EVENT_GFX_TAILLOW", "SPRITE_PIKACHU" },
+  }
+  local function lostSpawnAttempt(mapId)
+    if not cfg.lost then return false end
+    if lostState.stage ~= "none" then return false end
+    local species = pick(LOST_SPECIES, (journal.mapEntries or 1) * 7 + gen)
+    local id, sprite = spawnRuntimeNpc(mapId, "KANTO_API3_LOST", POKE_SPRITES[gen] or POKE_SPRITES[1], 2, 1)
+    if not id then return false end
+    lostState.stage = "waiting"
+    lostState.species = species
+    lostState.sprite = sprite
+    lostState.monId = id
+    lostState.monMap = mapId
+    persistLost()
+    logInfo("Kanto Life API3 lost %s appeared on %s", tostring(species), tostring(mapId))
+    return true
+  end
+  Api3._lostAttempt = lostSpawnAttempt
+
+  -- While the lost Pokemon follows, entering a new map respawns it
+  -- there (the companion pattern) and its trainer appears.
+  local function lostContinue(mapId)
+    if lostState.stage ~= "following" and lostState.stage ~= "reunion" then return end
+    if lostState.monMap ~= mapId then
+      if lostState.monId then despawnRuntime(lostState.monId) end
+      local sprites = {}
+      if lostState.sprite then sprites[#sprites + 1] = lostState.sprite end
+      for _, s in ipairs(POKE_SPRITES[gen] or POKE_SPRITES[1]) do sprites[#sprites + 1] = s end
+      local id, sprite = spawnRuntimeNpc(mapId, "KANTO_API3_LOST", sprites, 1, 0)
+      if id then
+        lostState.monId, lostState.monMap, lostState.sprite = id, mapId, sprite
+        persistLost()
+      end
+    end
+    if lostState.stage == "following" and not lostState.trainerId then
+      local tid = spawnRuntimeNpc(mapId, "KANTO_API3_TRAINER", HUMAN_SPRITES[gen] or HUMAN_SPRITES[1], -2, 0)
+      if tid then
+        lostState.trainerId, lostState.trainerMap = tid, mapId
+        lostState.stage = "reunion"
+        persistLost()
+        logInfo("Kanto Life API3 lost %s: trainer waiting on %s", tostring(lostState.species), tostring(mapId))
+      end
+    end
+  end
+
+  -- P10 -- shiny fame
+  local hunterState = { id = nil, mapId = nil }
+  Api3._hunterState = hunterState
+  local function onShinySeen(species)
+    if not cfg.fame then return end
+    journal.shinySeen = (journal.shinySeen or 0) + 1
+    journal.famePending = true
+    persistJournal()
+    addNews("A shiny " .. tostring(species or "POKEMON") .. " was spotted! Everyone is talking about it.")
+    if companion.id then queueEmote({ npcId = companion.id }, "shock") end
+  end
+  Api3._onShinySeen = onShinySeen
+  local function hunterSpawnAttempt(mapId)
+    if not cfg.fame or not journal.famePending then return false end
+    if hunterState.id then return true end
+    local id = spawnRuntimeNpc(mapId, "KANTO_API3_HUNTER", HUMAN_SPRITES[gen] or HUMAN_SPRITES[1], -2, 0)
+    if not id then return false end
+    hunterState.id, hunterState.mapId = id, mapId
+    journal.famePending = false
+    persistJournal()
+    logInfo("Kanto Life API3 shiny hunter appeared on %s", tostring(mapId))
+    return true
+  end
+  Api3._hunterAttempt = hunterSpawnAttempt
+
+  -- Talking to runtime NPCs (claimed by the talk paths in the install
+  -- section, so the vanilla talk never runs for our spawned NPCs).
+  local function runtimeTalk(role)
+    if role == "market" then
+      local text, idx = unreadNews()
+      if cfg.gossip and text then
+        journal.newsSeen = idx
+        persistJournal()
+        runScript({ { "show_text", "Traveller: Did you hear? " .. text } })
+      else
+        local line = MARKET_LINES[((journal.marketDays or 1) + #marketState.ids) % #MARKET_LINES + 1]
+        runScript({ { "show_text", "Traveller: " .. line } })
+      end
+      return true
+    elseif role == "lost" then
+      local species = tostring(lostState.species or "POKEMON")
+      if lostState.stage == "waiting" then
+        lostState.stage = "following"
+        persistLost()
+        runScript({
+          { "play_cry", species },
+          { "show_text", "The lost " .. species .. " started following you! Its trainer can't be far. Try the next town!" },
+        })
+      else
+        runScript({
+          { "play_cry", species },
+          { "show_text", species .. " looks around hopefully..." },
+        })
+      end
+      return true
+    elseif role == "trainer" then
+      if lostState.stage ~= "reunion" then return false end
+      local species = tostring(lostState.species or "POKEMON")
+      queueEmote({ npcId = lostState.trainerId }, "happy")
+      runScript({
+        { "show_text", "Trainer: There you are! I was so worried!" },
+        { "play_cry", species },
+        { "show_text", "Trainer: Thank you for bringing my " .. species .. " back. Please, take this!" },
+        { "give_item", pick(GIFT_ITEMS, (journal.reunions or 0) + 3), 1 },
+        { "show_text", species .. " is home again. What a happy ending!" },
+      })
+      despawnRuntime(lostState.trainerId)
+      despawnRuntime(lostState.monId)
+      lostState.stage = "none"
+      lostState.monId, lostState.trainerId = nil, nil
+      persistLost()
+      journal.reunions = (journal.reunions or 0) + 1
+      persistJournal()
+      addNews("A lost " .. species .. " was reunited with its trainer!")
+      return true
+    elseif role == "hunter" then
+      runScript({
+        { "show_text", "Shiny Hunter: Word travels fast! I heard about that shiny. You're famous around here now!" },
+      })
+      journal.hunterMet = (journal.hunterMet or 0) + 1
+      persistJournal()
+      despawnRuntime(hunterState.id)
+      hunterState.id, hunterState.mapId = nil, nil
+      return true
+    end
+    return false
+  end
+  Api3._runtimeTalk = runtimeTalk
+  local function handleRuntimeTalk(target)
+    local role = runtimeRoleOf(target)
+    if not role then return false end
+    return runtimeTalk(role)
+  end
+  Api3._handleRuntimeTalk = handleRuntimeTalk
+
+  -- Social lifecycle, called from the single map.entered / map.exited /
+  -- world.stepped subscriptions in the install section (the layer keeps
+  -- one handler per event, like everywhere else here).
+  local function socialMapEntered(mapId)
+    journal.mapEntries = (journal.mapEntries or 0) + 1
+    persistJournal()
+    hunterSpawnAttempt(mapId)
+    if lostState.stage == "following" or lostState.stage == "reunion" then
+      lostContinue(mapId)
+      return
+    end
+    local lostSpawned = false
+    if (journal.mapEntries % 3) == 0 then lostSpawned = lostSpawnAttempt(mapId) end
+    if (journal.mapEntries % 5) == 0 and not lostSpawned then
+      marketSpawnAttempt(mapId)
+    end
+  end
+  Api3._socialMapEntered = socialMapEntered
+  local function socialMapExited(mapId)
+    if not mapId then return end
+    if marketState.mapId == mapId then clearMarket() end
+    if hunterState.mapId == mapId and hunterState.id then
+      despawnRuntime(hunterState.id)
+      hunterState.id, hunterState.mapId = nil, nil
+      journal.famePending = true -- the hunter looks for you in the next town
+      persistJournal()
+    end
+    if lostState.monMap == mapId and lostState.monId then
+      despawnRuntime(lostState.monId)
+      lostState.monId = nil
+      if lostState.stage == "waiting" then
+        lostState.stage = "none" -- left behind unfound; another may appear later
+      end
+      persistLost()
+    end
+    if lostState.trainerMap == mapId and lostState.trainerId then
+      despawnRuntime(lostState.trainerId)
+      lostState.trainerId, lostState.trainerMap = nil, nil
+      if lostState.stage == "reunion" then lostState.stage = "following" end
+      persistLost()
+    end
+  end
+  Api3._socialMapExited = socialMapExited
+  local function socialStepped(ev)
+    if (lostState.stage == "following" or lostState.stage == "reunion")
+        and lostState.monId and lostState.monMap
+        and lastEnteredMap and lostState.monMap == lastEnteredMap
+        and type(ev) == "table" and type(ev.x) == "number" and type(ev.y) == "number" then
+      followNpc(lostState.monMap, lostState.monId, ev.x, ev.y)
+    end
+  end
+  Api3._socialStepped = socialStepped
+
+  Api3._featureOff = function(key)
+    if key == "market" then
+      clearMarket()
+    elseif key == "lost" then
+      if lostState.monId then despawnRuntime(lostState.monId) end
+      if lostState.trainerId then despawnRuntime(lostState.trainerId) end
+      lostState.stage = "none"
+      lostState.monId, lostState.trainerId = nil, nil
+      persistLost()
+    elseif key == "fame" then
+      if hunterState.id then despawnRuntime(hunterState.id) end
+      hunterState.id, hunterState.mapId = nil, nil
+      journal.famePending = false
+      persistJournal()
+    end
+  end
 
   -- ------------------------------------------------------------------
   -- No portable 2nd-interaction event system lives here, on purpose.
@@ -666,8 +1100,14 @@ return function(mod, gen)
     if cfg.events == nil then cfg.events = true end
     if cfg.battle == nil then cfg.battle = true end
     if cfg.shiny == nil then cfg.shiny = true end
+    if cfg.gossip == nil then cfg.gossip = true end
+    if cfg.market == nil then cfg.market = true end
+    if cfg.lost == nil then cfg.lost = true end
+    if cfg.fame == nil then cfg.fame = true end
     refresh(journal, "api3journal")
     refresh(compState, "api3companion")
+    refresh(lostState, "api3lost")
+    if lostState.stage == nil then lostState.stage = "none" end
     refresh(martConsts, "api3marts")
   end
   Api3._reloadBuckets = reloadBuckets
@@ -690,17 +1130,23 @@ return function(mod, gen)
   -- P4: companion lifecycle
   Api3.features.companion = on("map.entered", function(ev)
     local mapId = type(ev) == "table" and ev.mapId or nil
-    if mapId then lastEnteredMap = mapId; spawnCompanion(mapId) end
+    if mapId then
+      lastEnteredMap = mapId
+      spawnCompanion(mapId)
+      socialMapEntered(mapId)
+    end
   end)
   on("map.exited", function(ev)
+    local m = type(ev) == "table" and ev.mapId or nil
+    socialMapExited(m)
     -- Only retire the companion when its own map exits; Gen 2's live-map
     -- preparation fires exited for neighbouring maps too, and honouring
     -- those is what fed the boot-time spawn/despawn cycle.
-    local m = type(ev) == "table" and ev.mapId or nil
     if m and companion.mapId and m ~= companion.mapId then return end
     despawnCompanion()
   end)
   on("world.stepped", function(ev)
+    socialStepped(ev)
     if not cfg.companion then return end
     if companionRetryPending and not companion.id and lastEnteredMap
         and os.time() ~= companionRetryAt then
@@ -713,6 +1159,11 @@ return function(mod, gen)
   end)
   local interactedOk = on("world.interacted", function(ev)
     if type(ev) ~= "table" or ev.kind ~= "npc" then return end
+    -- Runtime social NPCs (P7-P10): same routing rule as the companion --
+    -- the interacted path is the Gen 2 route; Gen 1/3 use world.talk.
+    if not supports("hooks", "world.talk") and handleRuntimeTalk(ev.target) then
+      return
+    end
     if isCompanionTarget(ev.target) then
       -- Gen 1/3 answer the talk through the world.talk hook below; the
       -- interacted-driven path is the Gen 2 route (no world.talk site).
@@ -751,6 +1202,9 @@ return function(mod, gen)
   -- P3 talk path for Gen 1/3 (world.talk has no Gen 2 site).
   if supports("hooks", "world.talk") then
     Api3.features.talkHook = wrap("world.talk", function(next, gameOrWorld, target)
+      if handleRuntimeTalk(target) then
+        return nil -- claimed: runtime social NPC (market / lost / hunter / trainer)
+      end
       if isCompanionTarget(target) then
         local mapId = companion.mapId
         companionTalk(mapId)
@@ -776,6 +1230,7 @@ return function(mod, gen)
         journal.lastSnapshotEnemy = e.species or e.name
       end
     end
+    if type(ev) == "table" and ev.shiny then onShinySeen(ev.species) end
     journal.lastBattle = desc
     persistJournal()
   end)
@@ -784,6 +1239,12 @@ return function(mod, gen)
     if type(ev) == "table" and ev.result then
       journal.lastBattleResult = ev.result
       persistJournal()
+      -- P7: notable battles become gossip the companion and market
+      -- travellers can share.
+      if cfg.gossip and journal.lastBattle then
+        addNews("People are talking about that battle: " .. tostring(journal.lastBattle)
+          .. " (" .. tostring(ev.result) .. ").")
+      end
     end
   end)
 
@@ -821,13 +1282,17 @@ return function(mod, gen)
       if shinyPending and type(ctx) == "table" then
         local species = ctx.species
         if species == nil or tostring(species) == tostring(shinyPending) then
+          local forcedSpecies = shinyPending
           shinyPending = nil
           journal.shinyForced = (journal.shinyForced or 0) + 1
           persistJournal()
+          onShinySeen(forcedSpecies) -- P10: a forced shiny is still a sighting
           return true
         end
       end
-      return next(ctx)
+      local natural = next(ctx)
+      if natural == true and type(ctx) == "table" then onShinySeen(ctx.species) end
+      return natural
     end)
   end
 
@@ -865,10 +1330,16 @@ return function(mod, gen)
   -- never fires NPC events; the engine runs from the modules' own
   -- talk triggers.
   Api3.features.unifiedEvents = mod._kantoLifeUnifiedEvents or false
-  logInfo("Kanto Life API3 layer installed (gen %s, flyTo=%s, emote=%s, companion=%s, screen=%s, unifiedEvents=%s)",
+  Api3.features.gossip = true
+  Api3.features.market = true
+  Api3.features.lost = true
+  Api3.features.fame = true
+  logInfo("Kanto Life API3 layer installed (gen %s, flyTo=%s, emote=%s, companion=%s, screen=%s, unifiedEvents=%s, gossip=%s, market=%s, lost=%s, fame=%s)",
     tostring(gen), tostring(flyOk), tostring(Api3.features.emote),
     tostring(Api3.features.companion), tostring(Api3.features.screen),
-    tostring(Api3.features.unifiedEvents))
+    tostring(Api3.features.unifiedEvents), tostring(Api3.features.gossip),
+    tostring(Api3.features.market), tostring(Api3.features.lost),
+    tostring(Api3.features.fame))
   mod._kantoApi3 = Api3
   return Api3
 end

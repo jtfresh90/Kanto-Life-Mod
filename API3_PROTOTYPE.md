@@ -101,6 +101,46 @@ unchanged; main (api 2) does not need them.
    the `api3cfg` mod.save bucket; journal in `api3journal`. On Gen 3 the
    screen opens through the API 3 `mod.ui` bridge (GBA frame interior).
 
+## Social layer (P7–P10, added after the first play-test zip)
+
+Four of the five creative ideas from the Oct 21 2026 list, built on the
+same portable machinery as P1–P6 (the fifth — a companion travel diary —
+was dropped at Joshua's direction). All state is save-safe shapes
+(strings/numbers/booleans) in the existing buckets plus a new
+`api3lost` bucket; every spawn is fail-open.
+
+7. **Gossip network** — battle results (from the P5 journal), shiny
+   sightings, market days, and completed reunions become "news"
+   strings (cap 8, deduped). The companion shares the oldest unread
+   item instead of a greeting; market travellers share news first,
+   too. Toggle: GOSSIP.
+8. **Market days** — on every 5th map entry (prototype cadence,
+   labelled like the 1-in-16 shiny rate), up to three runtime
+   travellers spawn around the player with a happy emote; they leave
+   when the map exits. Toggle: MARKET DAYS.
+9. **Lost Pokémon reunions** — on every 3rd map entry (never the same
+   entry as a market), a lone Pokémon NPC may appear (generic
+   Pokémon-shaped overworld sprites, best-effort per gen). Talking to
+   it starts it following the player (P2 handle steps + placeAt
+   catch-up, the companion pattern); on the next map its trainer
+   spawns, and talking to the trainer plays the reunion scene
+   (emote + cry + thank-you item) and completes the quest. Leaving a
+   map before finding it resets the quest. Toggle: LOST POKEMON.
+10. **Shiny fame** — any shiny the layer observes (its own forced
+    rolls, natural `shiny.roll` passes, or a `battle.started` shiny
+    flag) makes the companion react with a shock emote, becomes
+    gossip, and arms a "shiny hunter" NPC who spawns on the next map
+    entry; talking to him records the meeting and he leaves. If the
+    map exits first, he re-arms for the next town. Toggle: SHINY FAME.
+
+The KANTO LIFE API3 screen gains the four toggles plus NEWS / REUNIONS
+/ SHINY SEEN journal lines. Runtime NPC talks are claimed through the
+same routes as the companion (`world.talk` wrap on Gen 1/3,
+`world.interacted` on Gen 2), matched by runtime id or def name, so
+no native NPC is ever intercepted — the mock suite re-checks the
+standing guard (the layer fires no events for ordinary NPCs) with the
+social layer live.
+
 ## Portability audit — what else can be one code across all 3 gens?
 
 Checked feature by feature against the 0.3.94 unified facades
@@ -135,9 +175,13 @@ does not expose.
   (three FireRed files skip on a documented lupa/LuaJIT baseline
   difference, identical on main) plus 86 mock-mod assertions covering
   all six points, the api<3 inert path, the Gen 3 busy-world spawn
-  retry, and the SharedEvents decision engine (70/30 roll boundary,
+  retry, the SharedEvents decision engine (70/30 roll boundary,
   cooldown cross-fallbacks, wait paths, 900s gate expiry, human pool
-  exclusion/widening, gate stamping, battle-level clamps).
+  exclusion/widening, gate stamping, battle-level clamps), and the
+  P7–P10 social layer (news add/dedupe/cap, companion + traveller
+  gossip delivery, market spawn/disperse/toggle-off, the full lost
+  Pokémon quest arc, shiny-fame hunter spawn/talk). 127 assertions
+  in total.
 - Headless boot test on the real 0.3.94 engine (Xvfb, driver runs,
   branch mod copied into the rig's `mods/kanto_life/`):
   - **Yellow: pass.** Mod loaded under api 3, API 3 layer installed
@@ -172,6 +216,18 @@ does not expose.
   errors; companion spawn refused 3× with "world is busy" during the
   continue transition (expected — the stepped retry is armed, and the
   headless driver never steps the player).
+- Social-layer boot re-test (after P7–P10): all three gens log the
+  extended install line with `gossip=true, market=true, lost=true,
+  fame=true` alongside `unifiedEvents=1`. Yellow: companion once,
+  zero errors (driver timeout quirk as above). Gold: BOOT DONE, zero
+  errors or warnings. FireRed: 7,200 in-world frames, routines
+  active, zero errors. Note: the first attempt at this batch was
+  invalid — the rig's per-game data folders had been removed by the
+  previous cleanup, so the engine waited at its first-run import
+  screen and never loaded the mod; re-importing the three ROMs
+  (`POKEPORT_IMPORT_ONLY=1`) restored the rig and the re-run above
+  is the valid result. Rig lesson: after any cleanup that removes
+  the rig's game folders, re-import before boot-testing.
 
 ## What still needs in-game eyes (cannot be verified headless)
 
@@ -181,3 +237,8 @@ does not expose.
 - The Gen 3 screen's rendering inside the GBA frame.
 - Whether Yellow's Pikachu follower suppression reads as intended.
 - Shiny forcing on a real Gen 2/3 wild battle.
+- The social layer end-to-end: companion/traveller gossip delivery,
+  a market gathering's spawn cells and dispersal, the lost Pokémon's
+  follow feel and which overworld sprite actually renders per gen,
+  the reunion scene, and the shiny hunter's appearance after a real
+  shiny.
