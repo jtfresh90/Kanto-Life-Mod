@@ -33,6 +33,7 @@ if bad:
 print(f"compile check: {n} Lua files OK (minus documented baseline)")
 
 lua.globals()["API3_PATH"] = str(ROOT / "lib" / "Api3Features.lua")
+lua.globals()["SHARED_PATH"] = str(ROOT / "lib" / "SharedEvents.lua")
 test_src = (ROOT / "tests" / "api3_mock_test.lua").read_text(encoding="utf-8")
 try:
     lua.execute(test_src)

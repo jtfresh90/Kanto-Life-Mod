@@ -489,6 +489,154 @@ return function(ctx)
     return message(display .. ":\nI couldn't start\nthe battle.")
   end
 
+  -- Unified 2nd-interaction events: lib/SharedEvents.lua owns the
+  -- decision (one engine for all 3 gens, per Joshua's Oct 21 2026
+  -- direction); the adapters below are this gen's existing event
+  -- branches from fifthEvent, so execution is unchanged. If the
+  -- shared module fails to load, fifthEvent above stays in charge
+  -- (fail-open).
+  local SharedEvents
+  pcall(function()
+    local src = mod:read("lib/SharedEvents.lua")
+    if type(src) == "string" then
+      local chunk = (loadstring or load)(src, "@lib/SharedEvents.lua")
+      if chunk then
+        local v = chunk()
+        if type(v) == "table" and type(v.run) == "function" then SharedEvents = v end
+      end
+    end
+  end)
+  if SharedEvents then mod._kantoLifeUnifiedEvents = SharedEvents.version end
+
+  local function runUnifiedEvent(game, npc, st, key, all, isPoke, display, species, forceKind)
+    if not SharedEvents then
+      if forceKind == "trade" then
+        return openTrade(npc, st, key, all, display, randomRare(), false, nil)
+      end
+      return fifthEvent(game, npc, st, key, all, isPoke, display, species)
+    end
+    local env = {
+      now = realNow,
+      rnd = function(n) return math.random(1, n) end,
+      rnd100 = function() return math.random(1, 100) end,
+      persist = function(k, s, a) putState(k, s, a) end,
+      battleLevel = function(ctx) return SharedEvents.levelFor(lowestPartyLevel(session())) end,
+      giveItem = function(ctx)
+        local s = session()
+        local given, id = giftItem(s)
+        ctx.st.event, ctx.st.eventDetail = "item", id
+        ctx.st.pendingTrade, ctx.st.retryAt = nil, nil
+        ctx.st.lastItemAt = realNow()
+        putState(ctx.key, ctx.st, ctx.all)
+        local nice = itemName(id)
+        if ctx.isPoke then
+          return cryMessage(ctx.display, ctx.species, function()
+            message("Received " .. nice .. "!" .. (given and "" or "\nYour BAG is full!"), function() releaseActor(ctx.npc) end)
+          end)
+        end
+        return message(ctx.display .. ":\nHere, take this\n" .. nice .. "!" .. (given and "" or "\nYour BAG is full!"), function() releaseActor(ctx.npc) end)
+      end,
+      openTrade = function(ctx)
+        return openTrade(ctx.npc, ctx.st, ctx.key, ctx.all, ctx.display, randomRare(), false, nil)
+      end,
+      wildBattle = function(ctx, lv)
+        local s = session()
+        if not s or type(s.party) ~= "table" or #s.party == 0 then
+          return cryMessage(ctx.display, ctx.species, function() message("No PARTY available for a battle.") end)
+        end
+        local foeId = speciesId(ctx.species)
+        if not foeId then foeId = randomSpeciesId() end
+        local foeSpecies = speciesName(foeId) or ctx.species or "???"
+        ctx.st.event, ctx.st.eventDetail = "battle", foeSpecies
+        ctx.st.pendingTrade = nil
+        putState(ctx.key, ctx.st, ctx.all)
+        local world = type(getWorld) == "function" and getWorld() or nil
+        if world and world.startWildBattle then
+          return cryMessage(ctx.display, ctx.species, function()
+            -- Mark the live actor before the asynchronous battle transition.
+            if type(onPokemonBattleStart) == "function" then
+              pcall(onPokemonBattleStart, ctx.npc, ctx.species, foeId)
+            end
+            local ok = world:startWildBattle(foeId, lv, function(result)
+              if result == "win" or result == "caught" then
+                message("Battle over!")
+              end
+            end)
+            if ok then ctx.st.lastBattleAt = realNow(); putState(ctx.key, ctx.st, ctx.all) end
+            if not ok then
+              if type(onPokemonBattleStart) == "function" then pcall(onPokemonBattleStart, nil) end
+              message("The battle could not start.")
+            end
+          end)
+        end
+        return cryMessage(ctx.display, ctx.species, function() message("The battle could not start.") end)
+      end,
+      trainerBattle = function(ctx, lv)
+        local s = session()
+        if not s or type(s.party) ~= "table" or #s.party == 0 then
+          return message(ctx.display .. ":\nI'd battle you,\nbut you need a PARTY!", function() releaseActor(ctx.npc) end)
+        end
+        local foeId = randomSpeciesId()
+        local foeSpecies = speciesName(foeId) or ctx.species or "???"
+        ctx.st.event, ctx.st.eventDetail = "battle", foeSpecies
+        ctx.st.pendingTrade = nil
+        putState(ctx.key, ctx.st, ctx.all)
+        local BattleBridge = engine("src.core.game3.battle_bridge")
+        if BattleBridge and type(BattleBridge.start) == "function" then
+          local foeParty = {}
+          local pool = allSpeciesPool()
+          for i = 1, math.random(1, 3) do
+            local sid = pool[math.random(1, #pool)] or foeId
+            foeParty[#foeParty+1] = { species = sid, level = lv }
+          end
+          local trainerId = trainerIdForNpc(ctx.npc)
+          if not trainerId then
+            return message(ctx.display .. ":\nI couldn't identify\nthis trainer.")
+          end
+          local foe = { trainerId = trainerId, party = foeParty, trainerName = ctx.display }
+          return message(ctx.display .. ":\nHow about a battle?\nMy team is ready!", function()
+            local ok = BattleBridge.start(mod, ctx.game, foe, {
+              wild = false, playerParty = s.party, trainerId = trainerId,
+              trainerName = ctx.display, session = s,
+              onDone = function(result)
+                if result == "win" then
+                  message(ctx.display .. ":\nYou're really strong!", function() releaseActor(ctx.npc) end)
+                else
+                  releaseActor(ctx.npc)
+                end
+              end,
+            })
+            if ok then ctx.st.lastBattleAt = realNow(); putState(ctx.key, ctx.st, ctx.all) end
+            if not ok then
+              message(ctx.display .. ":\nI couldn't start\nthe battle.", function() releaseActor(ctx.npc) end)
+            end
+          end)
+        end
+        return message(ctx.display .. ":\nI couldn't start\nthe battle.")
+      end,
+      waitMessage = function(ctx)
+        if ctx.isPoke then
+          local waitMsg = ctx.display .. " looks at you expectantly...\n(Check back in a bit!)"
+          return cryMessage(ctx.display, ctx.species, function() message(waitMsg, function() releaseActor(ctx.npc) end) end)
+        end
+        local waitMsg
+        if ctx.st.lastKind == "trade" then
+          waitMsg = ctx.display .. ":\nEnjoy that trade! Let's do\nanother in a little while."
+        elseif ctx.st.lastKind == "item" then
+          waitMsg = ctx.display .. ":\nI already gave you something.\nCome back later!"
+        else
+          waitMsg = ctx.display .. ":\nThat was fun! Give me some\ntime before our next match."
+        end
+        return message(waitMsg, function() releaseActor(ctx.npc) end)
+      end,
+    }
+    local ctx = {
+      game = game, npc = npc, st = st, key = key, all = all,
+      isPoke = isPoke, display = display, species = species, forceKind = forceKind,
+    }
+    return SharedEvents.run(env, ctx)
+  end
+
   -- Human identities are generated from a large deterministic name bank. The
   -- name is keyed by map + runtime object id, not by a shared fallback, so
   -- spawned civilians do not all become Quinn.
@@ -816,8 +964,12 @@ local function spriteGender(npc, def)
       return message(display .. " is fast asleep!", function() releaseActor(npc) end)
     end
 
+    if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
+      return runUnifiedEvent(game, npc, st, key, all, false, display, nil, "trade")
+    end
+
     if st.count % 2 == 0 then
-      return fifthEvent(game, npc, st, key, all, isPoke, display, species)
+      return runUnifiedEvent(game, npc, st, key, all, isPoke, display, species, nil)
     end
 
     if isPoke then

@@ -213,6 +213,120 @@ mod3._handlers["world.stepped"]({ mapId = "LITTLEROOT_TOWN", x = 5, y = 6 })
 eq(#mod3._calls.spawns, 1, "gen3 companion spawned on stepped retry")
 eq(A3.companion.id, "LITTLEROOT_TOWN_obj_99", "gen3 companion id recorded after retry")
 
+-- ===== 2nd-interaction events stay per-gen (Joshua's rule) =====
+-- The API 3 layer must never take over, count, or stand down the
+-- per-gen 2nd-interaction events: no arming flag is ever set, and
+-- talking to any NPC (spawned or native) through the layer's
+-- world.interacted handler produces no scripts and no wild battles.
+eq(mod1._kantoApi3PortableEvents, nil, "no portable-events arming flag (gen1)")
+eq(mod2._kantoApi3PortableEvents, nil, "no portable-events arming flag (gen2)")
+eq(A.features.portableEvents, nil, "layer reports no portable-events feature")
+local guardScripts = #mod1._calls.scripts
+local guardWild = #mod1._calls.wild
+local spawnedPal = { kind = "npc", mapId = "PALLET_TOWN", target = { id = "PALLET_TOWN_obj_7", def = { kantoLifeAmbient = true, kantoLifeDisplayName = "BRUNO" } } }
+local nativePal = { kind = "npc", mapId = "PALLET_TOWN", target = { id = "PALLET_TOWN_obj_10", def = { kantoLifeDisplayName = "MOM" } } }
+mod1._handlers["world.interacted"](spawnedPal)
+mod1._handlers["world.interacted"](spawnedPal)
+mod1._handlers["world.interacted"](nativePal)
+mod1._handlers["world.interacted"](nativePal)
+eq(#mod1._calls.scripts, guardScripts, "layer fires no NPC events (per-gen systems own them)")
+eq(#mod1._calls.wild, guardWild, "layer starts no NPC wild battles")
+
+-- ===== SharedEvents unified decision engine =====
+local sf = assert(io.open(SHARED_PATH, "r"))
+local ssrc = sf:read("*a"); sf:close()
+local SE = assert((loadstring or load)(ssrc, "@SharedEvents"))()
+eq(type(SE), "table", "SharedEvents loads as a table")
+eq(SE.version, 1, "SharedEvents version")
+-- Level rule: lowest party member - 10, clamped [2, 40].
+eq(SE.levelFor(50), 40, "levelFor: lowest 50 -> 40 (cap)")
+eq(SE.levelFor(30), 20, "levelFor: lowest 30 -> 20")
+eq(SE.levelFor(12), 2, "levelFor: lowest 12 -> 2 (floor)")
+eq(SE.levelFor(100), 40, "levelFor: lowest 100 -> 40 (cap)")
+eq(SE.levelFor(nil), 2, "levelFor: no party -> 2")
+
+local T = 100000
+local function stubEnv(rolls, rolls100)
+  local calls = {}
+  local qi, q100 = 0, 0
+  local env = {
+    now = function() return T end,
+    rnd = function(n) qi = qi + 1; local v = rolls[qi] or 1; return ((v - 1) % n) + 1 end,
+    rnd100 = function() q100 = q100 + 1; return rolls100[q100] or 50 end,
+    persist = function() calls.persist = (calls.persist or 0) + 1 end,
+    battleLevel = function() return 17 end,
+    giveItem = function() calls.giveItem = true; return true end,
+    openTrade = function() calls.openTrade = true; return true end,
+    wildBattle = function(ctx, lv) calls.wildBattle = lv; return true end,
+    trainerBattle = function(ctx, lv) calls.trainerBattle = lv; return true end,
+    waitMessage = function() calls.waitMessage = true; return true end,
+  }
+  return env, calls
+end
+local function decideWith(st, isPoke, rolls, rolls100)
+  local env = stubEnv(rolls or {}, rolls100 or {})
+  return SE.decide(env, { st = st, isPoke = isPoke })
+end
+-- Pokemon NPCs: 70/30 schedule (70 = battle, 71 = item).
+eq(decideWith({}, true, {}, { 70 }), "battle", "decide poke: roll 70 -> battle")
+eq(decideWith({}, true, {}, { 71 }), "item", "decide poke: roll 71 -> item")
+-- Scheduled kind on cooldown falls back to the other kind.
+eq(decideWith({ lastBattleAt = T - 100 }, true, {}, { 10 }), "item", "decide poke: battle gated -> item fallback")
+eq(decideWith({ lastItemAt = T - 100 }, true, {}, { 99 }), "battle", "decide poke: item gated -> battle fallback")
+-- Both gates closed -> check-back-later.
+eq(decideWith({ lastItemAt = T - 100, lastBattleAt = T - 100 }, true, {}, { 10 }), "wait", "decide poke: both gated -> wait")
+-- Gates open again after 900s.
+eq(decideWith({ lastBattleAt = T - 900 }, true, {}, { 10 }), "battle", "decide poke: battle gate expires at 900s")
+-- Humans: pool excludes the previous kind.
+eq(decideWith({ lastKind = "item" }, false, { 1 }), "trade", "decide human: excludes last (item), pick 1 -> trade")
+eq(decideWith({ lastKind = "item" }, false, { 2 }), "battle", "decide human: excludes last (item), pick 2 -> battle")
+eq(decideWith({}, false, { 2 }), "trade", "decide human: no last, pick 2 -> trade")
+-- Humans: readiness filter beats the exclusion (widen when empty).
+eq(decideWith({ lastKind = "battle", lastItemAt = T - 100 }, false, { 1 }), "battle", "decide human: only battle ready -> battle despite last")
+-- Humans: nothing ready -> wait.
+eq(decideWith({ lastItemAt = T - 100, lastBattleAt = T - 100 }, false, { 1 }), "wait", "decide human: all gated -> wait")
+-- run(): item stamps the reward gate + lastKind, routes to giveItem.
+do
+  local env, calls = stubEnv({ 1 }, {})
+  local st = {}
+  SE.run(env, { st = st, isPoke = false, key = "k", all = {} })
+  eq(calls.giveItem, true, "run human: item routed to giveItem")
+  eq(st.lastKind, "item", "run human: lastKind stamped")
+  eq(st.lastItemAt, T, "run human: reward gate stamped at selection")
+end
+-- run(): battle routes with the adapter level, gate left to the adapter.
+do
+  local env, calls = stubEnv({ 2 }, {})
+  local st = { lastKind = "item" }
+  SE.run(env, { st = st, isPoke = false, key = "k", all = {} })
+  eq(calls.trainerBattle, 17, "run human: battle routed to trainerBattle with level")
+  eq(st.lastItemAt, nil, "run human: battle does not stamp reward gate")
+end
+-- run(): wait routes to the check-back-later path, stamps nothing.
+do
+  local env, calls = stubEnv({}, { 10 })
+  local st = { lastItemAt = T - 5, lastBattleAt = T - 5, lastKind = "item" }
+  SE.run(env, { st = st, isPoke = true, key = "k", all = {} })
+  eq(calls.waitMessage, true, "run poke: gated -> waitMessage")
+  eq(st.lastItemAt, T - 5, "run poke: wait stamps nothing")
+end
+-- run(): a forced trade on a Pokemon NPC is dropped back to decide.
+do
+  local env, calls = stubEnv({}, { 71 })
+  local st = {}
+  SE.run(env, { st = st, isPoke = true, forceKind = "trade", key = "k", all = {} })
+  eq(calls.giveItem, true, "run poke: forced trade dropped, decide -> item")
+  eq(calls.openTrade, nil, "run poke: trade never opens for a Pokemon NPC")
+end
+-- run(): a forced trade (declined-trade re-offer) opens the trade.
+do
+  local env, calls = stubEnv({}, {})
+  local st = {}
+  SE.run(env, { st = st, isPoke = false, forceKind = "trade", key = "k", all = {} })
+  eq(calls.openTrade, true, "run human: forced trade opens trade")
+  eq(st.lastItemAt, T, "run human: forced trade stamps reward gate")
+end
+
 -- ===== api < 3 inert =====
 local modOld = newMod({})
 modOld.supports = nil

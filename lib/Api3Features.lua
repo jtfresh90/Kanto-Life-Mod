@@ -619,6 +619,21 @@ return function(mod, gen)
   Api3._buildScreen = buildScreen
 
   -- ------------------------------------------------------------------
+  -- No portable 2nd-interaction event system lives here, on purpose.
+  -- The unified script rows cannot express those events without
+  -- changing how they work: give_pokemon never takes one of the
+  -- player's Pokemon in exchange, the unified trade verb only replays
+  -- the game's native fixed trades, and a unified trainer battle
+  -- needs a native trainer class with its fixed party instead of a
+  -- fully random one. Instead, the event DECISIONS are unified in
+  -- lib/SharedEvents.lua (one engine for all 3 gens, Joshua's
+  -- Oct 21 2026 direction) while execution stays in the per-gen
+  -- modules' own branches, reached from their own talk triggers --
+  -- spawned NPCs only, exactly as shipped. This layer only reports
+  -- the engine's registration (features.unifiedEvents).
+  -- ------------------------------------------------------------------
+
+  -- ------------------------------------------------------------------
   -- Install: events, hooks, screen registration
   -- ------------------------------------------------------------------
   local function on(event, fn)
@@ -696,13 +711,15 @@ return function(mod, gen)
       companionFollow(ev.x, ev.y)
     end
   end)
-  on("world.interacted", function(ev)
+  local interactedOk = on("world.interacted", function(ev)
     if type(ev) ~= "table" or ev.kind ~= "npc" then return end
-    if not isCompanionTarget(ev.target) then return end
-    -- Gen 1/3 answer the talk through the world.talk hook below; the
-    -- interacted-driven path is the Gen 2 route (no world.talk site).
-    local talkOk = supports("hooks", "world.talk")
-    if not talkOk then companionTalk(ev.mapId) end
+    if isCompanionTarget(ev.target) then
+      -- Gen 1/3 answer the talk through the world.talk hook below; the
+      -- interacted-driven path is the Gen 2 route (no world.talk site).
+      local talkOk = supports("hooks", "world.talk")
+      if not talkOk then companionTalk(ev.mapId) end
+      return
+    end
   end)
   on("world.live_maps_updated", function(ev)
     if type(ev) == "table" then
@@ -843,9 +860,15 @@ return function(mod, gen)
 
   Api3.installed = true
   local flyOk = supports("world", "flyTo")
-  logInfo("Kanto Life API3 layer installed (gen %s, flyTo=%s, emote=%s, companion=%s, screen=%s)",
+  -- The per-gen modules register the unified SharedEvents engine here
+  -- when it loaded (they install before this layer). The layer itself
+  -- never fires NPC events; the engine runs from the modules' own
+  -- talk triggers.
+  Api3.features.unifiedEvents = mod._kantoLifeUnifiedEvents or false
+  logInfo("Kanto Life API3 layer installed (gen %s, flyTo=%s, emote=%s, companion=%s, screen=%s, unifiedEvents=%s)",
     tostring(gen), tostring(flyOk), tostring(Api3.features.emote),
-    tostring(Api3.features.companion), tostring(Api3.features.screen))
+    tostring(Api3.features.companion), tostring(Api3.features.screen),
+    tostring(Api3.features.unifiedEvents))
   mod._kantoApi3 = Api3
   return Api3
 end

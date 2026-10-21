@@ -4973,6 +4973,38 @@ local function courtesyOnWarp(world, warpDef)
     return maxLv, math.max(n, 0)
   end
 
+  -- Lowest party member level (same party scan as playerPartyInfo,
+  -- tracking the minimum). Drives the unified SharedEvents battle
+  -- level rule: lowest - 10, clamped to [2, 40].
+  local function lowestPartyLevel(g)
+    local minLv, n = nil, 0
+    local function scan(list)
+      if type(list) ~= "table" then return end
+      for i = 1, 6 do
+        local mon = list[i]
+        if type(mon) == "table" and (mon.species or mon.id or mon.name) then
+          n = n + 1
+          local lv = tonumber(mon.level or mon.lvl or mon.Level)
+          if not lv and type(mon.stats) == "table" then lv = tonumber(mon.stats.level) end
+          lv = lv or 5
+          if not minLv or lv < minLv then minLv = lv end
+        end
+      end
+    end
+    local save = g and g.save
+    local party = save and save.party
+    if type(party) == "table" then
+      scan(party.mons or party.pokemon or party)
+    end
+    if n == 0 and g and g.player then
+      scan(g.player.party and (g.player.party.mons or g.player.party))
+    end
+    if n == 0 and save then
+      scan(save.playerParty or save.player_party)
+    end
+    return minLv or 5
+  end
+
   local function enemyLevelFor(playerMax)
     playerMax = tonumber(playerMax) or 5
     if playerMax > 50 then return 40 end
@@ -5447,10 +5479,10 @@ local function pickRandomSpecies(preferRare)
     return sanitizeSpecies(pool[rnd(1, #pool)])
   end
 
-  local function buildEnemyParty(g)
+  local function buildEnemyParty(g, lvOverride)
     local maxLv = playerPartyInfo(g)
     local count = love.math.random(1, 6)
-    local lv = enemyLevelFor(maxLv)
+    local lv = tonumber(lvOverride) or enemyLevelFor(maxLv)
     local party = {}
     for i = 1, count do
       party[i] = { species = sanitizeSpecies(pickRandomSpecies(false)), level = lv, shiny = false, isShiny = false, form = nil, special = false }
@@ -5697,6 +5729,121 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     end
   end
 
+  -- Unified 2nd-interaction events: lib/SharedEvents.lua owns the
+  -- decision (one engine for all 3 gens, per Joshua's Oct 21 2026
+  -- direction); the adapters below are this gen's existing event
+  -- branches, so execution is unchanged. If the shared module fails
+  -- to load, runFifthEvent above stays in charge (fail-open).
+  local SharedEvents
+  pcall(function()
+    local src = mod:read("lib/SharedEvents.lua")
+    if type(src) == "string" then
+      local chunk = (loadstring or load)(src, "@lib/SharedEvents.lua")
+      if chunk then
+        local v = chunk()
+        if type(v) == "table" and type(v.run) == "function" then SharedEvents = v end
+      end
+    end
+  end)
+  if SharedEvents then mod._kantoLifeUnifiedEvents = SharedEvents.version end
+
+  local function runUnifiedEvent(g, world, npc, st, key, all, isPoke, display, species, forceKind)
+    if not SharedEvents then
+      return runFifthEvent(g, world, npc, st, key, all, isPoke, display, species, forceKind)
+    end
+    local rnd = (love and love.math and love.math.random) or math.random
+    local env = {
+      now = eventNow,
+      rnd = function(n) return rnd(1, n) end,
+      rnd100 = function() return rnd(1, 100) end,
+      persist = function(k, s, a) putTalkState(k, s, a) end,
+      battleLevel = function(ctx) return SharedEvents.levelFor(lowestPartyLevel(ctx.g)) end,
+      giveItem = function(ctx)
+        local itemId = pickGiftItem(ctx.g)
+        local given, resolved = tryGiveItem(ctx.g, itemId, 1)
+        itemId = resolved or itemId
+        local nice = tostring(itemId):gsub("_", " ")
+        ctx.st.event, ctx.st.eventDetail = "item", itemId
+        ctx.st.pendingTrade = nil
+        putTalkState(ctx.key, ctx.st, ctx.all)
+        if ctx.isPoke then
+          if playSpeciesCry then playSpeciesCry(ctx.species) end
+          if given then
+            pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. ctx.display .. "!\n(Received " .. nice .. "!)")
+          else
+            pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. ctx.display .. "!\n(Wanted to give\n" .. nice .. "...)")
+          end
+        else
+          if given then
+            pushText(ctx.g, ctx.world, ctx.display .. ":\nHere, take this\n" .. nice .. "!")
+          else
+            pushText(ctx.g, ctx.world, ctx.display .. ":\nI'd give you a\n" .. nice .. ", but your\nbag is full!")
+          end
+        end
+        return true
+      end,
+      openTrade = function(ctx)
+        local rare = ctx.st.eventDetail or pickRandomSpecies(true)
+        if type(rare) ~= "string" or rare == "" then rare = pickRandomSpecies(true) end
+        if sanitizeSpecies then rare = sanitizeSpecies(rare) end
+        if ctx.npc.def then ctx.npc.def.kantoLifeTradeMon = rare end
+        beginInteractiveTrade(ctx.g, ctx.world, ctx.npc, ctx.st, ctx.key, ctx.all, ctx.isPoke, ctx.display, rare)
+        return true
+      end,
+      wildBattle = function(ctx, lv)
+        ctx.st.lastBattleAt = eventNow()
+        ctx.st.pendingTrade = nil
+        local foe = ctx.species or pickRandomSpecies(false)
+        ctx.st.event, ctx.st.eventDetail = "battle", foe
+        putTalkState(ctx.key, ctx.st, ctx.all)
+        if playSpeciesCry then playSpeciesCry(foe) end
+        local started = startWildBattle(ctx.g, foe, lv, { world = ctx.world, display = ctx.display })
+        if not started then
+          pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. ctx.display .. "!\n(Couldn't start\nthe battle...)")
+        else
+          pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. ctx.display .. "!\n(Battle! Lv" .. tostring(lv) .. "\nYou can catch it!)")
+        end
+        return true
+      end,
+      trainerBattle = function(ctx, lv)
+        ctx.st.lastBattleAt = eventNow()
+        ctx.st.pendingTrade = nil
+        local party = buildEnemyParty(ctx.g, lv)
+        ctx.st.event, ctx.st.eventDetail = "battle", "trainer"
+        putTalkState(ctx.key, ctx.st, ctx.all)
+        local started = startTrainerBattle(ctx.g, party, ctx.display, ctx.npc)
+        if not started then
+          pushText(ctx.g, ctx.world, ctx.display .. ":\nI wanted to battle,\nbut something went wrong!")
+        else
+          pushText(ctx.g, ctx.world, ctx.display .. ":\nHow about a battle?\nMy team is ready!")
+        end
+        return true
+      end,
+      waitMessage = function(ctx)
+        if ctx.isPoke then
+          if playSpeciesCry then playSpeciesCry(ctx.species) end
+          pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. ctx.display .. " looks at you expectantly...\n(Check back in a bit!)")
+        else
+          local line
+          if ctx.st.lastKind == "trade" then
+            line = "Enjoy that trade! Let's do\nanother in a little while."
+          elseif ctx.st.lastKind == "item" then
+            line = "I already gave you something.\nCome back later!"
+          else
+            line = "That was fun! Give me some\ntime before our next match."
+          end
+          pushText(ctx.g, ctx.world, ctx.display .. ":\n" .. line)
+        end
+        return true
+      end,
+    }
+    local ctx = {
+      g = g, world = world, npc = npc, st = st, key = key, all = all,
+      isPoke = isPoke, display = display, species = species, forceKind = forceKind,
+    }
+    return SharedEvents.run(env, ctx)
+  end
+
   local function progressiveAmbientTalk(g, world, npc, isPoke)
     local d = npc.def or {}
     local st, key, all = getTalkState(npc)
@@ -5715,10 +5862,10 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     end
 
     if (not isPoke) and st.pendingTrade and not st.event and st.retryAt and st.count >= st.retryAt then
-      return runFifthEvent(g, world, npc, st, key, all, false, display, nil, "trade")
+      return runUnifiedEvent(g, world, npc, st, key, all, false, display, nil, "trade")
     end
-    if st.count >= 2 and eventRepeatReady(st) then
-      return runFifthEvent(g, world, npc, st, key, all, isPoke, display, species, nil)
+    if st.count >= 2 and st.count % 2 == 0 then
+      return runUnifiedEvent(g, world, npc, st, key, all, isPoke, display, species, nil)
     end
 
     if isPoke then
