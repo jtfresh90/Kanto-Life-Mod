@@ -574,6 +574,14 @@ local function spriteGender(npc, def)
     if def.kantoLifeAmbient or npc.kantoLifeAmbient or def.kantoLifeRandomDialogue then return true end
     if def.item or def.pokemon or def.trainerId or def.isTrainer or def.trainer then return false end
     if tonumber(def.trainerType) and tonumber(def.trainerType) > 0 then return false end
+    -- Field props are not NPCs. An item ball's def carries a scriptKey and
+    -- trainerType 0 but no item marker, so without this it passes as a
+    -- regular NPC: its pickup script is swallowed by the talk hook and it
+    -- speaks generated trainer dialogue instead. Same prop graphics ids
+    -- FireRedRoutines.eligible already excludes (item ball, cut tree,
+    -- rock-smash rock, pushable boulder).
+    local gid = tonumber(npc.graphicsId or def.graphicsId or def.graphics)
+    if gid == 92 or gid == 95 or gid == 96 or gid == 97 then return false end
     if def.story or def.isStory or def.hidden then return false end
     return def.scriptKey ~= nil or def.text ~= nil
   end
