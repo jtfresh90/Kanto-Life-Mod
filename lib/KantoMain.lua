@@ -56,25 +56,40 @@ return function(mod)
     return nil
   end
 
+  -- v10 perf: findInstalled + lib.require ran on EVERY frame via
+  -- scheduleTick's syncTerrariumSettings. Mods cannot be installed
+  -- mid-session, so the lookup is memoised once (same result
+  -- forever after, including nil when Terrarium is absent).
+  local terrariumRoutinesMemo, terrariumRoutinesMemoDone = nil, false
   local function terrariumRoutines()
+    if terrariumRoutinesMemoDone then return terrariumRoutinesMemo end
+    terrariumRoutinesMemoDone = true
     local m = findInstalled("TERRARIUM")
     local ex = m and m.exports
     local lib = ex and ex.lib
     if type(lib) ~= "table" or type(lib.require) ~= "function" then return nil end
     local ok, r = pcall(lib.require, "Routines")
-    return ok and type(r) == "table" and r or nil
+    terrariumRoutinesMemo = ok and type(r) == "table" and r or nil
+    return terrariumRoutinesMemo
   end
 
+  -- v10 perf: scheduleTick called this every frame, re-applying
+  -- the same two settings. Only push them when they actually
+  -- change (options only change from the pause menu).
+  local terrariumSyncLast = nil
   local function syncTerrariumSettings()
     local r = terrariumRoutines()
     if not r then return false end
     local g = G()
     local mode = math.floor(tonumber(opt("npc_agenda")) or 0)
     if mode < 0 then mode = 0 elseif mode > 2 then mode = 2 end
+    local routineOn = opt("npc_routines") and true or false
+    local key = mode .. ":" .. tostring(routineOn)
+    if terrariumSyncLast == key then return true end
+    terrariumSyncLast = key
     if r.agendaSetting and type(r.agendaSetting.setIndex) == "function" then
       pcall(r.agendaSetting.setIndex, r.agendaSetting, mode + 1, g)
     end
-    local routineOn = opt("npc_routines") and true or false
     if r.setting and type(r.setting.setIndex) == "function" then
       pcall(r.setting.setIndex, r.setting, routineOn and 1 or 2, g)
     end
@@ -198,6 +213,31 @@ return function(mod)
       if v ~= nil then return v end
     end
     return nil
+  end
+
+  -- v10 perf (Gen 1 only; Joshua, Oct 26 2026: the mod runs slow
+  -- in Gen 1). opt() walks mod.options + G() + the save tables on
+  -- EVERY call, and the per-frame paths called it per NPC per
+  -- frame: the NPC:update wrap (sleeping_npcs, debug_log, sleep_pct
+  -- via shouldSleepNow, sleep_style), nightlifeTick's sleep scan,
+  -- and scheduleTick's Terrarium sync. Cache option values for
+  -- 0.5s -- options only change from the pause menu, so a
+  -- half-second-old read is invisible in-game, and no NPC
+  -- behaviour changes (same values, just read less often).
+  local optCache = {}
+  local optCacheAt = 0
+  local function clockNow()
+    if love and love.timer and love.timer.getTime then
+      local ok, t = pcall(love.timer.getTime)
+      if ok and type(t) == "number" then return t end
+    end
+    return os.clock()
+  end
+  local function optCached(key)
+    local now = clockNow()
+    if now - optCacheAt >= 0.5 then optCache, optCacheAt = {}, now end
+    if optCache[key] == nil then optCache[key] = opt(key) end
+    return optCache[key]
   end
 
   -- Per-map defaults used only when EXTRA NPCS is turned ON while count is 0.
@@ -2957,7 +2997,7 @@ local nm = storyDisplayName(talker)
     return (idn + (isNight and 0 or 97)) % 100
   end
   local function shouldSleepNow(npc, isNight)
-    local pct = math.floor(tonumber(opt("sleep_pct")) or 15)
+    local pct = math.floor(tonumber(optCached("sleep_pct")) or 15)
     if pct <= 0 then return false end
     if pct > 100 then pct = 100 end
     if pct >= 100 then return true end
@@ -3599,16 +3639,23 @@ local kantoRoutines = nil
     end
   end
 
+  local scheduleTickLastDsStamp = 0
   local function scheduleTick(world, dt)
     if not world or not world.map or not world.player or not world.npcs then return end
     -- KantoRoutines is the sole owner of Kanto Life spawned-NPC travel and
     -- agenda. Default FireRed map NPCs are intentionally never handed to a
     -- routine scheduler here.
-    for _, n in ipairs(world.npcs or {}) do
-      local d = n.def or {}
-      if d.kantoLifeAmbient then
-        d.dsSpecies = d.dsSpecies or "KANTO_LIFE_AMBIENT"
-        n.def = d
+    -- v10 perf: the dsSpecies stamp is idempotent metadata -- it
+    -- only needs stamping once per NPC, not every frame. Re-scan
+    -- at ~2/second (new spawns get stamped within half a second).
+    if clockNow() - scheduleTickLastDsStamp >= 0.5 then
+      scheduleTickLastDsStamp = clockNow()
+      for _, n in ipairs(world.npcs or {}) do
+        local d = n.def or {}
+        if d.kantoLifeAmbient then
+          d.dsSpecies = d.dsSpecies or "KANTO_LIFE_AMBIENT"
+          n.def = d
+        end
       end
     end
     syncTerrariumSettings()
@@ -5831,6 +5878,7 @@ local function runFifthEvent(g, world, npc, st, key, all, isPoke, display, speci
     end
   end
 
+local nightlifeTickLastSleepScan = 0 -- v10 perf: sleep-scan throttle (see below)
 local function nightlifeTick(world, dt)
     if not world then return end
     local g = G()
@@ -5855,7 +5903,13 @@ local function nightlifeTick(world, dt)
       pushText(g, world, "Welcome! Thank you\nfor knocking.")
     end
 
-    if opt("sleeping_npcs") then
+    -- v10 perf: the sleep scan below used to run over every NPC on
+    -- EVERY frame (shouldSleepNow + a door check per NPC). Sleep is
+    -- a slow, time-of-day decision -- scanning at ~2/second is
+    -- invisible in-game. Step counting, trespass eject and the
+    -- welcome above stay per-frame; only this scan is throttled.
+    if optCached("sleeping_npcs") and clockNow() - (nightlifeTickLastSleepScan or 0) >= 0.5 then
+      nightlifeTickLastSleepScan = clockNow()
       local isNight = night(world)
       for _, npc in ipairs(world.npcs or {}) do
         if isPlayerActor(npc) then
@@ -5876,7 +5930,7 @@ local function nightlifeTick(world, dt)
             -- Natural sleep style (5): compute at sleep time when world/map is available.
             -- Outdoor->tent, house->bed, other indoor->80% bag / 20% default.
             pcall(function()
-              if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and world and world.map then
+              if math.floor(tonumber(optCached("sleep_style")) or 0) == 5 and world and world.map then
                 local mapId = tostring(world.map.id or "")
                 local naturalResult
                 if not isIndoor(mapId, world.map) then
@@ -7167,7 +7221,7 @@ local function nightlifeTick(world, dt)
         -- Uses setOpt (not mod.options:set) so opt() sees the reset.
         pcall(function()
           local nowT = (love and love.timer and love.timer.getTime and love.timer.getTime()) or 0
-          if opt("debug_log") == true and (nowT - (_kantoDebugLogLast or 0)) > 10 then
+          if optCached("debug_log") == true and (nowT - (_kantoDebugLogLast or 0)) > 10 then
             _kantoDebugLogLast = nowT
             local text = table.concat(debugLogBuffer, "\n")
             if text == "" then text = "(debug log empty - play with sleeping NPCs first)" end
@@ -7191,7 +7245,9 @@ local function nightlifeTick(world, dt)
           end
         end)
         -- Enforce sleep every frame (source of truth)
-        if opt("sleeping_npcs") and type(shouldSleepNow) == "function" then
+        -- v10 perf: cached option reads (see optCached) -- this
+        -- wrap runs per NPC per frame.
+        if optCached("sleeping_npcs") and type(shouldSleepNow) == "function" then
           local isNight = false
           pcall(function()
             local ow = map and map or nil
@@ -7209,7 +7265,7 @@ local function nightlifeTick(world, dt)
           if shouldSleepNow(self, isNight) and not doorBlocked then
             if not self.nightlifeSleeping then
               pcall(function()
-                if math.floor(tonumber(opt("sleep_style")) or 0) == 5 and map then
+                if math.floor(tonumber(optCached("sleep_style")) or 0) == 5 and map then
                   local mapId = tostring(map.id or "")
                   local nr
                   if not isIndoor(mapId, map) then nr = 1

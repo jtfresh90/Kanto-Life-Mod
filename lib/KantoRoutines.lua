@@ -16,6 +16,7 @@ return function(ctx)
   local travelPct = 30
   local lastMap = nil
   local dirty = true
+  local scanTimer = 0 -- v10 perf: new-actor scan throttle (see api.update)
   local states = {}
   local stateKeys = {}
   local handles = {}
@@ -1551,8 +1552,13 @@ return function(ctx)
     -- that controller-owned ambient actors are already non-native before the
     -- engine ticks them; changing wanders only after base Overworld:update
     -- still permits one vanilla step per frame.
+    -- v10 perf: this used to scan EVERY NPC on every frame to find
+    -- the handful with _kantoRoutineTraveling set. That flag is only
+    -- ever set by setState (which also records the NPC in
+    -- stateKeys), and cleared by releaseNative -- so iterating the
+    -- routine states covers exactly the same NPCs, with no scan.
     if not enabled or not world or not world.npcs then return end
-    for _, npc in ipairs(world.npcs or {}) do
+    for _, npc in pairs(stateKeys) do
       -- pcall: wild mods may add NPCs with unexpected structure.
       local ok, isSpawn = pcall(isKantoSpawn, npc)
       if ok and isSpawn and not npc.nightlifeSleeping
@@ -1575,20 +1581,31 @@ return function(ctx)
     local mapId = tostring(world.map.id or "")
     local pct = optionPct()
     if pct ~= travelPct then dirty = true end
-    -- Ambient actors are spawned after the overworld update on some maps.
-    -- Detect newly spawned Kanto/Johto Life actors so they are assigned on
-    -- the following frame instead of waiting for another map change.
-    for _, candidate in ipairs(world.npcs or {}) do
-      -- Wrap in pcall: other mods (e.g., Wilds of Kanto Revival) may add NPCs
-      -- with unexpected structures that could break eligibility checks.
-      local ok, isEligible = pcall(eligible, candidate)
-      if ok and isEligible then
-        local ok2, key = pcall(actorKey, candidate)
-        if ok2 and key and not states[key] then dirty = true; break end
-      end
-    end
+    -- v10 perf: the new-actor scan below used to walk EVERY NPC
+    -- with two pcalls (eligible + actorKey, the latter building a
+    -- string per NPC) on EVERY frame. Ambient actors only appear
+    -- on map changes or traffic spawns, so the scan now runs at
+    -- ~2/second -- a fresh spawn waits at most half a second for
+    -- its routine, invisible in-game. Map changes and forced
+    -- updates still scan at once.
     local mapChanged = lastMap ~= mapId
     if mapChanged then lastMap = mapId; dirty = true end
+    scanTimer = (scanTimer or 0) + (dt or 0)
+    if force or mapChanged or scanTimer >= 0.5 then
+      scanTimer = 0
+      -- Ambient actors are spawned after the overworld update on some maps.
+      -- Detect newly spawned Kanto/Johto Life actors so they are assigned on
+      -- the following frame instead of waiting for another map change.
+      for _, candidate in ipairs(world.npcs or {}) do
+        -- Wrap in pcall: other mods (e.g., Wilds of Kanto Revival) may add NPCs
+        -- with unexpected structures that could break eligibility checks.
+        local ok, isEligible = pcall(eligible, candidate)
+        if ok and isEligible then
+          local ok2, key = pcall(actorKey, candidate)
+          if ok2 and key and not states[key] then dirty = true; break end
+        end
+      end
+    end
     if dirty or force then refresh(world, force or mapChanged) end
 
     -- Keep ambient NPCs solid and freezable for A-talk while walking.
