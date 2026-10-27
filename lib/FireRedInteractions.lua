@@ -569,21 +569,54 @@ local function spriteGender(npc, def)
     return assignedName(npc, def)
   end
 
+  -- Gen 3 layout ("frlg" for FireRed/LeafGreen, "rse" for Ruby/Sapphire/
+  -- Emerald) via GameVersion.layout(); defaults to "frlg" if unavailable.
+  local function gameLayout()
+    local GV = engine("src.core.GameVersion")
+    return GV and GV.layout and GV.layout() or "frlg"
+  end
+
+  -- Field props are not NPCs. Graphics ids differ per layout (verified
+  -- against gen1recomp 0.3.96 src/core/game3/constants/*/event_objects.lua):
+  -- FireRed item ball 92, cut tree 95, rock-smash rock 96, pushable
+  -- boulder 97; Emerald item ball 59, berry trees 60-62, pushable boulder
+  -- 87, and the story objects that occupy 95/96/97 there (Vigoroth with
+  -- box, Vigoroth facing away, Birch's bag). The 1.4.269 list was
+  -- FireRed-only: it missed Emerald item balls and wrongly excluded
+  -- surfing May (Emerald 92).
+  local PROP_GFX = {
+    frlg = { [92] = true, [95] = true, [96] = true, [97] = true },
+    rse = { [59] = true, [60] = true, [61] = true, [62] = true, [87] = true, [95] = true, [96] = true, [97] = true },
+  }
+
+  local function isPropGfx(gid)
+    local set = PROP_GFX[gameLayout()] or PROP_GFX.frlg
+    return gid ~= nil and set[gid] == true
+  end
+
   local function isRegularNpc(npc)
     local def = npc and npc.def or {}
-    if def.kantoLifeAmbient or npc.kantoLifeAmbient or def.kantoLifeRandomDialogue then return true end
-    if def.item or def.pokemon or def.trainerId or def.isTrainer or def.trainer then return false end
-    if tonumber(def.trainerType) and tonumber(def.trainerType) > 0 then return false end
-    -- Field props are not NPCs. An item ball's def carries a scriptKey and
-    -- trainerType 0 but no item marker, so without this it passes as a
-    -- regular NPC: its pickup script is swallowed by the talk hook and it
-    -- speaks generated trainer dialogue instead. Same prop graphics ids
-    -- FireRedRoutines.eligible already excludes (item ball, cut tree,
-    -- rock-smash rock, pushable boulder).
+    -- 1.4.270: allowlist. Only mod-owned NPCs are intercepted. Every
+    -- mod-spawned ambient carries kantoLifeAmbient=true on both its def
+    -- and the live EventObject (FireRedAmbient.newObject); Pokemon
+    -- ambients additionally carry kantoLifePokemon/kantoLifeSpecies.
+    -- Everything else -- native NPCs (Nurse Joy, May, trainers, signs,
+    -- item balls) -- returns false, so world.talk falls through to next()
+    -- and the ROM script runs. The old denylist relied on def.story /
+    -- def.isStory, which the engine never sets on native defs, so any
+    -- non-trainer native with a scriptKey was hijacked and its heal/story
+    -- script never ran (daannyboii report, Oct 27 2026).
+    if def.kantoLifeAmbient or npc.kantoLifeAmbient
+       or def.kantoLifeRandomDialogue
+       or def.kantoLifePokemon or npc.kantoLifePokemon
+       or def.kantoLifePokeAmbient or npc.kantoLifePokeAmbient then
+      return true
+    end
+    -- Field props are not NPCs; explicit exclusion as defence-in-depth
+    -- (the allowlist above already returns false for them).
     local gid = tonumber(npc.graphicsId or def.graphicsId or def.graphics)
-    if gid == 92 or gid == 95 or gid == 96 or gid == 97 then return false end
-    if def.story or def.isStory or def.hidden then return false end
-    return def.scriptKey ~= nil or def.text ~= nil
+    if isPropGfx(gid) then return false end
+    return false
   end
 
   -- The dialogue ledger is global, not per NPC. That is the important

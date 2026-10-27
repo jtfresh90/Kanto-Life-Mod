@@ -421,6 +421,31 @@ return function(ctx)
     return npc and npc.kantoLifeAmbient == true
   end
 
+  -- Gen 3 layout ("frlg" for FireRed/LeafGreen, "rse" for Ruby/Sapphire/
+  -- Emerald) via GameVersion.layout(); defaults to "frlg" if unavailable.
+  local function gameLayout()
+    local GV = engine("src.core.GameVersion")
+    return GV and GV.layout and GV.layout() or "frlg"
+  end
+
+  -- Field props are not routine actors. Graphics ids differ per layout
+  -- (verified against gen1recomp 0.3.96
+  -- src/core/game3/constants/*/event_objects.lua): FireRed item ball 92,
+  -- cut tree 95, rock-smash rock 96, pushable boulder 97; Emerald item
+  -- ball 59, berry trees 60-62, pushable boulder 87, and the story
+  -- objects that occupy 95/96/97 there (Vigoroth with box, Vigoroth
+  -- facing away, Birch's bag). The old list was FireRed-only: it missed
+  -- Emerald item balls and wrongly excluded surfing May (Emerald 92).
+  local PROP_GFX = {
+    frlg = { [92] = true, [95] = true, [96] = true, [97] = true },
+    rse = { [59] = true, [60] = true, [61] = true, [62] = true, [87] = true, [95] = true, [96] = true, [97] = true },
+  }
+
+  local function isPropGfx(gid)
+    local set = PROP_GFX[gameLayout()] or PROP_GFX.frlg
+    return gid ~= nil and set[gid] == true
+  end
+
   local function eligible(npc)
     if not npc or npc.hidden or npc.isPlayer or npc.localId == 0xFF then return false end
     if npc.frozen or npc.story or npc.isStory or npc.trainer or npc.isTrainer then return false end
@@ -430,7 +455,7 @@ return function(ctx)
     -- Never treat field objects as routine actors. These are map props such as
     -- Poké Balls, Cut trees, rocks and pushable boulders, not NPCs.
     local gid = tonumber(npc.graphicsId or d.graphicsId or d.graphics)
-    if gid == 92 or gid == 95 or gid == 96 or gid == 97 then return false end
+    if isPropGfx(gid) then return false end
     if d.item or npc.item then return false end
     return true
   end
